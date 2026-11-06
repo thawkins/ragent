@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.nops.io/blog/token-economics
-- Title: AI Token Economics (Tokenomics): The Complete Guide
+- URL: https://near.ai/pricing
+- Title: Pricing | NEAR AI
 - Author(s): -
 - Language: English
-- Published (UTC): 2026-10-22T16:00:00+00:00
-- Captured (UTC): 2026-11-02T11:15:21.298490402+00:00
+- Published (UTC): 2026-11-03T21:12:34.638+00:00
+- Captured (UTC): 2026-11-03T21:08:25.278580436+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-AI token economics is the discipline of measuring, allocating, optimizing, and governing the cost and value of tokens consumed by AI applications and agents, aiming at cost per valuable outcome rather than the lowest cost per token; tokens include input, output, reasoning, cached, and multimodal units, with output tokens commonly priced 4–6× input. The article argues falling per-token prices have not lowered bills because demand is elastic: AT&T reportedly scaled from ~8B to 27B tokens/day, Google processes ~1.3 quadrillion tokens/month, and the IEA reports AI data-center electricity demand grew ~50% in 2025 versus ~3% globally, while reasoning/agentic workloads use 5–30× more tokens per task. It cites the Linux Foundation’s June 2026 intent to launch the Tokenomics Foundation—with Oracle, Salesforce, and IBM as founding members—as evidence of standardization, and notes enterprises spent ~$37B on generative AI in 2025. Practical levers include model routing (up to 98% cost reduction in cited benchmarking), sentence-level retrieval filtering (70–80% token reduction), prompt caching, and agent/tool-schema redesign; measurement requires call-level tagging by provider, model, app, feature, team, customer, environment, and workflow/user, plus range-based forecasting because pilot-to-production scaling, context growth, retries, agent loops, and hidden reasoning often break forecasts.
+NEAR AI Cloud uses pay-as-you-go per-token pricing, with input and output billed separately per 1M tokens and rates varying by model; there are no platform fees, minimums, subscriptions, or seat licenses, and private TEE execution plus hardware-signed attestation are included in the rate. Published private-model rates range from Qwen 3.8 27B at $0.04 input/$1.35 output per 1M tokens to Kimi K3 at $3.30/$16.50, with context windows from 16K to 1.05M tokens; Private TEE models run on NEAR AI infrastructure and Private 3P TEE models on a third-party provider. Teams can issue per-person API keys with spend caps and per-key usage reporting, while enterprise agreements are quoted and add reserved GPU capacity, custom/private models, volume rates with SLAs, on-prem or VPC deployment, solutions engineering, and approved end-of-month invoicing.
 ```

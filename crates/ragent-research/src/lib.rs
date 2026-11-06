@@ -52,6 +52,10 @@ pub mod cluster;
 pub mod comparison;
 pub mod contradiction;
 pub mod corpus_critic;
+pub mod deck;
+pub mod deck_enrich;
+pub mod deck_pptx;
+pub mod deck_progress;
 pub mod diagram;
 pub mod digest;
 pub mod document;
@@ -104,8 +108,8 @@ pub use brief::generate_research_brief;
 pub use cite_checker::{CitationCheckResult, check_citations};
 pub use clarify::needs_clarification;
 pub use cli::{
-    ResearchCliCommand, render_list_output, render_list_output_json, render_search_output,
-    render_search_output_json, render_session_event_json, render_show_output,
+    ResearchCliCommand, render_deck_event_json, render_list_output, render_list_output_json,
+    render_search_output, render_search_output_json, render_session_event_json, render_show_output,
     render_show_output_json, session_event_json,
 };
 pub use cluster::{
@@ -123,6 +127,11 @@ pub use contradiction::{
 };
 pub use corpus_critic::{
     CorpusCriticReport, GapFetchResult, build_corpus_critic, derive_gap_queries,
+};
+pub use deck::{
+    CONDENSE_MAX_CHARS, DeckElement, DeckItem, DeckOutcome, DeckParseError, DeckRunOptions,
+    DeckSection, DeckSelectError, DeckWriteError, ParsedReport, ReportFile, ReportPair,
+    ReportSeries, condense_bullet, deck_file_name, default_deck_path, parse_report,
 };
 pub use diagram::render_findings_diagram;
 pub use document::{

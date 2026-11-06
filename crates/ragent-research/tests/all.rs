@@ -12,6 +12,13 @@
 // several children. Under one-binary-per-crate that loads it more than once,
 // which clippy::duplicate_mod flags; hoisting it would require editing every
 // child file. See AGENTS.md ("Test Layout").
+#![allow(unsafe_code)]
+// ^ Intentional: the Rust 2024 `std::env::set_var` / `remove_var` migration made
+// both calls `unsafe`, and a file-level opt-in is the sanctioned test use
+// (AGENTS.md, "Core Code Rules"). `test_deck_determinism.rs` sets the provider
+// credential variables and restores them inside one case, to prove a
+// provider-configured and a provider-free environment render the same deck
+// (spec `diffdeck` FR-021).
 
 // Crate-root shims: `src/session/fallback.rs` (included by
 // `test_session_fallback.rs` below via `#[path]`) refers to `crate::document`
@@ -54,6 +61,40 @@ mod test_control_char_sanitization;
 mod test_corpa_companion;
 #[path = "test_corpus_critic.rs"]
 mod test_corpus_critic;
+#[path = "test_deck_bullet_safety.rs"]
+mod test_deck_bullet_safety;
+#[path = "test_deck_cli.rs"]
+mod test_deck_cli;
+#[path = "test_deck_condense.rs"]
+mod test_deck_condense;
+#[path = "test_deck_determinism.rs"]
+mod test_deck_determinism;
+#[path = "test_deck_diff.rs"]
+mod test_deck_diff;
+#[path = "test_deck_enrich.rs"]
+mod test_deck_enrich;
+#[path = "test_deck_event_json.rs"]
+mod test_deck_event_json;
+#[path = "test_deck_extract.rs"]
+mod test_deck_extract;
+#[path = "test_deck_identity.rs"]
+mod test_deck_identity;
+#[path = "test_deck_orchestrate.rs"]
+mod test_deck_orchestrate;
+#[path = "test_deck_parse.rs"]
+mod test_deck_parse;
+#[path = "test_deck_pptx.rs"]
+mod test_deck_pptx;
+#[path = "test_deck_progress.rs"]
+mod test_deck_progress;
+#[path = "test_deck_real_report.rs"]
+mod test_deck_real_report;
+#[path = "test_deck_refusals.rs"]
+mod test_deck_refusals;
+#[path = "test_deck_render.rs"]
+mod test_deck_render;
+#[path = "test_deck_select.rs"]
+mod test_deck_select;
 #[path = "test_findings_diagram_section.rs"]
 mod test_findings_diagram_section;
 #[path = "test_findings_diagram_section_skeleton.rs"]

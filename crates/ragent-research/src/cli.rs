@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 
+use crate::deck::DeckElement;
 use crate::run_config::{Depth, OutputFormat, ResearchMode, Tier};
 
 /// Parsed `ragent research` sub-command.
@@ -240,6 +241,30 @@ pub enum ResearchCliCommand {
         /// `--force` - regenerate cluster files even if they already exist.
         force: bool,
     },
+    /// `ragent research deck <name> [flags]` - write a diff deck for the item
+    /// from two of its dated reports (spec `diffdeck`, FR-001).
+    Deck {
+        /// URL-safe research item name.
+        name: String,
+        /// `--from <YYYY-MM-DD>` - the older (baseline) report's date stamp
+        /// (FR-007). Alone, it pairs with the next newer dated report.
+        from: Option<String>,
+        /// `--to <YYYY-MM-DD>` - the newer (current) report's date stamp
+        /// (FR-007). Alone, it pairs with the next older dated report.
+        to: Option<String>,
+        /// `--elements <list>` - comma-separated element names to restrict the
+        /// deck to, already resolved to the six `diffdeck` elements in the
+        /// FR-003 precedence order (FR-014). Empty means every element.
+        elements: Vec<crate::deck::DeckElement>,
+        /// `--include-old` - also emit a slide for an element whose items are
+        /// all unchanged (FR-015).
+        include_old: bool,
+        /// `--out <path>` - write the deck to this path instead of the default
+        /// `DECK-<YYYY-MM-DD>.md` in the item directory (FR-016).
+        out: Option<String>,
+        /// `--force` - overwrite an existing deck file (FR-017).
+        force: bool,
+    },
     /// `ragent research export <name> [--output <path>]`
     Export {
         /// URL-safe research item name.
@@ -290,6 +315,7 @@ impl ResearchCliCommand {
             "continue" => Self::parse_continue(&args[1..]),
             "update" => Self::parse_update(&args[1..]),
             "cluster" => Self::parse_cluster(&args[1..]),
+            "deck" => Self::parse_deck(&args[1..]),
             "export" => Self::parse_export(&args[1..]),
             "import" => Self::parse_import(&args[1..]),
             "config" => Self::Config,
@@ -725,6 +751,91 @@ impl ResearchCliCommand {
         }
     }
 
+    /// Parse `deck <name> [--from <date>] [--to <date>] [--elements <list>]
+    /// [--include-old] [--out <path>] [--force]` (spec `diffdeck` T-009).
+    ///
+    /// Every value is validated at parse time so an unusable invocation is
+    /// reported against the flag that produced it rather than surfacing later
+    /// from the orchestration:
+    ///
+    /// - `--from` / `--to` must be a real `YYYY-MM-DD` date, refused as
+    ///   [`ResearchCliCommand::Invalid`] naming the flag, the value, and the
+    ///   accepted form (FR-020's date half; whether a report exists for that
+    ///   date is only knowable from disk, so the run reports it);
+    /// - `--elements` must be a non-empty comma-separated list whose every
+    ///   entry names one of the six [`DeckElement`]s (matched
+    ///   case-insensitively, accepting the label or the report heading), and
+    ///   the resolved elements are deduplicated and returned in FR-003
+    ///   precedence order (FR-014);
+    /// - a flag that requires a value and is given none is refused rather than
+    ///   silently dropped.
+    ///
+    /// The first offending argument wins, so the caller reports one actionable
+    /// message at a time. `--force` and `--include-old` are plain switches.
+    fn parse_deck(rest: &[&str]) -> Self {
+        let mut from: Option<String> = None;
+        let mut to: Option<String> = None;
+        let mut elements: Vec<DeckElement> = Vec::new();
+        let mut include_old = false;
+        let mut out: Option<String> = None;
+        let mut force = false;
+        let mut invalid: Option<String> = None;
+        let mut i = 0;
+        while i < rest.len() {
+            let arg = rest[i];
+            match arg {
+                "--from" | "--to" | "--elements" | "--out" => {
+                    i += 1;
+                    let Some(value) = rest.get(i) else {
+                        invalid = Some(format!("{arg} requires a value"));
+                        break;
+                    };
+                    match arg {
+                        "--from" | "--to" => match validate_deck_stamp(arg, value) {
+                            Ok(stamp) => {
+                                if arg == "--from" {
+                                    from = Some(stamp);
+                                } else {
+                                    to = Some(stamp);
+                                }
+                            }
+                            Err(message) => {
+                                invalid = Some(message);
+                                break;
+                            }
+                        },
+                        "--elements" => match parse_deck_elements(value) {
+                            Ok(parsed) => elements = parsed,
+                            Err(message) => {
+                                invalid = Some(message);
+                                break;
+                            }
+                        },
+                        _ => out = Some((*value).to_string()),
+                    }
+                }
+                "--include-old" => include_old = true,
+                "--force" => force = true,
+                _ => {}
+            }
+            i += 1;
+        }
+        if let Some(message) = invalid {
+            return Self::Invalid(message);
+        }
+        Self::Deck {
+            name: Self::first_positional(rest, DECK_VALUE_FLAGS)
+                .unwrap_or_default()
+                .to_string(),
+            from,
+            to,
+            elements,
+            include_old,
+            out,
+            force,
+        }
+    }
+
     fn parse_export(rest: &[&str]) -> Self {
         let mut output: Option<String> = None;
         let mut i = 0;
@@ -762,9 +873,17 @@ impl ResearchCliCommand {
     }
 
     /// Build the help message shown for `/research help`.
+    ///
+    /// The `--elements` help names the accepted element values from
+    /// [`deck_element_names`], which is derived from
+    /// [`crate::deck::DeckElement::label`] - the same list the refusal message
+    /// and the CLI's usage error print. Interpolating it rather than repeating
+    /// the names here is what keeps the help from advertising a value the
+    /// parser would reject.
     #[must_use]
     pub fn build_help_message() -> String {
-        r"Available `ragent research` commands:
+        format!(
+            r"Available `ragent research` commands:
 
   create <name> [topic] [flags]   Start a new research run
   list [--all] [--json]          List research items
@@ -777,6 +896,7 @@ impl ResearchCliCommand {
   continue <name> [--message ...] Continue a completed run with a follow-up
   update <name>                   Replay the recorded invocation for a run
   cluster <name> [--force]        Extract concept clusters for a run
+  deck <name> [flags]             Write a diff deck from two dated reports
   export <name> [--output path]   Export a research item
   import <path> [--name name]    Import a research item
   config                         Show effective research defaults
@@ -826,9 +946,118 @@ Common create flags:
                                                      implies rejecting undated web sources; the window
                                                      start date is appended to every search query
   --evaluate                                         Append the self-evaluation scorecard
-"
-        .to_string()
+
+Deck flags (`deck <name>`, spec diffdeck):
+  --from <YYYY-MM-DD>                                Older (baseline) report; pairs with the
+                                                     next newer report when given alone
+  --to <YYYY-MM-DD>                                  Newer (current) report; pairs with the
+                                                     next older report when given alone
+  --elements <list>                                  Restrict the deck to these elements
+                                                     (comma-separated, any of:
+                                                     {deck_elements_help})
+  --include-old                                      Also slide elements with only unchanged items
+  --out <path>                                       Write the deck to this path instead of
+                                                     DECK-<YYYY-MM-DD>.md in the item directory
+  --force                                            Overwrite an existing deck file
+",
+            deck_elements_help = deck_element_names()
+        )
     }
+}
+
+/// The `deck` flags that consume the following token as their value.
+///
+/// [`ResearchCliCommand::first_positional`] skips a flag together with its value,
+/// so the item name is never mistaken for an `--out` path or a date.
+const DECK_VALUE_FLAGS: &[&str] = &["--from", "--to", "--elements", "--out"];
+
+/// Validate one `--from` / `--to` value against the `YYYY-MM-DD` stamp form.
+///
+/// Returns the stamp unchanged when it is a real date and an FR-020 refusal
+/// message naming the flag and the accepted form otherwise.
+///
+/// The **shape** is checked before the date is parsed: `chrono`'s `%Y-%m-%d`
+/// accepts an unpadded `2025-1-5`, which is not the stamp form a report file
+/// carries (`RESEARCH-<YYYY-MM-DD>.md`), so a padded `NNNN-NN-NN` digit mask is
+/// required first. A well-formed but impossible date (`2025-04-31`) then fails
+/// the parse, because it names no day and therefore no report.
+fn validate_deck_stamp(flag: &str, value: &str) -> Result<String, String> {
+    let padded = value.len() == 10
+        && value
+            .as_bytes()
+            .iter()
+            .enumerate()
+            .all(|(idx, byte)| match idx {
+                4 | 7 => *byte == b'-',
+                _ => byte.is_ascii_digit(),
+            });
+    if padded && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok() {
+        return Ok(value.to_string());
+    }
+    Err(format!(
+        "{flag} {value}: expected a report date in YYYY-MM-DD form"
+    ))
+}
+
+/// Parse a `--elements <list>` value into the six deck elements (FR-014).
+///
+/// The list is comma-separated; every entry is matched with
+/// [`DeckElement::from_name`], which is case-insensitive and accepts both the
+/// element label (`Cross-References`) and the report heading
+/// (`In-Project Cross-References`, `Top 10 Implications`). The result is
+/// deduplicated and ordered by the FR-003 element precedence, so the filter can
+/// never reorder the slides.
+///
+/// # Errors
+///
+/// Returns a refusal message naming the offending value and the accepted names
+/// when the list is empty, holds an empty entry, or holds an unknown name.
+fn parse_deck_elements(value: &str) -> Result<Vec<DeckElement>, String> {
+    let mut selected: Vec<DeckElement> = Vec::new();
+    for entry in value.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            return Err(format!(
+                "--elements {value}: expected a comma-separated list of element names, \
+                 empty entry found"
+            ));
+        }
+        match DeckElement::from_name(entry) {
+            Some(element) => {
+                if !selected.contains(&element) {
+                    selected.push(element);
+                }
+            }
+            None => {
+                return Err(format!(
+                    "--elements {value}: '{entry}' is not an element name; accepted values: {}",
+                    deck_element_names()
+                ));
+            }
+        }
+    }
+    if selected.is_empty() {
+        return Err(format!(
+            "--elements requires at least one element name; accepted values: {}",
+            deck_element_names()
+        ));
+    }
+    selected.sort();
+    Ok(selected)
+}
+
+/// The accepted `--elements` names, in FR-003 precedence order, as one
+/// comma-separated string for a help line or a refusal message.
+///
+/// The TUI catalogue and `/research help` advertise this same list, so the
+/// parser's accepted set and the advertised set cannot drift.
+#[must_use]
+pub fn deck_element_names() -> String {
+    DeckElement::ALL
+        .iter()
+        .map(|element| element.label())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Split a command line into tokens, respecting double-quoted strings.
@@ -1289,6 +1518,65 @@ pub fn session_event_json(event: &crate::session::SessionEvent) -> String {
 #[must_use]
 pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String {
     format!("ragent-research: {}", session_event_json(event))
+}
+
+/// Render a completed deck run as the single machine-readable JSON line the
+/// `ragent research` family prints (spec `diffdeck` T-011, FR-001).
+///
+/// The shape matches [`render_session_event_json`]: the `ragent-research: `
+/// prefix plus `{"kind": ..., "payload": ...}`, so a consumer that already
+/// parses the streaming research events reads a deck line with the same
+/// `jq -R 'sub("^ragent-research: ";"") | fromjson'` pipeline.
+///
+/// The counts in the payload are the written deck's own
+/// ([`crate::deck::DeckOutcome`]), so the line can never disagree with the file
+/// on disk (FR-010), and `element_slides` is the list of element labels that
+/// produced a slide in the FR-003 precedence order.
+#[must_use]
+pub fn render_deck_event_json(name: &str, outcome: &crate::deck::DeckOutcome) -> String {
+    let payload = serde_json::json!({
+        "name": name,
+        "path": outcome.path.display().to_string(),
+        "from": outcome.pair.older_label(),
+        "to": outcome.pair.newer_label(),
+        "no_changes": outcome.no_changes,
+        "new": outcome.new_count,
+        "added": outcome.added_count,
+        "update": outcome.update_count,
+        "old": outcome.old_count,
+        "changes": outcome.change_count(),
+        "element_slides": outcome
+            .document
+            .elements
+            .iter()
+            .map(|element| element.label())
+            .collect::<Vec<_>>(),
+        // FR-030: the second artifact, so a piped consumer can find the
+        // presentation without parsing the human lines below.
+        "pptx": match &outcome.pptx {
+            crate::deck_pptx::DeckPptxOutcome::Unavailable => serde_json::Value::Null,
+            crate::deck_pptx::DeckPptxOutcome::Written {
+                path,
+                slides,
+                provider,
+            } => serde_json::json!({
+                "path": path.display().to_string(),
+                "slides": slides,
+                "provider": provider,
+            }),
+            crate::deck_pptx::DeckPptxOutcome::Failed { reason } => serde_json::json!({
+                "error": reason,
+            }),
+        },
+    });
+    format!(
+        "ragent-research: {}",
+        serde_json::to_string(&serde_json::json!({
+            "kind": "deck",
+            "payload": payload,
+        }))
+        .unwrap_or_else(|_| "{}".to_string())
+    )
 }
 
 /// Parse a `<name>` / `<status>` filter pair from a `search` query string.

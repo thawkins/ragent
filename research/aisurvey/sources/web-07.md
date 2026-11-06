@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.kore.ai/blog/best-ai-agent-management-platforms
-- Title: Best AI agent management platforms for enterprises in 2026
-- Author(s): Best agent management platforms for enterprise-scale operations
+- URL: https://www.ibm.com/think/perspectives/how-to-effectively-govern-third-party-ai-agents-across-the-enterprise
+- Title: How to effectively govern third-party AI agents across the enterprise | IBM
+- Author(s): Jala  Taylor-Pickett
 - Language: English
-- Published (UTC): 2026-09-29T09:17:23.902+00:00
-- Captured (UTC): 2026-11-02T11:12:41.796951055+00:00
+- Published (UTC): 2026-09-22T00:00:00+00:00
+- Captured (UTC): 2026-11-03T21:05:36.964135737+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-Kore.ai’s blog cites Gartner’s March 2026 report “Beyond Agent Sprawl: The Rise of AI Agent Management Platforms” to argue that AI sprawl is driving demand for agent management platforms (AMPs): Gartner projects the average Fortune 500 will use over 150,000 agents by 2028, up from fewer than 15 in 2025, and says AMPs—defined by six elements including security, prebuilt libraries, tooling, dashboard, marketplace, and agent observability—will dominate 80% of successful agent-to-agent interactions and capture over 60% of AI’s compounded value by 2030. The article profiles vendors including Kore.ai, IBM watsonx Orchestrate/governance, GlobalLogic VelocityAI, AgilePoint NX, OneReach.ai GSX, Ravical, Pipefy, and XMPro APEX + MAGS, highlighting cross-framework A2A/MCP ingestion, full execution tracing, pre-production evaluation, event-driven policy enforcement, drift detection, and interaction-level token cost attribution. Kore.ai claims its dedicated AMP, launched March 17, 2026, governs agents built on LangGraph, CrewAI, AutoGen, Google ADK, AWS AgentCore, Microsoft Foundry, and Salesforce Agentforce, with 300+ pre-built agents, 250+ enterprise integrations, and over 500 Global 2000 customers with $1B+ in documented cost savings.
+IBM argues enterprises should govern third-party AI agents by their autonomy, access, authority, and potential impact—not by vendor trust alone—applying “least privilege” and “least agency” so each agent has a verified owner, purpose-limited permissions, runtime policy enforcement, and an evidence trail; Gartner and NIST are cited as emphasizing centralized agent management, risk-calibrated controls, and identification/authorization/auditing standards. As an example, Riyadh Air’s AI-native airline build involved IBM Consulting coordinating 59 workstreams across more than 60 partners, with watsonx Orchestrate coordinating agents and contextual data moving across 75+ systems through 1,800+ integrations. IBM positions watsonx Orchestrate as an open agentic control plane and watsonx.governance with Enforcement Tracking as providing visibility, monitoring, and governance evidence across IBM, custom, and third-party agents.
 ```

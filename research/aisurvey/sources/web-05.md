@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.fiddler.ai/blog/opentelemetry-ai-observability-guide
-- Title: OpenTelemetry for AI Observability: What It Covers and Where It Stops | Fiddler AI Blog
-- Author(s): Fiddler Team, @fiddler_ai
+- URL: https://islandnetworks.com/blog-ai-agent-governance-autonomous-agents-enterprise
+- Title: Governing Agentic AI: Visibility, Observability, and Enterprise Trust
+- Author(s): Gaby Moulis, @ISLENetworks
 - Language: English
-- Published (UTC): 2026-10-30T23:58:05.456+00:00
-- Captured (UTC): 2026-11-02T11:12:37.809132977+00:00
+- Published (UTC): 2026-09-09T15:51:19+00:00
+- Captured (UTC): 2026-11-03T21:05:40.939079159+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-OpenTelemetry is presented as the vendor-neutral telemetry standard for AI observability, providing distributed tracing, metrics, and logs across LLM calls, agent workflows, and infrastructure; its GenAI semantic conventions—still at Development status—standardize attributes such as `gen_ai.provider.name`, model, input/output token usage, and finish reasons, but do not cover output evaluation, safety scoring, or content quality. Production AI observability therefore needs OpenTelemetry as the data plane plus an evaluation/control layer, which Fiddler provides by ingesting OTel telemetry and applying in-environment Centor Models for faithfulness, toxicity, and policy-compliance scoring without sampling, along with Guardrails checks under 80ms. The article also flags production pitfalls including lost multi-turn session context, prompt/completion data-governance risk, span explosion in multi-agent systems, and evaluation-latency tradeoffs, and cites a financial-services agent example where traditional APM showed green while compliance violations occurred.
+The article argues enterprise AI governance must shift from controlling employee AI use to governing autonomous agent behavior, because leaders often lack visibility into how many agents exist, what systems and data they access, what decisions they make, and how they interact. It says the security perimeter is shifting to the agent: AI agents should be treated as first-class identities subject to Zero Trust, least-privilege access, continuous verification, monitoring, and oversight, especially as agent-to-agent interactions can occur continuously at scale—hundreds or thousands before humans notice. Traditional outcome metrics are insufficient; organizations should also assess decision patterns, policy adherence, explainability, escalation behavior, and autonomous reasoning, and the article lists eight priorities: visibility before scaling, a complete AI inventory, formal governance policies, continuous behavior monitoring, alignment with cybersecurity, human oversight processes, Zero Trust for agents, and AI observability and accountability.
 ```

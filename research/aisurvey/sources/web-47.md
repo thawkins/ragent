@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.duperrin.com/english/2026/10/15/profitability-ai-infrastructure
-- Title: The profitability of AI infrastructure: risks and profits
-- Author(s): http://www.facebook.com/bertrandduperrinblog
+- URL: https://www.linkedin.com/pulse/alphabet-oracle-bond-issuance-ai-infrastructure-financing-amjad-fubdf
+- Title: Alphabet &amp; Oracle Bond Issuance – AI Infrastructure Financing, Debt Expansion &amp; Balance-Sheet Risks |...
+- Author(s): Faisal Amjad
 - Language: English
-- Published (UTC): 2026-10-15T13:00:00+00:00
-- Captured (UTC): 2026-11-02T11:16:05.131960526+00:00
-- Relevance: Medium - partial query match
+- Published (UTC): 2026-11-02T16:49:36+00:00
+- Captured (UTC): 2026-11-03T21:09:01.789282539+00:00
+- Relevance: High - title matches query
 
 
 ```text
-AI infrastructure is becoming a strategic but financially risky business: Mistral launched Mistral Compute and secured $830 million in bank financing for 13,800 Nvidia chips for a Paris-region data center, later drawing a multibillion-dollar Microsoft partnership for European capacity, while CBRE reported 1.4% vacancy across eight major North American data-center markets in H1 2026 and 80.4% of capacity under construction pre-leased. Yet high demand does not guarantee returns—Nvidia posted FY2026 revenue of $215.9 billion and a 71.1% gross margin, while CoreWeave reported Q2 2026 revenue of $2.58 billion and a ~$104 billion backlog but a $626 million net loss and ~$640 million net interest expense; H1 2026 operating cash flow was ~$3.66 billion against $14.12 billion capex, ~$15 billion in principal repayments were due H2 2026–2028, and its top two customers were 62% of revenue. Circular financing—the BIS found 55.2% of 2021–2025 AI investment value came from AI businesses, and 16.1% of inter-AI deals represented 46.4% of amounts when commercial ties existed—shifts rather than eliminates risk. The Bank of England saw immediate stability risks as contained in July 2026, but rising rates (Fed at 3.75%–4% in September 2026), delays, GPU obsolescence, and refinancing pressure mean AI can grow while some financiers lose money; winners may be those investing at the right price and terms, not those building the most capacity.
+On November 2, 2026, Alphabet and Oracle launched major investment-grade bond offerings to fund AI infrastructure: Alphabet raised €6 billion across seven tranches (2–19 years), drawing over €17 billion in orders (~2.8x oversubscribed) to support a $195–205 billion 2026 CapEx program, while Oracle issued $10 billion across six tranches as half of a $20 billion debt-and-equity program, against $125.3 billion in existing debt and $288 billion in lease commitments. The article argues the AI race is shifting into a debt-financed balance-sheet competition, with investors increasingly focused on leverage, free-cash-flow conversion, debt-servicing capacity, and long-term ROIC rather than infrastructure expansion or revenue growth alone.
 ```

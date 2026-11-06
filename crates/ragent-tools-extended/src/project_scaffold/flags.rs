@@ -246,6 +246,17 @@ pub enum AppType {
     /// other language degrades to a manifest-only layout, exactly as
     /// data/DSL formats degrade for `tui`/`gui`.
     Webapp,
+    /// Workspace-member crate: a library crate added to an existing project
+    /// rather than a standalone project.
+    ///
+    /// Unlike every other app type this one is *additive*: it writes
+    /// `crates/<name>/` into the project it is invoked in and registers the
+    /// member, instead of scaffolding a new project root. Only `rust` defines
+    /// a crate recipe, and only a Cargo workspace can host one; another
+    /// language or a non-workspace target is refused by name rather than
+    /// degrading to a manifest-only layout, because a crate that nothing can
+    /// build is not a useful scaffold.
+    Crate,
 }
 
 impl AppType {
@@ -257,6 +268,7 @@ impl AppType {
             Self::Tui => "tui",
             Self::Gui => "gui",
             Self::Webapp => "webapp",
+            Self::Crate => "crate",
         }
     }
 
@@ -268,6 +280,7 @@ impl AppType {
             Self::Tui,
             Self::Gui,
             Self::Webapp,
+            Self::Crate,
         ]
     }
 }
@@ -692,6 +705,7 @@ fn match_app_type_value(value: &str) -> Result<AppType, ScaffoldError> {
         "tui" => Ok(AppType::Tui),
         "gui" => Ok(AppType::Gui),
         "webapp" | "web" => Ok(AppType::Webapp),
+        "crate" => Ok(AppType::Crate),
         other => Err(ScaffoldError::UnknownAppType(other.to_owned())),
     }
 }

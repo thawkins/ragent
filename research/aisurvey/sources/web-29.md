@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://revenuewizards.com/blog/ai-pricing-models-credit-costs
-- Title: AI Pricing Models: Seat, Usage, Credit and Outcome-Based
-- Author(s): Haris Odobasic
+- URL: https://www.crv.com/content/ai-pricing-models
+- Title: CRV | AI Pricing Models: How to Price an AI Product
+- Author(s): CRV
 - Language: English
-- Published (UTC): 2026-09-18T00:00:00+00:00
-- Captured (UTC): 2026-11-02T11:14:33.019552654+00:00
-- Relevance: High - title matches query
+- Published (UTC): 2026-09-07T00:00:00+00:00
+- Captured (UTC): 2026-11-03T21:07:48.287307369+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-The article compares four AI pricing models—per seat, usage-based, credit-based, and outcome-based—noting that hybrids combining fixed and variable elements are now most common (37% in Growth Unhinged’s 2026 survey, up from 25%). Published examples include Microsoft 365 Copilot at $30/user/month, Salesforce Agentforce at $2/conversation, Salesforce Flex Credits at $500 per 100,000 credits (20 credits, or $0.10, per action; unused credits expire), Fin at $0.99 per outcome with a $49 monthly minimum including 50 outcomes, HubSpot at $0.50 per resolved conversation and $1 per recommended lead, and GitHub Copilot Business at $19/seat/month including 1,900 credits then $0.01/credit. The article argues AI’s variable compute costs pressure SaaS margins—Growth Unhinged’s 2026 median target gross margin for AI products was about 50%, with only 12% targeting 80%+—while credit pricing can obscure unit economics because vendors define credits and buyers may not know model, processing, or failed-attempt costs. Outcome-based pricing remains a minority model (5% main model in 2025, 25% expected by 2028; Bain found ~10% metering outcomes vs. ~35% effort and ~55% output), and the piece recommends buyers seek clear unit definitions, rollover/expiry terms, overage caps, and “cost per useful outcome” visibility.
+CRV argues AI pricing must cover inference costs and protect gross margin, unlike seat-based SaaS pricing: GitHub Copilot charged $10/month but reportedly lost over $20 per user monthly (heavy users up to $80), added request caps in 2025, and moved to usage-based billing on June 1, 2026. It describes five models—seat-based, usage-based, credit-based, hybrid, and outcome-based—with examples including Claude Sonnet 5 at $2 input/$10 output per million tokens, Cursor’s June 16, 2025 switch from 500 fast requests to $20 of usage (followed by an apology and refunds), roughly 65% of 30+ established vendors layering AI meters onto seats, CodeRabbit’s per-developer tiers plus pay-as-you-go usage and caps, Fin at $0.99 per outcome, and Zendesk at $1.50 per committed automated resolution or $2.00 pay-as-you-go. It recommends calculating fully loaded cost per action (a sample agent session costs about $0.52–$0.54), pricing the median customer to target margin while ensuring the heaviest account covers its own cost, setting margin floors and allowances before overage rates/caps, and not tying prices directly to token rates—token prices fell about 98% while enterprise AI bills tripled as agentic workflows can use 30x more tokens per task. For migrations, CRV advises 60–90 days of new-customer testing, opt-in incentives, cohort-by-cohort moves after three to six months of data, and grandfathering policies; investors mainly ask whether founders know per-customer inference cost, whether the value metric matches customer value, and whether the heaviest customers are profitable.
 ```

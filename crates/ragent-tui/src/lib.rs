@@ -8,6 +8,7 @@
 
 pub mod app;
 pub mod clipboard;
+pub mod deck_progress;
 pub mod input;
 pub mod input_field;
 pub mod layout;

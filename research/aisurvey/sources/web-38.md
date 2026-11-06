@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://huggingnews.com/ai/aikido-releases-first-open-weight-security-model-altar-1-based-on-glm-53-9ba15bf3
-- Title: Aikido Releases First Open Weight Security Model Altar 1 Based on GLM 5.3 | HuggingNews
+- URL: https://www.cerebras.ai/glossary/cost-per-token-and-ai-price-performance
+- Title: AI Cost per Token and Price-Performance Explained
 - Author(s): -
 - Language: English
-- Published (UTC): 2026-09-22T05:47:57.760+00:00
-- Captured (UTC): 2026-11-02T11:15:08.188645949+00:00
+- Published (UTC): 2026-09-11T00:00:00+00:00
+- Captured (UTC): 2026-11-03T21:08:23.860297971+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-Aikido has released Altar 1, its first open-weight defensive security model, based on the GLM 5.3 framework. Using a pruned and quantized architecture, it aims to approach frontier performance while fitting on a single 4×H200 node, lowering hardware requirements for specialized security infrastructure. Aikido says the release lets users retain ownership of their security systems instead of relying on closed-source assistants.
+Cost per token is the price to process input or generate output tokens with an AI model, but it is not equivalent to total AI cost or price-performance. For production LLMs, the better metric is cost per useful response—total input/output token costs plus tool, infrastructure, retry, and verification costs divided by successful useful responses—while also considering latency, output tokens per second, throughput, quality, reliability, retries, and integration effort. Cerebras positions its Inference Cloud and wafer-scale infrastructure as fast-inference alternatives to conventional GPU-based infrastructure for speed-sensitive AI applications.
 ```

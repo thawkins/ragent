@@ -102,6 +102,7 @@ const CONFIG_SUBS: &[&str] = &["show", "save", "list", "help"];
 const TRIGGERS_SUBS: &[&str] = &["list", "enable", "disable", "remove", "status", "help"];
 const RESEARCH_SUBS: &[&str] = &[
     "help", "create", "list", "open", "search", "show", "delete", "archive", "update", "cluster",
+    "deck",
 ];
 const RESEARCH_FLAGS: &[&str] = &[
     "--mode",
@@ -125,6 +126,15 @@ const RESEARCH_FLAGS: &[&str] = &[
     "--max-concepts",
     "--max-findings",
     "--url-cloak",
+    // `deck <name>` flags (spec diffdeck, FR-014..FR-017). They are advertised on
+    // `/research` rather than on a separate command so completion offers them
+    // after `/research deck`, which is where the parser accepts them.
+    "--from",
+    "--to",
+    "--elements",
+    "--include-old",
+    "--out",
+    "--force",
 ];
 const INIT_SUBS: &[&str] = &["config", "help"];
 const PLUGINS_SUBS: &[&str] = &[
@@ -504,7 +514,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "research",
-        description: "Research system: /research create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> | list | open | search | show | delete | archive | cluster",
+        description: "Research system: /research create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> | list | open | search | show | delete | archive | cluster | deck <name> [--from DATE] [--to DATE] [--elements LIST] [--include-old] [--out PATH] [--force]",
         subcommands: RESEARCH_SUBS,
         flags: RESEARCH_FLAGS,
     },

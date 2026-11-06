@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://news.prfree.org/@julieczachur/strategywiz-consulting-expands-ai-governance-and-responsible-ai-services-for-enterprise-ai-adoption-li2t2te3vy6m
-- Title: StrategyWiz Consulting Expands AI Governance and Responsible AI Services for Enterprise AI Adoption
-- Author(s): JulieCzachur, StrategyWiz Consulting
+- URL: https://www.truefoundry.com/pt/glossary/model-distillation
+- Title: What Is Model Distillation? | TrueFoundry
+- Author(s): Ashish Dubey
 - Language: English
-- Published (UTC): 2026-10-07T11:46:16+00:00
-- Captured (UTC): 2026-11-02T11:13:48.554482847+00:00
-- Relevance: High - title + snippet match query
+- Published (UTC): 2026-10-31T00:00:00+00:00
+- Captured (UTC): 2026-11-03T21:07:02.927369282+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-On October 7, 2026, StrategyWiz Consulting announced expansion of its AI governance and responsible AI services to help enterprises move AI from experimentation to production while addressing model reliability, data privacy, bias, explainability, regulatory compliance, and performance. The technology consulting and digital transformation firm’s offerings include AI risk assessments, model evaluation, bias and fairness audits, explainable AI, data traceability, compliance controls, and post-deployment drift monitoring, plus automated auditing, runtime guardrails, human-in-the-loop controls, and continuous monitoring. Founder Vikas Agarwal said enterprise AI adoption “cannot depend on trust alone” and needs measurable controls embedded in the development lifecycle; StrategyWiz’s broader AI portfolio also covers agentic AI, AI application development, RAG pipelines and LLM fine-tuning, business process automation, and AI ROI measurement.
+Model distillation trains a smaller “student” model to reproduce a larger “teacher” model’s outputs, especially its soft probabilities, yielding compact models that retain much of the teacher’s quality while reducing cost and latency; it is useful for high-volume, latency-sensitive, and edge deployments. It differs from quantization and pruning by training a new smaller model that can use a different architecture, and it can be combined with those methods. Tradeoffs include a quality gap on edge cases, added training effort, limited task generalization, and dependence on teacher quality; TrueFoundry supports fine-tuning, distillation, and serving.
 ```

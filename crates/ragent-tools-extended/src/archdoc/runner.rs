@@ -24,10 +24,12 @@ use std::path::{Path, PathBuf};
 use chrono::SecondsFormat;
 
 use crate::project_scaffold::{
-    HostingTarget, RemoteStatus, ScaffoldError, ScaffoldRequest, ScaffoldSummary,
+    HostingTarget, RemoteStatus, ScaffoldError, ScaffoldRequest, ScaffoldSummary, crate_workspace,
     enforce_empty_directory_guard, init_and_commit, init_github_remote, init_gitlab_remote,
     plan_and_emit, recipe_for,
 };
+
+use crate::project_scaffold::flags::AppType;
 
 /// Why a [`run_govcreate_scaffold`] call did not complete.
 ///
@@ -52,6 +54,8 @@ pub enum GovCreateScaffoldError {
         /// The canonical language value that had no recipe.
         language: String,
     },
+    /// The additive `--type crate` branch refused the request (FR-020).
+    Crate(crate_workspace::CrateWorkspaceError),
 }
 
 impl std::fmt::Display for GovCreateScaffoldError {
@@ -68,6 +72,7 @@ impl std::fmt::Display for GovCreateScaffoldError {
             Self::NoRecipe { language } => {
                 write!(f, "internal: no scaffold recipe for language '{language}'")
             }
+            Self::Crate(err) => write!(f, "{err}"),
         }
     }
 }
@@ -102,10 +107,23 @@ fn scaffold_slug(target: &Path) -> String {
 /// guard before any other action, then delegates to the shared engine for
 /// emission, local git init, and (when a hosting flag was supplied) the GitHub
 /// or GitLab remote-init half.
+///
+/// `--type crate` takes the additive branch instead: its target is the
+/// project the command runs in, which is by definition not empty, so the
+/// empty-directory guard, the workspace/docs layer, and git init are all
+/// skipped and only `crates/<name>/` is planned (see
+/// [`crate_workspace::plan_crate_workspace`]). Scaffolding a crate into the
+/// project that contains the crate is what `--type crate` means.
 pub fn run_govcreate_scaffold(
     request: &ScaffoldRequest,
     target: &Path,
 ) -> Result<ScaffoldStageOutcome, GovCreateScaffoldError> {
+    // The crate layout adds to an existing Cargo workspace; every other app
+    // type creates a new project from an empty directory.
+    if request.app_type() == AppType::Crate {
+        return run_crate_scaffold(request, target);
+    }
+
     std::fs::create_dir_all(target).map_err(|err| GovCreateScaffoldError::TargetFolder {
         path: target.to_path_buf(),
         detail: err.to_string(),
@@ -136,6 +154,51 @@ pub fn run_govcreate_scaffold(
         slug,
         summary,
         stack_note,
+    })
+}
+
+/// Additive `--type crate` branch of the scaffold stage (FR-020).
+///
+/// Writes `crates/<crate-name>/` into the existing project at `target` and
+/// registers the workspace member when the root manifest lists members
+/// explicitly. The crate name is the target folder's own name, so
+/// `/spec reverse <repo> --type crate --folder crates/my-crate` produces
+/// `crates/my-crate/` with `package.name = "my-crate"` - the folder and the
+/// package agree, which is what Cargo's default `crates/<name>` member layout
+/// expects.
+///
+/// Deliberately performs no git init: the project is already a repository, and
+/// re-initialising it would be a destructive no-op at best.
+fn run_crate_scaffold(
+    request: &ScaffoldRequest,
+    target: &Path,
+) -> Result<ScaffoldStageOutcome, GovCreateScaffoldError> {
+    // The crate name comes from the target folder, falling back to the
+    // language's manifest-derived default when the target has no final
+    // component (e.g. `.`). Cargo package names use `-`, so the folder name is
+    // used verbatim rather than a lossy rewrite of it.
+    let name = scaffold_slug(target);
+    let outcome = crate_workspace::plan_crate_workspace(target, request, &name)
+        .map_err(GovCreateScaffoldError::Crate)?;
+
+    let mut summary = ScaffoldSummary::from_reports(
+        outcome.crate_name.clone(),
+        target.to_path_buf(),
+        request.language(),
+        request.app_type(),
+        None,
+        outcome.report,
+        None,
+    );
+    // A crate lives inside an existing repository, so the git half is reported
+    // as a no-op rather than run: the surrounding project already owns history.
+    summary.remote = RemoteStatus::None;
+    summary.stopped_early = None;
+
+    Ok(ScaffoldStageOutcome {
+        slug: outcome.crate_name,
+        summary,
+        stack_note: format!("\n{}\n", outcome.member.describe()),
     })
 }
 

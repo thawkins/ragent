@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://infiniapps.ai/blog/saas/ai-saas-pricing-models
-- Title: AI SaaS Pricing Models: Subscription vs Usage vs Hybrid | InfiniAppsAI
-- Author(s): -
+- URL: https://mlnotes.substack.com/p/stop-billing-by-the-token-how-to
+- Title: Stop Billing by the Token: How to Price Your AI Product for Value, Not Compute
+- Author(s): Mehdi Allahyari
 - Language: English
-- Published (UTC): 2026-09-15T00:00:00+00:00
-- Captured (UTC): 2026-11-02T11:14:39.837290324+00:00
+- Published (UTC): 2026-10-25T13:03:44+00:00
+- Captured (UTC): 2026-11-03T21:07:43.404020354+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-The article compares AI SaaS pricing models—subscription, usage-based, and hybrid—and argues no single model is universally best; the choice should match how customers receive value and how AI costs rise with usage, a distinction it says Stripe’s 2026 guidance also emphasizes. Subscription pricing charges fixed recurring amounts (e.g., $49/month) and offers predictable revenue but can erode margins when heavy users consume far more AI than light users; usage-based pricing charges per metric such as $0.02 per document or $0.01 per AI request, aligning revenue with consumption but risking bill shock; hybrid pricing combines a base plan with overages, such as $99/month including 5 users and 10,000 AI tasks plus $0.01 per additional task. The article stresses choosing a pricing metric that is measurable, understandable, tied to customer value, and correlated with cost—rather than exposing token costs directly—and gives a unit-economics example where $100/month revenue with $35 variable cost leaves $65 contribution, but heavy usage raising AI cost to $80 and total variable cost to $97 leaves only $3. It also cites AWS on tenant-level usage tracking and Infiniapps.ai on AI SaaS development, usage tracking, and billing architecture.
+The article argues that billing enterprise AI by raw LLM tokens creates an “invoice anxiety” tax, deflationary margin collapse when model prices fall, and commodity pass-through positioning; customers instead buy outcomes like resolved tickets or verified pull requests. It cites Stripe and Metronome’s “AI Token Billing” blueprint for a Hybrid Value-Unit Architecture: price externally on business-value units, route tasks between cheap and frontier models, verify task completion before charging, and meter tokens internally as a cost guardrail to target 60–80% software gross margins. A naive example bills 12,431 tokens at a 20% markup for $14.28312, while the proposed model might charge $500/month for 250 completed tasks plus $2.00 per overage. It warns of edge cases costing $8.50 against a $2.00 charge and margin collapse from 4x model-price increases, recommending complexity caps, 6-decimal micro-metering, and dynamic rate cards.
 ```

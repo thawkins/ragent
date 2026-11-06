@@ -1,6 +1,6 @@
 //! CLI helper functions extracted from `main.rs` (REMPLAN.md M9/T9.4).
 //!
-//! Contains `run_orchestration_example` and `handle_research_command`,
+//! Contains `run_orchestration_example` and `handle_research_command_with_model`,
 //! plus the `ResearchCommands` clap subcommand enum.
 
 use anyhow::Result;
@@ -337,6 +337,36 @@ pub enum ResearchCommands {
         #[arg(long)]
         force: bool,
     },
+    /// Diff two dated reports of a research item into a rendered deck
+    /// (`DECK-<YYYY-MM-DD>.md`).
+    Deck {
+        /// Research name
+        name: String,
+        /// Older (baseline) report's `YYYY-MM-DD` stamp. Alone, it pairs with
+        /// the next newer dated report.
+        #[arg(long, value_name = "DATE")]
+        from: Option<String>,
+        /// Newer (current) report's `YYYY-MM-DD` stamp. Alone, it pairs with
+        /// the next older dated report.
+        #[arg(long, value_name = "DATE")]
+        to: Option<String>,
+        /// Comma-separated element names to restrict the deck to
+        /// (e.g. `concepts,findings`). Omit for every element. The accepted
+        /// values are printed by `--help`'s sibling on the TUI side; an unknown
+        /// name is a usage error that lists them.
+        #[arg(long, value_name = "LIST")]
+        elements: Option<String>,
+        /// Also emit a slide for an element whose items are all unchanged.
+        #[arg(long)]
+        include_old: bool,
+        /// Write the deck here instead of the default
+        /// `DECK-<YYYY-MM-DD>.md` in the item directory.
+        #[arg(long, value_name = "PATH")]
+        out: Option<String>,
+        /// Overwrite an existing deck file.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Parse the `--age <span>` value from the Clap layer into the research
@@ -359,14 +389,158 @@ fn parse_age_span(span: Option<String>) -> Result<Option<ragent_research::AgeSpa
     }
 }
 
+/// The stderr progress reporter a one-shot CLI `research deck` run uses
+/// (spec `diffdeck` FR-031).
+///
+/// The CLI is a presentation surface, so it prints progress rather than logging
+/// it: one `ragent-research: <stage> ...` line as each stage begins, the `N of M`
+/// counter for a countable stage, and a closing line as each stage completes.
+/// Reports go to stderr so the machine-readable JSON line on stdout stays a
+/// single parseable record for a piped consumer.
+///
+/// A stage with no unit count prints one line when it starts and one when it
+/// ends; a countable stage (finding paragraphs, exported slides) additionally
+/// prints each unit, which is what makes a long enrichment or export visible.
+struct CliDeckProgress;
+
+impl ragent_research::deck_progress::DeckProgress for CliDeckProgress {
+    fn report(&self, event: &ragent_research::deck_progress::DeckEvent) {
+        use ragent_research::deck_progress::DeckStepStatus;
+
+        // A per-unit report is the noisy case: it is printed once per finding or
+        // per slide, so it carries its counter and nothing else.
+        if let Some((completed, total)) = event.unit() {
+            cliprintln_err!(
+                "ragent-research: deck {} [{completed}/{total}] {}",
+                event.stage.label(),
+                event.detail
+            );
+            return;
+        }
+        match event.status {
+            DeckStepStatus::Started => cliprintln_err!(
+                "ragent-research: deck {} ... {}",
+                event.stage.label(),
+                event.detail
+            ),
+            DeckStepStatus::Done => cliprintln_err!(
+                "ragent-research: deck {} done - {}",
+                event.stage.label(),
+                event.detail
+            ),
+            DeckStepStatus::Skipped => cliprintln_err!(
+                "ragent-research: deck {} skipped - {}",
+                event.stage.label(),
+                event.detail
+            ),
+        }
+    }
+}
+
+/// Build a PowerPoint deck sink for a one-shot CLI `research deck` run.
+///
+/// The CLI has no long-lived session and so no shared MCP client. This connects
+/// the MCP servers the same configuration the TUI would start, builds a sink
+/// over them, and returns it for the deck run. The caller drops it afterwards.
+///
+/// A server that cannot be reached, or a configuration with no
+/// PowerPoint-capable server at all, yields `None`: the deck run then records
+/// [`ragent_research::deck_pptx::DeckPptxOutcome::Unavailable`] and still writes
+/// the markdown deck. Connecting here is best-effort by design - a broken MCP
+/// server must never stop a user writing a deck.
+async fn connect_cli_deck_sink()
+-> Option<std::sync::Arc<dyn ragent_research::deck_pptx::DeckSlideSink>> {
+    let working_dir = std::env::current_dir().ok()?;
+    let config = ragent_agent::Config::load().ok()?;
+    let configs = ragent_agent::plugin::plugin_mcp_servers(&working_dir, &config.mcp);
+    if configs.is_empty() {
+        return None;
+    }
+    let ledger = ragent_agent::mcp::McpEnableLedger::load();
+    let mut client = ragent_agent::mcp::McpClient::new();
+    let mut connected = 0usize;
+    for (id, cfg) in configs {
+        if !ragent_agent::mcp::is_server_enabled(&cfg, &ledger, &id) {
+            continue;
+        }
+        match client.connect(&id, cfg).await {
+            Ok(()) => connected += 1,
+            Err(e) => tracing::debug!(
+                server = %id,
+                error = %e,
+                "research deck: MCP server connect failed; continuing without it"
+            ),
+        }
+    }
+    if connected == 0 {
+        client.shutdown().await;
+        return None;
+    }
+    Some(
+        std::sync::Arc::new(ragent_agent::mcp::deck_sink::McpDeckSink::new(
+            std::sync::Arc::new(tokio::sync::RwLock::new(client)),
+        )) as std::sync::Arc<dyn ragent_research::deck_pptx::DeckSlideSink>,
+    )
+}
+
+/// Parse the `--elements <list>` value from the Clap layer into the deck
+/// layer's element selection (spec `diffdeck` FR-014).
+///
+/// Resolution goes through the same [`ragent_research::deck::DeckElement::from_name`]
+/// the TUI's `/research deck --elements` uses, so the two surfaces accept exactly
+/// the same spellings. An empty or absent list means "no filter". A name that
+/// names no element is a usage error that shows both the offending value and the
+/// accepted names (FR-014), never a silently narrowed deck.
+///
+/// # Errors
+///
+/// Returns a [`CliExit::usage`] (exit code 2) when an entry does not name one of
+/// the six deck elements.
+fn parse_deck_elements_arg(list: Option<&str>) -> Result<Vec<ragent_research::deck::DeckElement>> {
+    let Some(list) = list else {
+        return Ok(Vec::new());
+    };
+    let mut selected: Vec<ragent_research::deck::DeckElement> = Vec::new();
+    for entry in list.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        match ragent_research::deck::DeckElement::from_name(entry) {
+            Some(element) => {
+                if !selected.contains(&element) {
+                    selected.push(element);
+                }
+            }
+            None => {
+                cliprintln_err!(
+                    "ragent-research: unknown deck element '{entry}'. Accepted values: {}.",
+                    ragent_research::cli::deck_element_names()
+                );
+                return Err(CliExit::usage().into());
+            }
+        }
+    }
+    // The deck writes its slides in FR-003 precedence order whichever order the
+    // user listed them in, so the selection is normalised here too.
+    selected.sort_unstable();
+    Ok(selected)
+}
+
 /// Dispatch `ragent research ...` sub-commands to the `ragent-research`
 /// crate. Emits a `ragent-research:` JSON line for each event so the
 /// output is machine-parseable even when the session produces many
 /// sources (T-035).
-pub async fn handle_research_command(
+/// The registry is what lets the `/research deck` enrichment stage reach the
+/// selected model (spec `diffdeck` FR-023, FR-024). Passing `None` leaves the
+/// deck on its deterministic enrichment, so a caller without a registry still
+/// gets every other requirement's behaviour and the deck never fails for want
+/// of a provider.
+pub async fn handle_research_command_with_model(
     command: ResearchCommands,
     active_model: Option<ragent_agent::agent::ModelRef>,
     storage: Option<std::sync::Arc<Storage>>,
+    provider_registry: Option<std::sync::Arc<ragent_agent::provider::ProviderRegistry>>,
 ) -> Result<()> {
     use ragent_research::cli::ResearchCliCommand;
     use ragent_research::{ResearchManager, SessionEvent, SessionObserver};
@@ -527,6 +701,23 @@ pub async fn handle_research_command(
         },
         ResearchCommands::Update { name } => ResearchCliCommand::Update { name },
         ResearchCommands::Cluster { name, force } => ResearchCliCommand::Cluster { name, force },
+        ResearchCommands::Deck {
+            name,
+            from,
+            to,
+            elements,
+            include_old,
+            out,
+            force,
+        } => ResearchCliCommand::Deck {
+            name,
+            from,
+            to,
+            elements: parse_deck_elements_arg(elements.as_deref())?,
+            include_old,
+            out,
+            force,
+        },
     };
     match cli_cmd {
         ResearchCliCommand::Help => {
@@ -1118,6 +1309,137 @@ pub async fn handle_research_command(
         }
         ResearchCliCommand::Export { name, .. } => {
             cliprintln!("ragent-research: export '{name}' is not implemented in the CLI.");
+        }
+        ResearchCliCommand::Deck {
+            name,
+            from,
+            to,
+            elements,
+            include_old,
+            out,
+            force,
+        } => {
+            // FR-001: the CLI and the TUI drive the same orchestration entry
+            // point, so the deck both write is byte-identical for one pair of
+            // reports (FR-021).
+            let options = ragent_research::deck::DeckRunOptions {
+                from,
+                to,
+                elements,
+                include_old,
+                out,
+                force,
+            };
+            // FR-023, FR-024: a wired provider/model lets the deck write the
+            // finding paragraphs and rank the findings behind each implication.
+            // With no model selected the manager's deterministic enrichment
+            // produces both, so this is an enhancement, never a precondition.
+            let deck_model =
+                provider_registry
+                    .as_ref()
+                    .zip(active_model.as_ref())
+                    .map(|(registry, model)| {
+                        let api_key =
+                            ragent_llm::provider::env_key::provider_env_key(&model.provider_id)
+                                .or_else(|| {
+                                    research_storage
+                                        .get_provider_auth(&model.provider_id)
+                                        .ok()
+                                        .flatten()
+                                });
+                        let base_url = ragent_llm::provider::env_key::provider_env_base_url(
+                            &model.provider_id,
+                        );
+                        std::sync::Arc::new(ragent_research::deck_enrich::LlmDeckModel::new(
+                            std::sync::Arc::new(
+                                ragent_research::analysis::LlmAnalysisEngine::new(
+                                    registry.clone(),
+                                    model.provider_id.clone(),
+                                    model.model_id.clone(),
+                                )
+                                .with_api_key(api_key)
+                                .with_base_url(base_url),
+                            ),
+                        ))
+                            as std::sync::Arc<dyn ragent_research::deck_enrich::DeckModel>
+                    });
+            let outcome = {
+                // FR-030: offer the deck to a connected MCP server that can
+                // write presentation files. The CLI has no long-lived session
+                // client, so one is built for this run from the configured MCP
+                // servers, used, and torn down before the command returns. A
+                // connection failure is not an error: the markdown deck is the
+                // canonical artifact and is written either way.
+                let deck_sink = connect_cli_deck_sink().await;
+                let sink_ref = deck_sink
+                    .as_ref()
+                    .map(|sink| sink.as_ref() as &dyn ragent_research::deck_pptx::DeckSlideSink);
+                // FR-031: a deck run reports each stage on stderr, so a run that
+                // spends a model call per finding (or a round trip per slide) shows
+                // progress instead of going quiet. Stderr keeps the machine-readable
+                // JSON line on stdout untouched for a piped consumer.
+                let progress = CliDeckProgress;
+                manager
+                    .deck_with_progress(
+                        &name,
+                        &options,
+                        deck_model.as_deref(),
+                        sink_ref,
+                        Some(&progress),
+                    )
+                    .await?
+            };
+            // The machine-readable line first: a consumer piping the output can
+            // read the counts without parsing the human summary below.
+            cliprintln!(
+                "{}",
+                ragent_research::render_deck_event_json(&name, &outcome)
+            );
+            // FR-010: the counts are the written deck's own, so this summary can
+            // never disagree with the file on disk. FR-013's no-change case says
+            // so explicitly instead of reporting a deck full of zeroes.
+            if outcome.no_changes {
+                cliprintln!(
+                    "ragent-research: wrote `{path}` for `{name}` ({from} to {to}): \
+                     no changes detected between the two reports.",
+                    path = outcome.path.display(),
+                    from = outcome.pair.older_label(),
+                    to = outcome.pair.newer_label(),
+                );
+            } else {
+                cliprintln!(
+                    "ragent-research: wrote `{path}` for `{name}` ({from} to {to}): \
+                     NEW {new}, ADDED {added}, UPDATE {update}, OLD {old} - \
+                     {changes} change(s) across {slides} element slide(s).",
+                    path = outcome.path.display(),
+                    from = outcome.pair.older_label(),
+                    to = outcome.pair.newer_label(),
+                    new = outcome.new_count,
+                    added = outcome.added_count,
+                    update = outcome.update_count,
+                    old = outcome.old_count,
+                    changes = outcome.change_count(),
+                    slides = outcome.document.elements.len(),
+                );
+            }
+            // FR-030: report the second artifact. An absent PowerPoint server
+            // says nothing, so a run without one reads exactly as before; a
+            // written file and a failed export are both worth a line.
+            match &outcome.pptx {
+                ragent_research::deck_pptx::DeckPptxOutcome::Unavailable => {}
+                ragent_research::deck_pptx::DeckPptxOutcome::Written {
+                    path,
+                    slides,
+                    provider,
+                } => cliprintln!(
+                    "ragent-research: wrote `{path}` ({slides} slides, via {provider}).",
+                    path = path.display(),
+                ),
+                ragent_research::deck_pptx::DeckPptxOutcome::Failed { reason } => cliprintln_err!(
+                    "ragent-research: PowerPoint export skipped: {reason} \
+                     (the markdown deck is unaffected)."
+                ),
+            }
         }
         ResearchCliCommand::Import { path, .. } => {
             cliprintln!("ragent-research: import '{path}' is not implemented in the CLI.");

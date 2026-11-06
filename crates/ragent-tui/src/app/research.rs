@@ -11,6 +11,61 @@ use crate::research_adapter::TuiResearchObserver;
 
 use crate::app::state::{App, LogLevel};
 
+/// Resolve a provider API key for the deck's enrichment model.
+///
+/// Environment variables win (through the single resolver in
+/// [`ragent_llm::provider::env_key`]), then the encrypted credential store. A
+/// `None` result leaves the client keyless, which is valid for a local provider
+/// such as Ollama and fatal only for a provider that then rejects the request -
+/// in which case the deck falls back to its deterministic enrichment.
+fn resolve_provider_api_key(provider_id: &str, storage: &Storage) -> Option<String> {
+    if let Some(key) = ragent_llm::provider::env_key::provider_env_key(provider_id) {
+        return Some(key);
+    }
+    match storage.get_provider_auth(provider_id) {
+        Ok(key) => key,
+        Err(error) => {
+            tracing::debug!(
+                provider = provider_id,
+                %error,
+                "credential store lookup failed; deck enrichment runs keyless"
+            );
+            None
+        }
+    }
+}
+
+/// Resolve a provider-specific base URL for the deck's enrichment model.
+///
+/// Only the providers whose endpoint is configurable by the user resolve to a
+/// value here (Copilot, a generic OpenAI-compatible endpoint, Azure AI Foundry);
+/// every other provider builds its client from its own default endpoint, so
+/// `None` is the correct answer for it.
+fn resolve_provider_base_url(
+    provider_id: &str,
+    storage: &Storage,
+    config: Option<&ragent_agent::Config>,
+) -> Option<String> {
+    let setting_key = match provider_id {
+        "copilot" => "copilot_api_base",
+        "generic_openai" => "generic_openai_api_base",
+        "azure_foundry" => "azure_foundry_api_base",
+        _ => return None,
+    };
+    storage
+        .get_setting(setting_key)
+        .ok()
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            config
+                .and_then(|c| c.provider.get(provider_id))
+                .and_then(|p| p.api.as_ref())
+                .and_then(|api| api.base_url.clone())
+        })
+        .or_else(|| ragent_llm::provider::env_key::provider_env_base_url(provider_id))
+}
+
 /// Marker the TUI question dialog returns when the user dismisses the prompt
 /// with Esc (see the free-text question key handling in `src/input.rs`).
 const QUESTION_DISMISSED_MARKER: &str = "[User dismissed question]";
@@ -204,6 +259,70 @@ async fn run_cluster_extraction(
     });
 
     Ok(path)
+}
+
+/// Render the `[ok]` line a successful `/research deck` run publishes.
+///
+/// The per-status counts come from the written deck's own diff (FR-010), so this
+/// line can never disagree with the file on disk. FR-013's no-change case says
+/// so explicitly instead of reporting a deck full of zeroes.
+#[must_use]
+fn format_deck_success_line(
+    name: &str,
+    path: &std::path::Path,
+    pair: &ragent_research::deck::ReportPair,
+    outcome: &ragent_research::deck::DeckOutcome,
+) -> String {
+    if outcome.no_changes {
+        return format!(
+            "From: /research deck\n\n[ok] Wrote `{path}` for `{name}` \
+             ({} to {}): no changes detected between the two reports.{pptx}",
+            pair.older_label(),
+            pair.newer_label(),
+            path = path.display(),
+            pptx = format_deck_pptx_line(outcome),
+        );
+    }
+    format!(
+        "From: /research deck\n\n[ok] Wrote `{path}` for `{name}` ({} to {}): \
+         NEW {}, ADDED {}, UPDATE {}, OLD {} - {} change(s) across {} element slide(s).{pptx}",
+        pair.older_label(),
+        pair.newer_label(),
+        outcome.new_count,
+        outcome.added_count,
+        outcome.update_count,
+        outcome.old_count,
+        outcome.change_count(),
+        outcome.document.elements.len(),
+        path = path.display(),
+        pptx = format_deck_pptx_line(outcome),
+    )
+}
+
+/// The FR-030 second-artifact line appended to a deck success message.
+///
+/// A written presentation is reported by path; an absent capability adds
+/// nothing, so a session with no PowerPoint server reads exactly as it did
+/// before the export existed. A failure is reported because the user asked for a
+/// deck and should know one of its two artifacts is missing, but it is phrased as
+/// a warning: the markdown deck is on disk and complete.
+#[must_use]
+fn format_deck_pptx_line(outcome: &ragent_research::deck::DeckOutcome) -> String {
+    use ragent_research::deck_pptx::DeckPptxOutcome;
+    match &outcome.pptx {
+        DeckPptxOutcome::Unavailable => String::new(),
+        DeckPptxOutcome::Written { path, slides, .. } => {
+            format!(
+                "\n\n[ok] Also wrote `{}` ({slides} slides).",
+                path.display()
+            )
+        }
+        DeckPptxOutcome::Failed { reason } => {
+            format!(
+                "\n\n[warn] PowerPoint export skipped: {reason} (the markdown deck is unaffected)."
+            )
+        }
+    }
 }
 
 impl App {
@@ -990,6 +1109,35 @@ impl App {
             ResearchCliCommand::Export { name, .. } => {
                 self.append_assistant_text(&format!("From: /research export\n\nExporting `{name}` is not yet implemented in the TUI."));
             }
+            ResearchCliCommand::Deck {
+                name,
+                from,
+                to,
+                elements,
+                include_old,
+                out,
+                force,
+            } => {
+                // FR-023, FR-024: the finding paragraphs and the
+                // implication-to-finding ranking are written by the session's
+                // own provider/model when one is selected. With no model the
+                // manager's deterministic enrichment still produces both, so
+                // the run is never refused for want of a provider.
+                let model = self.deck_model();
+                self.handle_research_deck(
+                    &manager,
+                    &name,
+                    ragent_research::deck::DeckRunOptions {
+                        from,
+                        to,
+                        elements,
+                        include_old,
+                        out,
+                        force,
+                    },
+                    model,
+                )
+            }
             ResearchCliCommand::Import { path, .. } => {
                 self.append_assistant_text(&format!("From: /research import\n\nImporting `{path}` is not yet implemented in the TUI."));
             }
@@ -1004,5 +1152,155 @@ impl App {
                 ));
             }
         }
+    }
+
+    /// Drive a `/research deck <name>` run (spec `diffdeck`, FR-001).
+    ///
+    /// The whole seven-step orchestration lives in [`ResearchManager::deck`], so
+    /// this arm only resolves the session, spawns the future on the tokio
+    /// runtime, and reports the outcome: one [`Event::TextDelta`] carrying the
+    /// written path and the deck's own per-status counts on success (FR-010),
+    /// and one `TextDelta` plus an [`Event::AgentNotice`] on a refusal.
+    ///
+    /// A refusal is never silent: every branch of [`ResearchError`] - a missing
+    /// item (FR-018), an unusable report pair (FR-011/FR-012/FR-020), an
+    /// unparseable report (FR-019), a bad `--out` or an existing deck without
+    /// `--force` (FR-016/FR-017) - surfaces as an `[err]` line naming the reason.
+    /// The model the deck enrichment stage may consult, if one is selected.
+    ///
+    /// It reuses the session's provider/model wiring exactly as the research
+    /// session's own analysis engine does, so a `/provider` choice applies to
+    /// the deck without a second configuration surface. `None` means "no model
+    /// selected" and is not an error: the deck then falls back to the
+    /// deterministic enrichment.
+    fn deck_model(&self) -> Option<Arc<dyn ragent_research::deck_enrich::DeckModel>> {
+        let (provider_id, model_id) = self.selected_model.as_deref()?.split_once('/')?;
+        let registry = self.provider_registry.clone();
+        let provider_id = provider_id.to_string();
+        let model_id = model_id.to_string();
+        let storage = self.storage.clone();
+        let config = ragent_agent::Config::load().ok();
+        let api_key = resolve_provider_api_key(&provider_id, &storage);
+        let base_url = resolve_provider_base_url(&provider_id, &storage, config.as_ref());
+        Some(
+            Arc::new(ragent_research::deck_enrich::LlmDeckModel::new(Arc::new(
+                ragent_research::analysis::LlmAnalysisEngine::new(registry, provider_id, model_id)
+                    .with_api_key(api_key)
+                    .with_base_url(base_url),
+            ))) as Arc<dyn ragent_research::deck_enrich::DeckModel>,
+        )
+    }
+
+    pub(crate) fn handle_research_deck(
+        &mut self,
+        manager: &ragent_research::ResearchManager,
+        name: &str,
+        options: ragent_research::deck::DeckRunOptions,
+        model: Option<Arc<dyn ragent_research::deck_enrich::DeckModel>>,
+    ) {
+        let Some(session_id) = self.session_id.clone() else {
+            self.status = "research: no active session".to_string();
+            return;
+        };
+        let manager = manager.clone();
+        let name = name.to_string();
+        let event_bus = self.event_bus.clone();
+        // FR-030: a connected MCP server that can write presentation files is
+        // offered the deck as a second artifact. The sink is built from the
+        // session's own shared `McpClient`, so it reuses a server the user has
+        // already connected and spawns nothing. `None` when no client is wired
+        // or no server qualifies, which the manager records as `Unavailable`.
+        let deck_sink: Option<Arc<dyn ragent_research::deck_pptx::DeckSlideSink>> =
+            self.session_processor.mcp_client.get().map(|client| {
+                Arc::new(ragent_agent::mcp::deck_sink::McpDeckSink::new(
+                    client.clone(),
+                )) as Arc<dyn ragent_research::deck_pptx::DeckSlideSink>
+            });
+        // The run is short on the deterministic path and long whenever it does
+        // real work - one model call per finding in the enrichment stage, one
+        // server round trip per slide in the export - so it reports each stage
+        // (FR-031). The adapter publishes sentinel notices that the TUI folds into
+        // one in-place `Research Progress` message for this run, the same
+        // presentation `/research create` uses, so the window shows a run that is
+        // working rather than one that went quiet.
+        self.status = format!("[wait] research: deck '{name}'...");
+        let progress = crate::deck_progress::DeckProgressAdapter::new(
+            self.event_bus.clone(),
+            session_id.clone(),
+            name.clone(),
+        );
+        // Seed the run's tracker and render it immediately, so the message window
+        // acknowledges the command before the first stage report arrives rather
+        // than staying silent until the lookup completes.
+        let mut tracker = crate::deck_progress::DeckTracker::new();
+        tracker.apply(&ragent_research::deck_progress::DeckEvent::started(
+            ragent_research::deck_progress::DeckStage::Select,
+            format!("starting a deck run for '{name}'"),
+        ));
+        match self.research_progress.iter_mut().find(|p| p.name == name) {
+            Some(existing) => existing.deck = Some(tracker),
+            None => {
+                let mut seeded =
+                    crate::research_progress::ResearchProgress::new(name.clone(), name.clone());
+                seeded.deck = Some(tracker);
+                self.research_progress.push(seeded);
+            }
+        }
+        self.refresh_research_progress_message(&name);
+
+        tokio::spawn(async move {
+            // The model is borrowed for the run rather than cloned into it:
+            // the trait object is behind an `Arc`, so the call keeps it alive
+            // across the await without duplicating provider state.
+            let model_ref = model.as_deref();
+            let sink_ref = deck_sink.as_deref();
+            match manager
+                .deck_with_progress(&name, &options, model_ref, sink_ref, Some(&progress))
+                .await
+            {
+                Ok(outcome) => {
+                    // Close the run's stage list in the message window before the
+                    // outcome lands, so the tracker never shows an export stage
+                    // still in flight beside a finished deck.
+                    ragent_research::deck_progress::DeckProgress::report(
+                        &progress,
+                        &ragent_research::deck_progress::DeckEvent::done(
+                            ragent_research::deck_progress::DeckStage::Export,
+                            "deck run complete",
+                        ),
+                    );
+                    event_bus.publish(Event::TextDelta {
+                        session_id: session_id.clone(),
+                        text: format_deck_success_line(
+                            &name,
+                            &outcome.path,
+                            &outcome.pair,
+                            &outcome,
+                        ),
+                    });
+                    event_bus.publish(Event::AgentNotice {
+                        session_id,
+                        message: if outcome.no_changes {
+                            format!("research: deck '{name}' written (no changes)")
+                        } else {
+                            format!(
+                                "research: deck '{name}' written ({} change(s))",
+                                outcome.change_count()
+                            )
+                        },
+                    });
+                }
+                Err(e) => {
+                    event_bus.publish(Event::TextDelta {
+                        session_id: session_id.clone(),
+                        text: format!("From: /research deck\n\n**Error:** {e}"),
+                    });
+                    event_bus.publish(Event::AgentNotice {
+                        session_id,
+                        message: format!("research: deck '{name}' failed: {e}"),
+                    });
+                }
+            }
+        });
     }
 }

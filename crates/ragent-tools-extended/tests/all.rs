@@ -218,6 +218,9 @@ mod test_pdf_expert_cff;
 #[path = "test_pdf_roundtrip.rs"]
 mod test_pdf_roundtrip;
 
+#[path = "test_crate_workspace.rs"]
+mod test_crate_workspace;
+
 #[path = "test_project_scaffold_docs.rs"]
 mod test_project_scaffold_docs;
 

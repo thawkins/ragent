@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.tekedia.com/mistral-releases-trillion-parameter-open-weight-large-4-ai-model-to-expand-sovereign-cybersecurity-capabilities
-- Title: Mistral Releases Trillion-Parameter Open-Weight Large 4 AI Model to Expand Sovereign Cybersecurity Capabilities -...
-- Author(s): Samuel Nwite, @tekedia
+- URL: https://coworker.ai/blog/ai-token-cost
+- Title: AI Token Cost: 13 Models by Cost per Task
+- Author(s): Dhruv Kapadia
 - Language: English
-- Published (UTC): 2026-10-30T17:52:00+00:00
-- Captured (UTC): 2026-11-02T11:15:10.387010909+00:00
+- Published (UTC): 2026-10-16T17:15:00+00:00
+- Captured (UTC): 2026-11-03T21:08:14.585380081+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-Mistral has released the weights of its trillion-parameter Mistral Large 4 model, nicknamed “Le Chonk,” via Hugging Face and its API, positioning it as an open-weight alternative to closed systems from OpenAI and Anthropic for sovereign deployment and cybersecurity. Mistral claims Large 4 performs comparably to China’s GLM-5.3, uses 47% fewer tokens per task, and ranks ahead of other open models on Artificial Analysis’ Coding Agent Index for agentic coding. CEO Arthur Mensch frames the goal as making AI “a tool for empowerment, not dominance,” while VP of Science Pierre Stock says open weights give enterprises and governments cyber-defense access that “can’t be cut off,” though Mistral notes such deployments still require infrastructure, expertise, maintenance, and safeguards.
+A October 2026 comparison of 13 models found AI token list prices range from $0.10 to $10 per million input tokens and $0.50 to $50 per million output tokens, but list price poorly predicts cost per task. Artificial Analysis cost per task ranges from $0.07 for GPT 6 Luna (score 38) to $7.63 for Claude Fable 5.1 (score 53), while Claude Opus 5.5 tops the Intelligence Index at 58 for $5.98 per task and GPT 6.1 Sol scores 52 for $0.72. Coworker’s default “Optimized” setting runs GLM 5.3 Flash at $0.28 per task with a score of 42, and Coworker says its OM2 context layer cut token cost 9x on retrieval-heavy tasks in its 100-task benchmark.
 ```

@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.linkedin.com/posts/pooja3p_agenticai-aigovernance-enterprisearchitecture-activity-7519110335748833280-8Ixs
-- Title: AI Agent Sprawl: The Next Big Enterprise Governance Challenge | Pooja Sund
-- Author(s): Pooja Sund
+- URL: https://www.sweet.security/agent-security/agent-governance-platforms
+- Title: AI Agent Governance Platforms: Top 7 Compared
+- Author(s): -
 - Language: English
-- Published (UTC): 2026-10-22T19:00:02.356+00:00
-- Captured (UTC): 2026-11-02T11:12:58.986344050+00:00
+- Published (UTC): 2026-09-24T00:00:00+00:00
+- Captured (UTC): 2026-11-03T21:05:58.791620760+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-Pooja Sund argues that as enterprises scale from AI-agent experimentation to hundreds or thousands of deployed agents, “AI agent sprawl” becomes a major governance challenge around ownership, access, and accountability. She recommends six controls: centralized agent visibility across platforms such as Microsoft Copilot Studio, Azure AI Foundry, AWS Bedrock, and internal frameworks; assigned business/technical owners and risk classifications; treating agents as non-human identities with least-privilege access and monitoring; risk-based approval gates involving architecture, security, data governance, and compliance; full lifecycle management through recertification; and formal decommissioning. She proposes an Enterprise AI Agent Control Plane combining inventory, identity, policy enforcement, observability, and lifecycle management, and asks whether governance should be centralized under an enterprise AI platform team or federated across business units with common guardrails.
+The page argues that AI agent governance must be a runtime control problem, not policy documentation: platforms should record tool calls, identity use, data access, approvals, exceptions, blocked actions, policy changes, and enforcement decisions, then tie them to approved intent. It says buyers should prioritize runtime blocking/guardrails, approval workflows, least-privilege tool scoping, identity-linked audit evidence, integrations with agent frameworks, model gateways, cloud APIs, and IAM, plus alignment with NIST AI RMF, ISO/IEC 42001, SOC 2, and the EU AI Act. It compares seven platforms—Sweet Security (runtime-first cloud/AI governance with behavioral drift detection), Aqua Security, HiddenLayer, Lakera, Prompt Security, Protect AI, and Noma—and notes that prompt-layer and AI-SPM tools often cover only part of the agent governance problem.
 ```

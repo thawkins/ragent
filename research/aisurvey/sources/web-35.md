@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://emergent.sh/news/meta-releases-muse-spark-open-ai-model-open
-- Title: Meta Releases Muse Spark Open AI Model: Open-Weight Era
-- Author(s): Kamran
+- URL: https://www.traxtech.com/ai-in-supply-chain/agentic-ai-monetization-models-supply-chain-impact
+- Title: Agentic AI Business Models and What They Mean for Supply Chain
+- Author(s): Trax Technologies
 - Language: English
-- Published (UTC): 2026-10-16T19:18:42+00:00
-- Captured (UTC): 2026-11-02T11:15:04.421593973+00:00
+- Published (UTC): 2026-10-16T12:59:59+00:00
+- Captured (UTC): 2026-11-03T21:08:10.536275004+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-Meta officially released **Muse Spark Open** on **October 16, 2026**, an **open-weight** generative AI model positioned as complementary to its **Llama** series and intended for creative and multimodal tasks such as image generation/editing, text-visual content synthesis, style transfer, and rapid prototyping. The model uses transformer-based attention and is available through Meta’s AI research portal under an open-weight license permitting commercial use with attribution while restricting certain high-risk deployments; it ships in multiple quantization formats with documentation, API libraries, and framework integration guides. Meta frames the release as part of its strategy to counter closed, API-only competitors, though it has not published comprehensive evaluation metrics.
+A Nasscom analysis cited by Trax finds agentic AI providers are commercializing autonomous agents through subscription tiers, outcome-based pricing, and usage/task-volume billing, shifting the technology from pilots to enterprise offerings. Because agents can plan and execute multi-step supply chain tasks—such as freight invoice discrepancy resolution—the models carry different risk and ROI implications: outcome pricing requires clear baselines, consumption billing rewards documented workflows, and autonomous action makes governance, audit trails, and human escalation part of deployment cost. Trax says high-volume, rules-governed workflows like freight audit, carrier invoice matching, inventory reorder triggering, and shipment status monitoring are near-term candidates, while strategic supplier negotiation and volatile-market demand sensing are not yet.
 ```

@@ -374,6 +374,10 @@ mod test_research_app_more;
 mod test_research_clarification;
 #[path = "test_research_cluster.rs"]
 mod test_research_cluster;
+#[path = "test_research_deck.rs"]
+mod test_research_deck;
+#[path = "test_research_deck_progress_message.rs"]
+mod test_research_deck_progress_message;
 #[path = "test_research_progress_config.rs"]
 mod test_research_progress_config;
 #[path = "test_research_progress_extra.rs"]

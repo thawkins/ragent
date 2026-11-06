@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://mcpmanager.ai/blog/enterprise-ai-governance
-- Title: Enterprise AI Governance Framework for Agentic AI
-- Author(s): -
+- URL: https://scand.com/company/blog/enterprise-ai-platform
+- Title: Enterprise AI Platform: Architecture, Build vs. Buy
+- Author(s): @ScandLtd
 - Language: English
-- Published (UTC): 2026-09-05T05:12:05+00:00
-- Captured (UTC): 2026-11-02T11:13:59.183516354+00:00
+- Published (UTC): 2026-09-25T00:00:00+00:00
+- Captured (UTC): 2026-11-03T21:07:13.363685266+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-Enterprise AI governance can accelerate adoption through “bounded freedom”: assign explicit ownership across IT, security, legal, and business units; inventory all AI clients, MCP servers, and agents; write policies that map to enforceable controls; and route MCP traffic through a centralized gateway with identity brokering, fail-closed tool provisioning, inline PII detection/redaction, per-user audit logging, and SIEM export via OpenTelemetry. IBM’s 2026 Cost of a Data Breach Report, covering 602 breached organizations from March 2025–February 2026, found shadow AI in 43% of incidents (up from 20%), more than two-thirds lacked governance to limit shadow AI, average breach cost was $4.99M, one in four malicious breaches were AI-enabled and averaged roughly $6M, and more than 20% reported breaches targeting their own AI models/apps, with compromised APIs/apps/plug-ins and cloud misconfigurations each cited at 27%. McKinsey’s 2026 AI Trust Maturity Survey of roughly 500 organizations found clear responsible-AI ownership correlated with maturity scores of 2.6 vs. 1.8, nearly two-thirds named security/risk concerns as the top barrier to scaling agentic AI, and only about 30% reached maturity level three or higher in strategy, governance, and agentic AI controls. The article argues MCP itself provides no organization-wide visibility, identity model, policy layer, or runtime inspection, so enterprises should use a governed MCP gateway, pre-approve servers, enforce two-axis access control, and limit AI-client connectors to the gateway URL while recognizing that browser-based AI use and local client behavior fall outside MCP gateway coverage.
+An IBM Institute for Business Value study of 2,000 tech executives found that 70% say business teams deploy AI faster than IT can track it, and two-thirds are accountable for AI systems they do not fully control. The article argues that disconnected copilots, agents, RAG systems, and predictive models create shadow AI, duplicated integrations, untracked inference costs, inconsistent governance and compliance, and stalled production scaling, so an enterprise AI platform provides a shared lifecycle foundation for data, multi-model access including private LLMs, RAG/knowledge, agent orchestration, identity and access, governance, evaluation and monitoring, MLOps/LLMOps, and cost control. It distinguishes platforms from standalone tools, outlines build-vs-buy criteria, names hyperscaler offerings (Amazon Bedrock, Google Vertex AI, Microsoft Foundry), data platforms (Databricks, Snowflake Cortex), suites (IBM watsonx, C3 AI, Salesforce Agentforce), and open-source components (LangChain/LangGraph, LiteLLM, MLflow), and stresses that governance—including EU AI Act requirements—must be designed in from day one; SCAND offers related strategy, custom AI/ML, integration, security, and support services.
 ```

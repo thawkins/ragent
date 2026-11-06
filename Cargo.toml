@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.162"
+version = "1.0.163"
 edition = "2024"
 # The minimum Rust the workspace actually builds on. `edition = "2024"` needs
 # 1.85, but the source uses `slice::as_chunks` (stable in 1.88) and several
@@ -256,7 +256,7 @@ sysinfo = { version = "0.38", default-features = false, features = ["system"] }
 
 # ── Document format support ─────────────────────────────────────────────
 # calamine: used by ragent-bench to read back generated .xlsx workbooks.
-calamine = "0.37"
+calamine = "0.38"
 rust_xlsxwriter = "0.101"
 # default-features = false: only deflate — avoids bzip2, zstd, lzma, aes.
 zip = { version = "9", default-features = false, features = ["deflate"] }

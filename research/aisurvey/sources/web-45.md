@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://am.jpmorgan.com/us/en/asset-management/adv/insights/portfolio-insights/ltcma/a-brighter-productivity-outlook-for-the-ai-era
-- Title: A brighter productivity outlook for the AI era
-- Author(s): Stephanie Aliaga
+- URL: https://www.linkedin.com/posts/tarsha-phillibert-5106a548_ai-corporategovernance-enterpriserisk-activity-7503493324302069760-f2kd
+- Title: AI Governance Belongs in Enterprise Risk Conversation | Tarsha Phillibert posted on the topic | LinkedIn
+- Author(s): Tarsha Phillibert
 - Language: English
-- Published (UTC): 2026-10-19T10:21:00+00:00
-- Captured (UTC): 2026-11-02T11:15:51.188741962+00:00
-- Relevance: Medium - partial query match
+- Published (UTC): 2026-09-09T16:43:36.659+00:00
+- Captured (UTC): 2026-11-03T21:08:53.734533089+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-J.P. Morgan Asset Management’s rebuilt long-term AI methodology assumes AI delivers a durable 10- to 15-year productivity lift, with U.S. TFP growth rising about 40 bps above the pre-AI trend to 1.2% annually, capital stock growth up roughly 30 bps to 2.3%, and labor productivity up 50 bps to 2.2%—enough to make the U.S. economy 7%–8% larger over 15 years. Although just 6% of U.S. work hours are AI-assisted today, it expects adoption to reach about 40% of tasks by 2040, with gains concentrated in the 2030s; the U.S. leads both as an AI enabler and adopter. U.S. hyperscalers have invested nearly $1.6 trillion in capex since 2023 (over $2 trillion globally), with annual U.S. AI capex projected to rise from over $800 billion in 2026 to nearly $1.2 trillion by 2030.
+The posts argue that AI risk is an enterprise-wide governance and accountability issue—not just an “AI issue” for IT—touching investigations, cybersecurity, privacy, IP, employment, financial reporting, compliance, and reputation, and requiring Legal, boards, and the C-suite at the table. They cite FTC scrutiny of deceptive AI claims; a federal court-approved $1.5 billion settlement involving AI training data and copyright; litigation over AI-supported employment decisions; GSA’s government-wide AI acquisition strategy; the European Commission’s preliminary finding that AWS and Microsoft Azure may qualify as gatekeepers under the Digital Markets Act; and Anthropic CEO Dario Amodei’s call for transparency in model testing and pre-deployment risk evaluation, while stressing AI visibility, defensible evidence, and clear authorization/accountability for agentic AI.
 ```

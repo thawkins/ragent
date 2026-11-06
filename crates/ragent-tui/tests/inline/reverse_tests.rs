@@ -265,6 +265,29 @@ fn test_reverse_help_message_content() {
 }
 
 #[test]
+fn test_reverse_help_message_shows_worked_examples() {
+    let msg = reverse_help_message();
+    assert!(
+        msg.contains("**Examples:**"),
+        "help must carry an examples block"
+    );
+    assert!(
+        msg.contains(
+            "/spec reverse acme/widget --language rust --type crate --folder crates/widget"
+        ),
+        "the additive crate example must name the crate destination: {msg}"
+    );
+    assert!(
+        msg.contains("--type crate --create"),
+        "the crate example must show the --create chain: {msg}"
+    );
+    assert!(
+        msg.contains("/reverse owner/repo --tech"),
+        "the plain reverse example must show --tech: {msg}"
+    );
+}
+
+#[test]
 fn test_reverse_help_message_lists_all_formats() {
     let msg = reverse_help_message();
     assert!(msg.contains("owner/repo"));

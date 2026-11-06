@@ -72,6 +72,21 @@ impl LanguageRecipe {
         file.content.replace("{name}", project_name)
     }
 
+    /// Library entry-point content for a workspace-member crate.
+    ///
+    /// `--type crate` needs two files (a manifest and a library) where every
+    /// other app type needs one, so the crate library is rendered from its
+    /// own template rather than through the single-source registry slot. Only
+    /// [`Language::Rust`] defines one; other languages render an empty string,
+    /// which [`super::crate_workspace::crate_recipe`] prevents from being
+    /// reached.
+    pub fn render_crate_lib_content(&self, project_name: &str) -> String {
+        match self.language {
+            Language::Rust => RUST_CRATE_LIB_RS.replace("{name}", project_name),
+            _ => String::new(),
+        }
+    }
+
     /// Gitignore content: language artifacts plus ragent artifacts (FR-004).
     pub fn render_gitignore(&self) -> String {
         format!("{}\n.ragent/\nlog/\ntarget/\n", self.gitignore_body)
@@ -95,6 +110,42 @@ const RUST_MAIN_RS: &str = "fn main() {\n    println!(\"Hello, world!\");\n}\n";
 const RUST_LIB_RS: &str = "/// Returns a greeting from the library.\n\
 pub fn hello() -> String {\n\
     \"Hello, world!\".to_owned()\n\
+}\n";
+
+/// Manifest for a workspace-member crate (`--type crate`).
+///
+/// Inherits `edition`, `rust-version`, `license`, `authors` and
+/// `repository` from the umbrella `[workspace.package]`, so a crate added to
+/// a project follows that project's release policy instead of pinning its
+/// own. The workspace lint block is inherited too, which is what keeps a
+/// generated crate warning-clean under the same `cargo clippy` the
+/// surrounding project runs.
+const RUST_CRATE_MANIFEST: &str = "[package]\n\
+name = \"{name}\"\n\
+version = \"0.1.0\"\n\
+edition.workspace = true\n\
+rust-version.workspace = true\n\
+license.workspace = true\n\
+authors.workspace = true\n\
+repository.workspace = true\n\
+description = \"{name} crate\"\n\
+\n\
+[dependencies]\n\
+\n\
+[lints]\n\
+workspace = true\n";
+
+/// Library entry point for a workspace-member crate (`--type crate`).
+const RUST_CRATE_LIB_RS: &str = "//! `{name}` crate.\n\
+\n\
+#![deny(unsafe_code)]\n\
+\n\
+/// Returns a greeting from this crate.\n\
+///\n\
+/// Replace with the crate's real entry points as it grows.\n\
+#[must_use]\n\
+pub fn hello() -> String {\n\
+    \"Hello from {name}!\".to_owned()\n\
 }\n";
 
 const RUST_TUI_MAIN: &str = "fn main() {\n\
@@ -1074,6 +1125,19 @@ pub static REGISTRY: &[LanguageRecipe] = &[
                 SourceFile {
                     path: "src/main.rs",
                     content: RUST_WEBAPP_MAIN,
+                },
+            ),
+            // `--type crate` is additive and is planned by
+            // `crate_workspace::plan_crate_workspace`, which needs two files
+            // (manifest + lib), so the single `SourceFile` slot carries the
+            // manifest as the marker that "rust has a crate recipe" while the
+            // planner reads `CRATE_MANIFEST_TEMPLATE` / `CRATE_LIB_TEMPLATE`
+            // below for the real artifact pair.
+            (
+                AppType::Crate,
+                SourceFile {
+                    path: "crates/{name}/Cargo.toml",
+                    content: RUST_CRATE_MANIFEST,
                 },
             ),
         ],

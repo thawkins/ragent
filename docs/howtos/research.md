@@ -50,6 +50,17 @@ adversarial quality review.
   citation verification.
 - **Multiple output formats** — report (default), executive summary,
   comparison table, source bibliography, and IMRaD scientific format.
+- **Diff decks** — `/research deck <name>` turns two of an item's dated reports
+  into a Markdown slide deck showing what changed between them - one slide per
+  concept, each carrying the concept's definition with the findings that belong
+  to it grouped beneath it, and each finding carrying a one-paragraph summary of
+  its observation and analysis (the grouping and the paragraphs written by the
+  selected model when one is wired in, and computed deterministically when not)
+  - with every item tagged `NEW`, `ADDED`, `UPDATE` or `OLD`. The deck's
+  structure, counts and tags are deterministic and model-free; only the finding
+  paragraphs and the concept grouping consult the model, and both fall back to a
+  deterministic equivalent, so a run with no provider produces byte-identical
+  output for the same pair.
 - **Open-access recovery** — for short scholarly sources, queries Unpaywall
   and Europe PMC for legal full-text copies.
 - **Seed sources** — start research from a URL, a local file (PDF, DOCX, ODT,
@@ -119,6 +130,7 @@ research/
     ├── RESEARCH-2026-03-02.md   # report of a later `/research update` run
     ├── CORPA-2026-02-14.md      # QA companion for the first run
     ├── CORPA-2026-03-02.md      # QA companion for the later run
+    ├── DECK-2026-03-05.md       # `/research deck` output, generated 2026-03-05
     └── sources/
         ├── web-01.md
         ├── web-02.md
@@ -503,6 +515,281 @@ frontmatter, not the state file.
 ```text
 /research continue rust-async "Also cover tokio vs async-std comparison"
 ```
+
+### 4.12 `/research deck <name>` - the diff deck
+
+Turn two of an item's reports into a single slide deck that tells the *change
+narrative*: what appeared, what was re-sourced, what changed, and what stayed
+put between two runs. This is the answer to "I re-ran this research two months
+later - what actually moved?"
+
+```text
+/research deck rust-async
+ragent research deck rust-async
+```
+
+The deck's structure - the cover, the element slides, the status tags, the
+counts and the summary - is **deterministic and model-free**: it is a pure
+function of the two input reports, so the same pair always yields byte-identical
+output and the run works with no provider configured.
+
+Two things on a slide are supplied by the LLM enrichment stage when a provider
+and model are selected (they are the only part of a deck a model can influence,
+and the run degrades to a deterministic equivalent without one):
+
+1. **A paragraph under each finding.** The report writes every finding as a
+   headline followed by `**Observation:**` and `**Analysis:**`; the deck
+   condenses both into one paragraph and renders it under the headline. With no
+   model wired in, the paragraph is the first sentence of the observation
+   followed by the first sentence of the analysis, so a model-free deck still
+   explains every finding. The `**Sources:**` list and the source-date note are
+   never turned into prose.
+2. **Which findings belong to each concept.** The report's `## Concepts` are
+   written before its findings and do not name them, so the deck groups each
+   finding under the concept it belongs to, at most three per concept. With no
+   model, the grouping is a term-overlap score (a headline match counts double,
+   and a finding must share at least two content terms with a concept to be
+   grouped), so an unrelated finding is never filed under a concept.
+
+#### Watching a deck run
+
+A deck run narrates its stages, so a slow run is visible while it works rather
+than only when it finishes. The TUI folds the reports into one in-place
+`Research Progress` message for the run, and the status bar names the stage in
+flight with its unit count:
+
+```text
+[research] Research Progress - `rust-async`
+Command: /research deck
+
+  [ok] select           - comparing 2026-02-14 to 2026-03-02
+  [ok] read             - read 32 item(s) from the older and 35 from the newer report
+  [ok] diff             - 3 element(s) in the diff
+  [ok] destination      - writing to research/rust-async/DECK-2026-03-05.md
+  >    enrich findings  - [7/22] Runtime enforcement beats paper approvals...
+  o    group concepts    - no model selected; concept grouping uses the term-overlap ranking
+```
+
+- `>` is a stage in flight, `[ok]` a stage that finished, and `o` a stage that
+  did not apply to this run (`no model selected`, `no presentation capability
+  connected`) - so "not applicable" never looks like "still running".
+- `enrich findings` reports one line per finding paragraph and `export` reports
+  one line per presentation slide, each carrying `[completed/total]`; a run with
+  no provider skips both enrichment stages and writes the deterministic deck.
+- A refusal stops at the stage it failed in and reports no later stage, so you
+  can see where a run gave up.
+- The CLI prints the same stages on **stderr**, so the machine-readable JSON line
+  on stdout stays a single parseable record for a piped consumer.
+
+#### Which two reports
+
+By default the deck covers the **two most recent dated reports** of the item:
+`/research deck rust-async` compares the newest `RESEARCH-<date>.md` against the
+one before it, rendering the older as the baseline and the newer as current.
+
+To pick the pair yourself, name the date stamps:
+
+```text
+/research deck rust-async --from 2026-02-14 --to 2026-03-02
+```
+
+Each value is a `YYYY-MM-DD` stamp that must match a `RESEARCH-<stamp>.md` in
+the item directory. Supplying only one pairs it with its **adjacent** dated
+report - the next older for `--to`, the next newer for `--from`:
+
+```text
+/research deck rust-async --to 2026-03-02      # 2026-03-02 vs the report before it
+/research deck rust-async --from 2026-02-14    # 2026-02-14 vs the report after it
+```
+
+An explicit pair must be ordered older-then-newer; `--from 2026-03-02 --to
+2026-02-14` is refused rather than silently swapped, because a deck always
+compares a baseline against a later report.
+
+#### What a deck covers: the coverage window
+
+The **coverage window** is the pair of report dates the deck was built from,
+shown on the cover slide as `**Coverage:** <older-date> to <newer-date>`. It is
+the one line that says which two runs you are looking at, so a deck found on
+disk months later is self-describing.
+
+An item created by an older ragent may still hold an undated `RESEARCH.md`. That
+legacy file is treated as the **oldest report of the series** - usable as a
+baseline, never as the current side - and its side of the cover window reads
+`legacy`. An item whose *only* report is `RESEARCH.md` cannot produce a deck at
+all, and the refusal says so specifically: it needs its first *dated* report,
+not a second one.
+
+#### Status tags
+
+Every item on every slide carries exactly one tag from a closed set of four:
+
+| Tag | Meaning |
+| --- | --- |
+| `NEW` | The item exists only in the newer report. A reworded finding headline counts as `NEW`, because a finding is identified by its headline (FR-009). |
+| `ADDED` | The item exists only in the newer report **and** cites at least one source the older report did not cite. This is what distinguishes genuinely new *evidence* for a known point from a merely new *point*. |
+| `UPDATE` | The item exists in both reports with changed condensed text - the same identity, drifted wording. |
+| `OLD` | The item exists in both reports with unchanged condensed text. |
+
+"Same item" is decided by section-scoped normalised identity: findings are
+matched by their extracted headline, concepts by their declared name, and every
+other element by its normalised text with citations, Markdown emphasis,
+backticks and whitespace runs removed - so a cosmetically drifted item still
+matches itself and reports `UPDATE` rather than `NEW` + a silent deletion.
+
+#### Slides
+
+The document is Markdown, separated into slides by `---` rules, in a fixed
+order:
+
+1. **Cover** - the title, the generation date, the coverage window, the research
+   id, and a table counting element slides, change items, and unchanged `OLD`
+   items.
+2. **One slide per concept**, then **one slide per other changed element** in a
+   fixed element precedence: Executive Summary, Concepts, Findings,
+   Cross-References, References.
+
+   A **concept** is the deck's key category: the report's `## Concepts` section
+   names the corpus's themes, and the deck renders each concept as its own slide
+   carrying the concept's definition with the findings that belong to it
+   grouped beneath it. Each concept slide is its name, its status, its
+   definition, then one entry per finding:
+
+   ```markdown
+   ## Human Oversight
+
+   _`UPDATE`_
+
+   Human oversight is the deliberate calibration of agent autonomy, with human
+   approval reserved for high-impact actions.
+
+   ### `ADDED` Runtime enforcement beats paper approvals in agent governance
+
+   Paper approvals leave the gateway without context, so a policy document can
+   approve an agent the audit trail cannot reconstruct. Enforcement in the
+   request path generates audit evidence automatically at the moment of action.
+   ```
+
+   A concept that claimed no finding still gets its slide and says so with
+   `_No finding maps to this concept._`. Every finding no concept claimed is
+   rendered on the **Other Findings** slide, so each finding appears on the deck
+   exactly once and none is lost to the grouping.
+
+   The **other elements** (Executive Summary, Cross-References, References) each
+   render every item of the element from both reports - the changed items *and*
+   the unchanged `OLD` ones - as one condensed bullet labelled with its tag, so
+   a slide is the complete picture of that element, not just its deltas:
+
+   ```text
+   ## Cross-References
+
+   _NEW 1 - ADDED 0 - UPDATE 0 - OLD 1 - 2 item(s)_
+
+   - `OLD` `crates/ragent-llm/src/retry.rs` - backoff policy
+   - `NEW` `crates/ragent-agent/src/loop.rs` - turn driver
+   ```
+
+   Item order within a slide follows the newer report, with the unchanged items
+   kept in place; the count line is `NEW n - ADDED n - UPDATE n - OLD n - n
+   item(s)`.
+
+   The report's `## Top 10 Implications` and `## Open Questions` are not deck
+   elements: they are reader-facing narrative, and neither the slides nor the
+   `--elements` filter names them.
+
+3. **A `No changes` slide** instead of step 2, when the pair changed nothing at
+   all. The deck is still written - an unchanged pair is a result, not an error.
+4. **Summary** - the element-slide count, the per-status counts of every emitted
+   item, and the names of the elements that produced a slide.
+
+`--include-old` additionally emits a slide for an element that carries *only*
+`OLD` items, which is otherwise omitted.
+
+#### Output file naming
+
+The deck is written to the item directory as **`DECK-<YYYY-MM-DD>.md`**, where
+the date is the UTC day the deck was *generated* - not a date from either
+contributing report. That is deliberate: regenerating a deck on a later day
+writes a new file beside the earlier one instead of overwriting it, so a series
+of decks can be kept just like a series of reports.
+
+```text
+research/
+└── rust-async/
+    ├── RESEARCH-2026-02-14.md
+    ├── RESEARCH-2026-03-02.md
+    ├── DECK-2026-03-05.md       # generated 2026-03-05
+    └── sources/
+```
+
+Write somewhere else with `--out <path>`; missing parent directories are
+created for you:
+
+```text
+/research deck rust-async --out docs/decks/rust-async-diff.md
+```
+
+Re-running on the same day targets the same `DECK-<today>.md`. Without
+`--force` that is refused rather than overwritten, naming the existing path;
+`--force` overwrites it. A same-day rerun under `--force` is byte-identical.
+
+#### Narrowing and flags
+
+Restrict the deck to specific elements with `--elements`, a comma-separated list
+of element names:
+
+```text
+/research deck rust-async --elements findings,references
+```
+
+Names are matched case-insensitively and accept either the slide label or the
+report heading, so `"cross references"`, `"Cross-References"` and
+`"In-Project Cross-References"` all name the same element. An unknown name is
+refused with the offending value and the accepted list. The filter runs *before*
+rendering, so a narrowed deck's cover and summary counts describe only what it
+actually wrote.
+
+| Flag | Effect |
+| --- | --- |
+| `--from <YYYY-MM-DD>` | Older (baseline) report. Alone, pairs with the next newer report. |
+| `--to <YYYY-MM-DD>` | Newer (current) report. Alone, pairs with the next older report. |
+| `--elements <list>` | Comma-separated element names to include. |
+| `--include-old` | Also emit slides for elements that changed nothing. |
+| `--out <path>` | Write here instead of `DECK-<YYYY-MM-DD>.md`. Parent dirs created. |
+| `--force` | Overwrite an existing deck file. |
+
+#### Refusals are non-destructive
+
+Every refusal exits before writing: two reports are read and parsed, the deck
+is rendered, *then* the destination is resolved. So a run that fails at any
+point leaves the item directory byte-identical - including any deck file already
+there. The refusals are:
+
+- the item does not exist (no directory or file is created);
+- the item holds fewer than two reports;
+- the item holds only the legacy `RESEARCH.md`;
+- a `--from` / `--to` value is not a real `YYYY-MM-DD` date, or names no
+  existing report - the message lists the report dates that do exist;
+- the pair is inverted (`--from` newer than `--to`);
+- `--elements` names an unknown element;
+- a selected report cannot be read, is not valid UTF-8, or contains no
+  recognised top-level section - the message names the path and the reason,
+  and `--force` does not bypass it;
+- the target deck file exists and `--force` was not supplied.
+
+#### CLI and event output
+
+The CLI prints one machine-readable event line and one human summary:
+
+```text
+$ ragent research deck rust-async
+ragent-research: {"kind":"deck","payload":{...}}
+wrote `research/rust-async/DECK-2026-03-05.md` for `rust-async` (2026-02-14 to 2026-03-02): NEW 2, ADDED 0, UPDATE 0, OLD 3 - 2 change(s) across 1 element slide(s)
+```
+
+The payload's counts are the written deck's own, so the line can never disagree
+with the file on disk. A run that found no changes says `no changes detected
+between the two reports` rather than reporting a row of zeroes.
 
 ---
 
@@ -1378,6 +1665,10 @@ ragent research update rust-async
 ragent research delete rust-async --yes
 ragent research archive rust-async
 ragent research continue rust-async "Also cover tokio vs async-std"
+ragent research deck rust-async
+ragent research deck rust-async --from 2026-02-14 --to 2026-03-02
+ragent research deck rust-async --elements findings,open-questions --include-old
+ragent research deck rust-async --out docs/decks/rust-async-diff.md --force
 ```
 
 CLI `create` emits machine-readable JSON lines prefixed with
@@ -1389,6 +1680,18 @@ ragent research create rust-async "Rust async patterns" 2>&1 | grep '^ragent-res
 
 Each JSON line is a session event (phase, queries, web source captured,
 local source captured, iteration completed, critic result, etc.).
+
+CLI `deck` emits exactly one `ragent-research: {"kind":"deck","payload":{...}}`
+line per successful run, followed by a human summary:
+
+```bash
+ragent research deck rust-async | grep '^ragent-research:' | jq '.payload'
+```
+
+The payload carries `name`, `path`, `from`, `to`, `no_changes`, the per-status
+counts (`new`, `added`, `update`, `old`, `changes`), and `element_slides` - the
+element labels that produced a slide. See
+[§ 4.12](#412-research-deck-name---the-diff-deck) for the full deck contract.
 
 ---
 

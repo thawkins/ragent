@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://ourfinancialsecurity.org/resources/tracing-the-money-private-equity-and-data-centers
-- Title: TRACING THE MONEY: Private Equity, Private Credit, and the Data Center Bubble - Americans for Financial Reform
-- Author(s): -
+- URL: https://finance.biggo.com/news/094a3a3e-0746-4e88-856f-5f251d647745
+- Title: Big Tech&#x27;s $300 Billion &#x27;Hidden Guarantee&#x27; for AI Investment… Risk That Doesn&#x27;t Show Up as Debt...
+- Author(s): BigGo Finance
 - Language: English
-- Published (UTC): 2026-10-29T19:09:33+00:00
-- Captured (UTC): 2026-11-02T11:16:10.916282762+00:00
+- Published (UTC): 2026-09-21T03:27:02+00:00
+- Captured (UTC): 2026-11-03T21:09:19.666747664+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-A report by Iván Cazarin and Dustin Duong estimates that 78 private equity firms own or back 13–17 GW of active U.S. data center capacity across 670 sites—25–30% of the country’s 54 GW—and at least 26.8 GW of planned capacity, more than half of the 50 GW pipeline through 2030. The five largest private equity data center backers—Brookfield Asset Management, Ares Management, Blue Owl Capital, DigitalBridge, and Apollo—control nearly 20% of existing and 30% of planned capacity; private equity controls one-third of active capacity in Texas, almost half of current and one-third of planned capacity in Arizona, and nearly a quarter of online capacity plus over 10% of projects in development in Virginia. In 2025, private equity accounted for 90% ($56 billion) of the $61 billion spent globally on data center acquisitions and development, while the report links the buildout to water depletion, fossil-fuel dependence, higher utility bills, and local opposition, including 86 localities with moratoria since 2023 and 70% public opposition to local data centers.
+Global Big Tech has provided up to $300 billion in off-balance-sheet “residual value guarantees” over the past 12 months to fund AI infrastructure, including Meta’s $28 billion guarantee for Louisiana’s 2GW Hyperion data center (enabling $27 billion in financing with Blue Owl), Broadcom’s roughly $29 billion for AI chips leased to Anthropic, and Nvidia’s $105 billion for an SB Energy OpenAI data center in Ohio. Morgan Stanley estimates off-balance-sheet commitments and credit support across seven companies exceed $3.1 trillion, with Alphabet the largest at $890 billion, mostly purchase commitments. Under U.S. GAAP, such guarantees are recorded only when payment is “probable” (over 50%), and Moody’s, S&P, and bond investors warn reported debt may understate risk; S&P adds gaps of up to about 25% of guaranteed value to leverage, while CreditSights likened RVGs to “selling put options.” Amazon, Alphabet, Meta, and Microsoft’s 2025 capex totaled about $381 billion, expected to approach $700 billion in 2026 versus only about $60 billion in 2025 AI revenue, driving reliance on guarantees to protect credit ratings.
 ```

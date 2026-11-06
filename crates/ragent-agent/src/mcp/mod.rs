@@ -11,6 +11,7 @@
 //! Whether a server is started is a durable, global choice recorded in
 //! `<global state dir>/mcp_state.json`; see [`enable_state`].
 
+pub mod deck_sink;
 pub mod discovery;
 pub mod enable_state;
 pub mod http;

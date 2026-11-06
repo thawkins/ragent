@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.brookings.edu/articles/financing-the-ai-buildout
-- Title: Financing the AI buildout | Brookings
-- Author(s): -
+- URL: https://weaver.com/resources/ai-regulation-and-risk-questions-for-boards-to-consider
+- Title: AI, Regulation and Risk: Questions for Boards to Consider | Weaver
+- Author(s): Greg Englert, Craig Epstein, Tessa O&#8217;Keefe, Richard Steen
 - Language: English
-- Published (UTC): 2026-09-24T01:00:05+00:00
-- Captured (UTC): 2026-11-02T11:15:54.211199158+00:00
+- Published (UTC): 2026-10-23T00:00:00+00:00
+- Captured (UTC): 2026-11-03T21:09:12.750306908+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-A Fall 2026 Brookings Papers on Economic Activity paper, “Financing the AI Buildout” by Stijn Van Nieuwerburgh of Columbia University, projects $10.3 trillion in U.S. AI investment from 2025 to 2032—averaging 3.63% of GDP annually—larger relative to the economy than prior U.S. canal, railroad, electrification, highway, and telecommunications booms. It warns that AI-investment risk is shifting from transparent on-balance-sheet corporate financing to opaque off-balance-sheet structures such as joint ventures, private credit, securitization, special-purpose vehicles, lease commitments, and loan guarantees, whose performance depends on uncertain AI demand, rapid technological change, timely power and hardware access, and the credit quality of a small number of data-center tenants. Van Nieuwerburgh says it is premature to call AI infrastructure a systemic risk comparable to earlier credit booms, but argues the policy priority should be improving measurement and transparency while the industry’s capital structure is still evolving.
+Weaver’s board-oversight resource urges boards planning for 2027 to review lessons from the 2026 proxy season, AI risk and value, OECD Pillar Two, ERM effectiveness, and regulatory change. It notes that approximately 300 shareholder proposals went to a vote at S&P 500 companies in 2026, down 18% from 2025, and says AI oversight must provide visibility into employee-enabled and third-party AI use while enabling proportionate, risk-based adoption. Pillar Two is described as the OECD global minimum tax framework requiring large multinationals (generally revenue over €750 million) to pay at least a 15% effective tax rate per jurisdiction; 2026 OECD “side-by-side” safe harbors apply for fiscal years beginning in 2026 and turn off the income inclusion and undertaxed profits rules for eligible U.S.-parented groups that elect them, though other countries’ domestic minimum top-up taxes still apply. The article also says ERM should connect risk to strategy and decision-making, and boards should use structured processes to prioritize regulatory changes rather than react to every development.
 ```

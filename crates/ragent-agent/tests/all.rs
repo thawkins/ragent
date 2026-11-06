@@ -174,6 +174,13 @@ mod test_dry_run_extra;
 #[path = "test_default_registry_doc_lists_the_family.rs"]
 mod test_default_registry_doc_lists_the_family;
 
+#[path = "test_deck_command_catalog.rs"]
+mod test_deck_command_catalog;
+#[path = "test_deck_pptx_sink.rs"]
+mod test_deck_pptx_sink;
+#[path = "test_deck_sink_drive_protocol.rs"]
+mod test_deck_sink_drive_protocol;
+
 #[path = "test_dump_registries.rs"]
 mod test_dump_registries;
 
