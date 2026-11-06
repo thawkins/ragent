@@ -29,7 +29,6 @@ use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::BroadcastStream;
 use tower_http::cors::{AllowOrigin, CorsLayer};
-use tower_http::services::ServeDir;
 use tower_http::timeout::TimeoutLayer;
 
 use ragent_agent::{
@@ -199,14 +198,6 @@ pub fn router(state: AppState) -> Router {
             auth_middleware,
         ));
 
-    // Serve static web UI files from the embedded static directory.
-    // Axum >= 0.8 rejects `nest_service("/")` ("Nesting at the root is no
-    // longer supported"), so the static tree is attached as the fallback for
-    // any path that matched no API route above.
-    let static_files =
-        ServeDir::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/static"))
-            .append_index_html_on_directories(true);
-
     // F-M8: an explicit loopback-only origin policy replaces
     // `CorsLayer::permissive()`. Only the verbs and headers the REST/SSE API
     // actually uses are allowed, and credentials are never reflected.
@@ -228,7 +219,7 @@ pub fn router(state: AppState) -> Router {
         // from the single route table in `openapi::ROUTES`.
         .merge(openapi::openapi_routes())
         .merge(protected)
-        .fallback_service(static_files)
+        .fallback(static_web_ui)
         // F-M10: bound the request body and give every handler a deadline.
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -1203,4 +1194,23 @@ fn task_entry_to_response(entry: ragent_agent::task::TaskEntry, background: bool
 
 fn event_matches_session(event: &Event, session_id: &str) -> bool {
     event.session_id() == Some(session_id)
+}
+
+/// The web UI page, embedded at compile time.
+///
+/// It used to be served with `ServeDir` from `env!("CARGO_MANIFEST_DIR")`,
+/// a path on the *build* machine, so every installed or relocated binary
+/// answered the UI with 404.
+const WEB_UI_INDEX_HTML: &str = include_str!("../static/index.html");
+
+/// Fallback for any path that matched no API route: serve the embedded web
+/// UI at `/` and `/index.html`, and 404 for everything else.
+///
+/// Axum >= 0.8 rejects `nest_service("/")` ("Nesting at the root is no
+/// longer supported"), so the UI is attached as the router fallback.
+async fn static_web_ui(uri: axum::http::Uri) -> Response {
+    match uri.path() {
+        "/" | "/index.html" => axum::response::Html(WEB_UI_INDEX_HTML).into_response(),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
 }

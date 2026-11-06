@@ -107,6 +107,10 @@ fn test_save_history_overwrites_previous() {
 #[cfg(unix)]
 #[test]
 fn test_save_history_permission_denied() {
+    if !crate::permission_bits_enforced() {
+        eprintln!("skipping: permission bits are not enforced for this user (root?)");
+        return;
+    }
     use std::os::unix::fs::PermissionsExt;
 
     let dir = TempDir::new().unwrap();
@@ -220,6 +224,10 @@ fn test_load_history_clears_previous_entries() {
 #[cfg(unix)]
 #[test]
 fn test_load_history_permission_denied() {
+    if !crate::permission_bits_enforced() {
+        eprintln!("skipping: permission bits are not enforced for this user (root?)");
+        return;
+    }
     use std::os::unix::fs::PermissionsExt;
 
     let dir = TempDir::new().unwrap();

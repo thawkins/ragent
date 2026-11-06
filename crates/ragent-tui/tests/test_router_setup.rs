@@ -679,6 +679,7 @@ async fn test_router_setup_empty_state_when_no_providers() {
     // Disable any concrete provider that might be auto-discovered from the
     // environment so the empty-state path is exercised deterministically.
     let mut app = make_app();
+    crate::without_host_providers(&mut app);
     for pid in ["ollama", "ollama_cloud", "copilot"] {
         let _ = app
             .storage
@@ -1060,6 +1061,7 @@ async fn test_provider_picker_router_opens_setup_router() {
 async fn test_provider_picker_router_no_concrete_providers_keeps_picker() {
     let storage = mem_storage();
     let mut app = make_app_with_storage(storage);
+    crate::without_host_providers(&mut app);
     // Suppress any provider that could be auto-discovered from the environment
     // so the empty-state path is exercised deterministically.
     for pid in [

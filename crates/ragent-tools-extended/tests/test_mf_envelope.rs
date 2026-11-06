@@ -1781,3 +1781,20 @@ fn test_page_metadata_default_all_none() {
     assert!(md.modified_time.is_none());
     assert!(md.author.is_none());
 }
+
+#[test]
+fn test_detect_redirect_reads_the_refresh_meta_not_the_first_meta() {
+    // Regression: the refresh delay used to be read from the page's FIRST
+    // `<meta>`. A leading `charset` tag (no `content`) made every refresh a
+    // redirect; a leading `viewport` tag hid a 0-second redirect.
+    let auto_refresh = r#"<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="60"></head><body>Auto-refresh page.</body></html>"#;
+    assert_ne!(
+        detect_page_type(auto_refresh, "https://example.com/page", 50),
+        PageType::Redirect
+    );
+    let redirect = r#"<html><head><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="0;url=https://other.com"></head><body>Redirecting...</body></html>"#;
+    assert_eq!(
+        detect_page_type(redirect, "https://example.com/old", 50),
+        PageType::Redirect
+    );
+}

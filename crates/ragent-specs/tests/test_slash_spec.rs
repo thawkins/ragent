@@ -1950,3 +1950,12 @@ fn test_build_quickstart_md_multiple_requirements_all_included() {
         );
     }
 }
+
+#[test]
+fn test_feedback_log_short_multibyte_note_is_not_marked_truncated() {
+    // 30 CJK characters are 90 bytes but well under the 80-character preview.
+    let note = "\u{65e5}".repeat(30);
+    let log = SpecCommand::build_feedback_log("myspec", &note);
+    assert!(log.ends_with(&note), "note must be shown whole: {log}");
+    assert!(!log.ends_with("..."), "no truncation marker: {log}");
+}

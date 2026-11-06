@@ -2065,6 +2065,44 @@ impl TaskStore {
     /// the add: removing a task is the creator's decision, and the tool is the
     /// only place that knows the task was a seed.
     pub async fn add_task(&self, task: Task) -> Result<HookOutcome> {
+        self.add_task_inner(|_| task)
+            .await
+            .map(|(_, outcome)| outcome)
+    }
+
+    /// Add a new task whose id is allocated as the next `task-NNN` while the
+    /// exclusive lock is held.
+    ///
+    /// Reading the next id and then calling [`TaskStore::add_task`] is a race:
+    /// two concurrent creators compute the same id and the loser is rejected
+    /// with a duplicate-id error it cannot act on. Allocating inside the lock
+    /// makes the id and the insert one step. Fires the same
+    /// [`HookEvent::TaskCreated`] hook as [`TaskStore::add_task`].
+    ///
+    /// # Arguments
+    ///
+    /// * `build` - Builds the task from its allocated id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lock, read, parse or write fails, or the hook
+    /// errors.
+    pub async fn add_task_with_next_id(
+        &self,
+        build: impl FnOnce(String) -> Task,
+    ) -> Result<(Task, HookOutcome)> {
+        self.add_task_inner(|list| build(next_task_id_in(list)))
+            .await
+    }
+
+    /// Shared body of [`TaskStore::add_task`] and
+    /// [`TaskStore::add_task_with_next_id`]: builds the task from the list
+    /// read under the exclusive lock, rejects a duplicate id, persists, and
+    /// fires the `TaskCreated` hook.
+    async fn add_task_inner(
+        &self,
+        build: impl FnOnce(&TaskList) -> Task,
+    ) -> Result<(Task, HookOutcome)> {
         let lock = self.acquire_lock(true)?;
 
         let raw = if self.path.exists() {
@@ -2073,6 +2111,7 @@ impl TaskStore {
             String::new()
         };
         let mut list: TaskList = parse_task_list(&self.path, &raw, "parse tasks.json")?;
+        let task = build(&list);
 
         if list.tasks.iter().any(|t| t.id == task.id) {
             drop(lock);
@@ -2087,7 +2126,8 @@ impl TaskStore {
         let result = Self::write_locked(&self.path, &list);
         drop(lock);
         result?;
-        fire_task_created_hook(&self.team_dir, &task).await
+        let outcome = fire_task_created_hook(&self.team_dir, &task).await?;
+        Ok((task, outcome))
     }
 
     /// Atomically pre-assign a pending task to an agent in `InProgress` state.
@@ -2246,4 +2286,19 @@ impl TaskStore {
         })
         .await?
     }
+}
+
+/// The next free `task-NNN` id in `list`: one past the highest numeric
+/// `task-` suffix, zero-padded to three digits.
+pub(crate) fn next_task_id_in(list: &TaskList) -> String {
+    let max = list
+        .tasks
+        .iter()
+        .filter_map(|t| {
+            t.id.strip_prefix("task-")
+                .and_then(|n| n.parse::<u32>().ok())
+        })
+        .max()
+        .unwrap_or(0);
+    format!("task-{:03}", max + 1)
 }

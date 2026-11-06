@@ -256,6 +256,10 @@ fn test_atomic_update_invalid_json_returns_error() {
 #[cfg(unix)]
 #[test]
 fn test_atomic_update_permission_denied() {
+    if !crate::permission_bits_enforced() {
+        eprintln!("skipping: permission bits are not enforced for this user (root?)");
+        return;
+    }
     use std::os::unix::fs::PermissionsExt;
 
     let dir = TempDir::new().unwrap();

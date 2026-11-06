@@ -934,6 +934,7 @@ async fn focused_message_without_a_team_or_member_reports_the_reason() {
     // Neither an absent team nor a stale focus id changes the destination: both
     // take the lead-session path and refuse for the ordinary reason.
     let mut app = new_app("s1");
+    crate::without_host_providers(&mut app);
     app.active_team = None;
     app.team_members = vec![member("swarm-s1", "tm-001")];
     app.focused_teammate = Some("tm-001".to_string());
@@ -947,6 +948,7 @@ async fn focused_message_without_a_team_or_member_reports_the_reason() {
     );
 
     let mut app = new_app("s1");
+    crate::without_host_providers(&mut app);
     app.active_team = Some(TeamConfig::new("team-a", "s1"));
     app.team_members = vec![member("swarm-s1", "tm-001")];
     app.focused_teammate = Some("tm-404".to_string());

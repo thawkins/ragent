@@ -128,6 +128,22 @@ async fn test_rollback_loop_failure_keeps_the_capture() -> Result<()> {
         perms.set_mode(0o500);
     }
     std::fs::set_permissions(dir.path(), perms.clone())?;
+    // A privileged user (root, CAP_DAC_OVERRIDE) writes through 0o500, so the
+    // restore cannot fail and the scenario under test does not exist there.
+    // Probe the real permission check rather than assuming it.
+    let probe = dir.path().join(".write-probe");
+    if std::fs::write(&probe, b"").is_ok() {
+        let _ = std::fs::remove_file(&probe);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut writable = std::fs::metadata(dir.path())?.permissions();
+            writable.set_mode(0o700);
+            std::fs::set_permissions(dir.path(), writable)?;
+        }
+        eprintln!("skipping: a read-only directory is still writable for this user");
+        return Ok(());
+    }
     processor.active_loop_captures.write().await.insert(
         "sess-rollback".to_string(),
         LoopCapture {

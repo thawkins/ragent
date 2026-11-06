@@ -39,6 +39,16 @@ fn render_app_to_string(app: &mut App) -> String {
     rows.join("\n")
 }
 
+/// Pin the host-derived status-bar fields to short values.
+///
+/// `support::make_app()` takes the cwd and git branch from the real process,
+/// so a long checkout path or branch name crowds the last-prompt tag off the
+/// 120-column top line and the assertion depends on where the test runs.
+fn pin_host_fields(app: &mut App) {
+    app.cwd = "/p".to_string();
+    app.git_branch = Some("main".to_string());
+}
+
 /// Find the character (column) index of `needle` in `row`.
 ///
 /// `str::find` returns a byte offset; the status bar contains multi-byte
@@ -128,6 +138,7 @@ async fn test_statusbar_renders_slash_command_tag() {
 #[tokio::test]
 async fn test_statusbar_slash_command_tag_truncated_like_prompts() {
     let mut app = support::make_app();
+    pin_host_fields(&mut app);
     // Unknown command suffix is ignored; `/about` keeps the status short so
     // the tag has room to render. The status-bar tag budget is 48 chars (the
     // production `prompt_display_text(&app.last_prompt, 48)` call).
@@ -150,6 +161,7 @@ async fn test_statusbar_slash_command_tag_truncated_like_prompts() {
 #[test]
 fn test_statusbar_renders_last_prompt_tag() {
     let mut app = support::make_app();
+    pin_host_fields(&mut app);
     // 60 chars exceeds the 48-char status-bar tag budget, so the rendered tag
     // is the first 48 chars plus the `....` truncation suffix.
     app.last_prompt = "x".repeat(60);

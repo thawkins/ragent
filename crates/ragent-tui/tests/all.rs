@@ -35,6 +35,80 @@ pub fn global_env_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// Disable, in `storage`, every provider the TUI would auto-detect from the
+/// host environment (a credential env var, the Bedrock `AWS_*` pair, or
+/// `OLLAMA_HOST`).
+///
+/// A CI runner or cloud container commonly exports `GITHUB_TOKEN` or AWS keys,
+/// which `App::detect_provider` reports as configured Copilot / Bedrock. A test
+/// asserting the "no provider" or "DB-stored provider" path calls this so it
+/// does not depend on the host. Uses the same `provider_<id>_disabled` setting
+/// the `/provider reset` flow writes, so no environment variable is mutated and
+/// no lock is needed. Providers stored in the DB by the test itself stay
+/// detectable unless their env var is also set on the host.
+pub fn disable_host_providers(storage: &ragent_storage::Storage) {
+    for (pid, _) in ragent_tui::app::PROVIDER_LIST {
+        let from_env = match *pid {
+            "bedrock" => {
+                std::env::var_os("AWS_ACCESS_KEY_ID").is_some()
+                    || std::env::var_os("AWS_SECRET_ACCESS_KEY").is_some()
+            }
+            "ollama" => std::env::var_os("OLLAMA_HOST").is_some(),
+            other => ragent_config::credential_env::provider_credential_env(other).is_some(),
+        };
+        if from_env {
+            storage
+                .set_setting(&format!("provider_{pid}_disabled"), "true")
+                .expect("disable host-detected provider");
+        }
+    }
+}
+
+/// [`disable_host_providers`] on `app.storage`, then re-run provider detection
+/// so `app.configured_provider` (computed when the app was built) reflects it.
+pub fn without_host_providers(app: &mut ragent_tui::App) {
+    disable_host_providers(&app.storage);
+    app.configured_provider = ragent_tui::App::detect_provider(&app.storage);
+}
+
+/// Whether POSIX permission bits actually deny this process.
+///
+/// Root (or any process with `CAP_DAC_OVERRIDE`) reads and writes through
+/// `0o000`/`0o500`, so a test that provokes a permission-denied error cannot
+/// observe one there. Such a test calls this first and skips, rather than
+/// failing for a reason unrelated to the code under test. Probed once per
+/// process by writing into a `0o500` directory under `target/temp`.
+///
+/// Off Unix there is no mode-bit model to bypass, so this reports `true`.
+#[cfg(not(unix))]
+pub fn permission_bits_enforced() -> bool {
+    true
+}
+
+/// See the non-Unix variant above for the contract.
+#[cfg(unix)]
+pub fn permission_bits_enforced() -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    static ENFORCED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENFORCED.get_or_init(|| {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/temp");
+        let Ok(()) = std::fs::create_dir_all(&root) else {
+            return true;
+        };
+        let Ok(dir) = tempfile::tempdir_in(&root) else {
+            return true;
+        };
+        let Ok(()) = std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500))
+        else {
+            return true;
+        };
+        let denied = std::fs::write(dir.path().join("probe"), b"").is_err();
+        let _ = std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700));
+        denied
+    })
+}
+
 #[path = "test_active_tasks_reconcile.rs"]
 mod test_active_tasks_reconcile;
 #[path = "test_agent_notice_separation.rs"]

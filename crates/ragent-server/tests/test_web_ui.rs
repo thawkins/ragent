@@ -76,3 +76,24 @@ async fn test_serve_dir_feature_enabled() {
     let resp = service.oneshot(req).await.expect("ServeDir responds");
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn test_root_serves_embedded_index_html() {
+    // The UI is embedded in the binary, so `/` must serve it regardless of
+    // the process working directory or where the binary was built.
+    let app = router(crate::support::test_state("tok"));
+    let req = Request::builder()
+        .uri("/")
+        .body(Body::empty())
+        .expect("build request");
+    let resp = app.oneshot(req).await.expect("route /");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let html = String::from_utf8_lossy(&body);
+    assert!(
+        html.contains("RAgent"),
+        "embedded index.html served: {html:.200}"
+    );
+}

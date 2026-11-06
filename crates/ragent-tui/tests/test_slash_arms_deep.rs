@@ -193,6 +193,10 @@ async fn team_delete_unknown_name_reports_load_failure() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn team_delete_reports_remove_failure() {
+    if !crate::permission_bits_enforced() {
+        eprintln!("skipping: permission bits are not enforced for this user (root?)");
+        return;
+    }
     let (_g, _e, temp, mut app) = team_app();
     active_team_on_disk(&mut app, "undeletable").await;
     let teams_dir = temp.path().join(".ragent/teams");
@@ -531,6 +535,10 @@ async fn init_config_reports_create_dir_error() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn init_config_reports_write_error() {
+    if !crate::permission_bits_enforced() {
+        eprintln!("skipping: permission bits are not enforced for this user (root?)");
+        return;
+    }
     use std::os::unix::fs::PermissionsExt as _;
 
     let (_g, _e, temp, mut app) = isolated_app();
@@ -1715,6 +1723,10 @@ async fn update_check_publishes_an_outcome() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn codeindex_on_and_off_report_unsaved_when_the_config_is_read_only() {
+    if !crate::permission_bits_enforced() {
+        eprintln!("skipping: permission bits are not enforced for this user (root?)");
+        return;
+    }
     use std::os::unix::fs::PermissionsExt as _;
 
     let (_g, _e, temp, mut app) = isolated_app();
@@ -1761,6 +1773,10 @@ async fn codeindex_graph_lang_reports_a_refused_spawn() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn codeindex_skillgen_reports_an_unwritable_skills_dir() {
+    if !crate::permission_bits_enforced() {
+        eprintln!("skipping: permission bits are not enforced for this user (root?)");
+        return;
+    }
     use std::os::unix::fs::PermissionsExt as _;
 
     let (_g, _e, _t, mut app) = isolated_app();
@@ -1800,6 +1816,10 @@ async fn mcp_discover_opens_the_discovery_state() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn router_reload_reports_a_read_error() {
+    if !crate::permission_bits_enforced() {
+        eprintln!("skipping: permission bits are not enforced for this user (root?)");
+        return;
+    }
     use std::os::unix::fs::PermissionsExt as _;
 
     let (_g, _e, _t, mut app) = isolated_app();

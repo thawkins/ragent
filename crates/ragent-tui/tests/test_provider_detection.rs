@@ -241,6 +241,7 @@ fn test_provider_source_equality() {
 #[test]
 fn test_detect_provider_fast_path_uses_cheap_source_without_gh() {
     let storage = mem_storage();
+    crate::disable_host_providers(&storage);
 
     // A provider detected from an explicit credential (env/DB) must be
     // returned by detect_provider.  No `gh auth token` subprocess is ever

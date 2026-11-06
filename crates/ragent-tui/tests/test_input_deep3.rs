@@ -275,6 +275,7 @@ async fn select_provider_enter_azure_resource_opens_resource_picker() {
 #[tokio::test]
 async fn select_provider_enter_router_without_providers_warns_and_stays() {
     let mut app = support::make_app();
+    crate::without_host_providers(&mut app);
     app.provider_setup = Some(ProviderSetupStep::SelectProvider {
         selected: provider_index("router"),
         force_key_entry: false,

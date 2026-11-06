@@ -281,7 +281,7 @@ pub fn detect_page_type(html: &str, url: &str, extracted_text_length: usize) -> 
         if html_lower.contains(indicator) {
             // Meta refresh with a very short delay (0-3 seconds) is a redirect.
             // Longer delays are just auto-refresh.
-            if let Some(content_attr) = find_meta_refresh_content(&html_lower) {
+            if let Some(content_attr) = find_meta_refresh_content(&html_lower, indicator) {
                 if parse_meta_refresh_seconds(&content_attr) <= 3 {
                     return PageType::Redirect;
                 }
@@ -372,8 +372,13 @@ pub fn detect_page_type(html: &str, url: &str, extracted_text_length: usize) -> 
 
 /// Extract the `content` attribute value from a `<meta http-equiv="refresh"
 /// content="...">` tag.
-fn find_meta_refresh_content(html_lower: &str) -> Option<String> {
-    let meta_start = html_lower.find("<meta")?;
+///
+/// `indicator` is the `http-equiv` attribute text that was found; the tag
+/// read is the `<meta` tag enclosing it, not merely the page's first `<meta`
+/// (which is usually `charset` or `viewport`).
+fn find_meta_refresh_content(html_lower: &str, indicator: &str) -> Option<String> {
+    let indicator_pos = html_lower.find(indicator)?;
+    let meta_start = html_lower[..indicator_pos].rfind("<meta")?;
     let meta_end = html_lower[meta_start..].find('>')? + meta_start;
     let meta_tag = &html_lower[meta_start..meta_end];
     let content_pos = meta_tag.find("content=")?;

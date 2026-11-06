@@ -465,3 +465,33 @@ async fn add_task_and_next_task_id_increment() {
         .expect("add task");
     assert_eq!(store.next_task_id().expect("second id"), "task-002");
 }
+
+/// Concurrent creators never collide on the same `task-NNN` id: the id is
+/// allocated under the task-store lock (regression for the read-then-add race).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_add_task_with_next_id_allocates_unique_ids_concurrently() {
+    let (manager, _tmp, _bus) = team_manager("race-team", "lead-1", true);
+    let store = std::sync::Arc::new(TeamStore::load(&manager.team_dir).expect("load"));
+
+    let mut handles = Vec::new();
+    for i in 0..8 {
+        let store = std::sync::Arc::clone(&store);
+        handles.push(tokio::spawn(async move {
+            store
+                .add_task_with_next_id(|id| Task::new(&id, &format!("t{i}")))
+                .await
+                .map(|(task, _)| task.id)
+        }));
+    }
+    let mut ids = Vec::new();
+    for handle in handles {
+        ids.push(handle.await.expect("join").expect("add task"));
+    }
+    ids.sort();
+    ids.dedup();
+    assert_eq!(
+        ids.len(),
+        8,
+        "every concurrent create gets its own id: {ids:?}"
+    );
+}

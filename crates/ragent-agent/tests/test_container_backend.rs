@@ -188,14 +188,18 @@ fn kind_maps_to_runtime_both_ways() {
 async fn missing_image_fails_provisioning_without_host_execution() {
     // A container backend with no image cannot provision; the dispatch fails with
     // a Provision error and the tool never runs on the host (FR-031).
-    if detect_container_runtime().is_none() {
+    // Use the runtime that is actually present: hard-coding `podman` on a
+    // docker-only host fails with "runtime not found" instead of exercising the
+    // missing-image path this test is about.
+    let Some(runtime) = detect_container_runtime() else {
         eprintln!("skipping: no container runtime on PATH");
         return;
-    }
+    };
     let (tool, runs) = NamedTool::new("Bash");
     let ctx = ctx();
-    let backend = ContainerBackend::from_descriptor(&descriptor("podman", None), &ctx.working_dir);
-    assert_eq!(backend.kind(), ExecutionBackendKind::Podman);
+    let backend =
+        ContainerBackend::from_descriptor(&descriptor(runtime.as_str(), None), &ctx.working_dir);
+    assert_eq!(backend.kind(), runtime.kind());
 
     let err = ExecutionBackend::execute_tool(
         &backend,

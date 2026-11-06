@@ -2274,8 +2274,10 @@ Use the `Write` tool to create all three files. Ensure the spec is clear, testab
     pub fn build_feedback_log(spec_id: &str, note: &str) -> String {
         // Truncate very long notes in the log for readability, stopping at a
         // character boundary (a raw byte slice panics when the cut byte falls
-        // inside a multi-byte character).
-        let preview: String = if note.len() > NOTE_LOG_PREVIEW_LEN {
+        // inside a multi-byte character). The length test counts characters,
+        // like the cut: a byte test appended `...` to a short multi-byte note
+        // that was never cut.
+        let preview: String = if note.chars().count() > NOTE_LOG_PREVIEW_LEN {
             let cut = note
                 .char_indices()
                 .nth(NOTE_LOG_TRUNCATED_LEN)

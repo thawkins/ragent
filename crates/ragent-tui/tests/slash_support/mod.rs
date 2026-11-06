@@ -26,24 +26,50 @@ pub fn test_lock() -> MutexGuard<'static, ()> {
     crate::global_env_lock()
 }
 
-/// Restores cwd and config-related env vars on drop.
+/// Environment variables that make the TUI treat a provider as configured
+/// (`App::detect_provider`): every provider's credential variables plus the
+/// Bedrock (`AWS_*`) and Ollama (`OLLAMA_HOST`) probes.
+///
+/// [`enter_project`] clears them so a fixture that "configures no provider"
+/// does not inherit one from the host (a CI runner or cloud container commonly
+/// exports `GITHUB_TOKEN` or AWS keys).
+fn provider_env_vars() -> Vec<&'static str> {
+    let mut vars: Vec<&'static str> = ragent_tui::app::PROVIDER_LIST
+        .iter()
+        .flat_map(|(pid, _)| ragent_config::credential_env::provider_credential_env_vars(pid))
+        .copied()
+        .collect();
+    vars.extend(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "OLLAMA_HOST"]);
+    vars.sort_unstable();
+    vars.dedup();
+    vars
+}
+
+/// Restores cwd and config- and provider-related env vars on drop.
 pub struct EnvGuard {
     keys: Vec<(&'static str, Option<String>)>,
     cwd: std::path::PathBuf,
 }
 
 impl EnvGuard {
-    /// Capture the current config env vars and cwd for restoration on drop.
+    /// Capture the current config and provider env vars and cwd for
+    /// restoration on drop.
     pub fn new() -> Self {
+        let mut keys = vec![
+            ("XDG_CONFIG_HOME", std::env::var("XDG_CONFIG_HOME").ok()),
+            ("RAGENT_CONFIG", std::env::var("RAGENT_CONFIG").ok()),
+            (
+                "RAGENT_CONFIG_CONTENT",
+                std::env::var("RAGENT_CONFIG_CONTENT").ok(),
+            ),
+        ];
+        keys.extend(
+            provider_env_vars()
+                .into_iter()
+                .map(|k| (k, std::env::var(k).ok())),
+        );
         Self {
-            keys: vec![
-                ("XDG_CONFIG_HOME", std::env::var("XDG_CONFIG_HOME").ok()),
-                ("RAGENT_CONFIG", std::env::var("RAGENT_CONFIG").ok()),
-                (
-                    "RAGENT_CONFIG_CONTENT",
-                    std::env::var("RAGENT_CONFIG_CONTENT").ok(),
-                ),
-            ],
+            keys,
             cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         }
     }
@@ -68,7 +94,8 @@ impl Drop for EnvGuard {
 }
 
 /// Enter an isolated tempdir project with the given `.ragent/ragent.json`
-/// contents, isolated `XDG_CONFIG_HOME`, and cleared `RAGENT_CONFIG*`.
+/// contents, isolated `XDG_CONFIG_HOME`, cleared `RAGENT_CONFIG*`, and no
+/// provider credentials inherited from the host environment.
 ///
 /// The returned guard must be bound (`let (_guard, _env, _temp) = ...`) so the
 /// cwd/env restoration survives the test body.
@@ -80,6 +107,9 @@ pub fn enter_project(config: &str) -> (MutexGuard<'static, ()>, EnvGuard, tempfi
     unsafe { std::env::set_var("XDG_CONFIG_HOME", temp.path().join(".config")) };
     unsafe { std::env::remove_var("RAGENT_CONFIG") };
     unsafe { std::env::remove_var("RAGENT_CONFIG_CONTENT") };
+    for key in provider_env_vars() {
+        unsafe { std::env::remove_var(key) };
+    }
     std::env::set_current_dir(temp.path()).expect("set cwd");
 
     let ragent_dir = temp.path().join(".ragent");

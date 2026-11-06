@@ -28,7 +28,7 @@ use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{AgentMode, ModelRef};
-use crate::event::{Event, EventBus};
+use crate::event::{Event, EventBus, FinishReason};
 use crate::session::processor::SessionProcessor;
 
 /// Persist a completed sub-agent's FULL untruncated output to
@@ -616,24 +616,42 @@ impl AgentManager {
         match result {
             Ok(response) => {
                 let summary = truncate_str(&response, 2000).into_owned();
+                // The loop returns `Ok` for a cancelled turn too; the recorded
+                // terminal reason is what tells a cancel from a real finish.
+                let reason = self.processor.last_message_end_reason(&child_sid);
+                let cancelled = matches!(reason, Some(FinishReason::Cancelled));
                 {
                     if let Some(mut entry) = self.tasks.get_mut(&task_id) {
-                        entry.status = TaskStatus::Completed;
+                        entry.status = if cancelled {
+                            TaskStatus::Cancelled
+                        } else {
+                            TaskStatus::Completed
+                        };
                         entry.result = Some(Arc::from(response.as_str()));
                         entry.completed_at = Some(Utc::now());
                     }
                 }
                 self.cancel_flags.remove(&task_id);
                 self.suspend_flags.remove(&child_sid);
-                self.event_bus.publish(Event::SubagentComplete {
-                    session_id: parent_session_id.to_string(),
-                    task_id: task_id.clone(),
-                    child_session_id: child_sid.clone(),
-                    summary,
-                    success: true,
-                    duration_ms,
-                    finish_reason: "stop".to_string(),
-                });
+                if cancelled {
+                    self.event_bus.publish(Event::SubagentCancelled {
+                        session_id: parent_session_id.to_string(),
+                        task_id: task_id.clone(),
+                    });
+                } else {
+                    self.event_bus.publish(Event::SubagentComplete {
+                        session_id: parent_session_id.to_string(),
+                        task_id: task_id.clone(),
+                        child_session_id: child_sid.clone(),
+                        summary,
+                        success: true,
+                        duration_ms,
+                        finish_reason: reason
+                            .as_ref()
+                            .map_or("stop", crate::session::finish_reason_label)
+                            .to_string(),
+                    });
+                }
 
                 let entry = self
                     .tasks
@@ -947,6 +965,28 @@ impl AgentManager {
             let duration_ms = start.elapsed().as_millis() as u64;
 
             match result {
+                Ok(_)
+                    if matches!(
+                        processor.last_message_end_reason(&csid_for_reason),
+                        Some(FinishReason::Cancelled)
+                    ) =>
+                {
+                    // The loop returns `Ok` for a cancelled turn; record it as
+                    // the cancel it was, exactly as the cancelled `Err` arm
+                    // below does, not as a successful completion.
+                    if let Some(mut entry) = tasks.get_mut(&tid) {
+                        entry.status = TaskStatus::Cancelled;
+                        entry.completed_at = Some(Utc::now());
+                    }
+                    cancel_flags.remove(&tid);
+                    if let Some(child) = tasks.get(&tid).map(|e| e.child_session_id.clone()) {
+                        suspend_flags.remove(&child);
+                    }
+                    event_bus.publish(Event::SubagentCancelled {
+                        session_id: parent_sid,
+                        task_id: tid,
+                    });
+                }
                 Ok(response) => {
                     let summary = truncate_str(&response, 2000).into_owned();
                     // Report the real loop outcome: before this fix every
@@ -981,7 +1021,8 @@ impl AgentManager {
                         tracing::warn!(
                             task_id = %tid,
                             dir = %report_dir.join("log").join("subagents").display(),
-                            "sub-agent report could not be persisted; the result                              is only available in memory and will not survive                              a restart"
+                            "sub-agent report could not be persisted; the result is only \
+                             available in memory and will not survive a restart"
                         );
                     }
                     {
@@ -1008,11 +1049,8 @@ impl AgentManager {
                     });
                 }
                 Err(e) => {
-                    // M7-T4: Use typed cancellation detection instead of
-                    // fragile string matching. The processor returns a
-                    // Cancelled error variant when the cancel flag is
-                    // set; we check for that rather than
-                    // `error_msg.contains("cancelled")`.
+                    // A cancellation that surfaced as an error (see
+                    // `is_cancel_error` for what that matches).
                     let is_cancelled = is_cancel_error(&e);
                     let error_msg = e.to_string();
                     {
@@ -1634,34 +1672,18 @@ fn truncate_str(s: &str, max_len: usize) -> std::borrow::Cow<'_, str> {
     }
 }
 
-/// M7-T4: Typed cancellation detection.
+/// Whether a sub-agent run's error is a cancellation.
 ///
-/// Instead of checking `error_msg.contains("cancelled")`, we inspect the
-/// error's type chain for the processor's cancellation error. This is
-/// robust to wording changes in the error message.
-///
-/// The processor signals cancellation by returning an error whose
-/// `to_string()` contains "cancelled" OR whose type name contains
-/// "Cancelled" (via `anyhow`'s chain). We check both paths for robustness:
-/// - The `anyhow::Error::chain()` lets us inspect each error's type name.
-/// - As a fallback, we also check the debug representation, since the
-///   processor's `FinishReason::Cancelled` may appear in the error chain.
+/// A cancel request normally ends the loop with `Ok` and a recorded
+/// [`FinishReason::Cancelled`] (checked in the `Ok` arms). The `Err` path is
+/// reached when a cancellation surfaces as an error instead, for example
+/// `compaction cancelled` from the compaction stage. There is no typed
+/// cancellation error to downcast to, so this matches "cancelled" in the
+/// Display text of any error in the chain (`chain()` includes the top-level
+/// error itself).
 fn is_cancel_error(err: &anyhow::Error) -> bool {
-    // Check the error chain for a "Cancelled" type name or a
-    // "cancelled" in any error's Display string. `chain()` includes
-    // the top-level error itself, so the extra top-level check below
-    // is unnecessary.
-    for source in err.chain() {
-        let type_name = std::any::type_name_of_val(source);
-        if type_name.contains("Cancelled") {
-            return true;
-        }
-        let display = source.to_string();
-        if display.to_lowercase().contains("cancelled") {
-            return true;
-        }
-    }
-    false
+    err.chain()
+        .any(|source| source.to_string().to_lowercase().contains("cancelled"))
 }
 
 #[cfg(test)]

@@ -646,3 +646,51 @@ async fn suspended_task_still_occupies_the_limit() {
     let resumed = mgr.limit_report().await;
     assert_eq!((resumed.occupancy, resumed.headroom), (1, 0));
 }
+
+/// A cancelled sync sub-agent is recorded as `Cancelled`, not `Completed`.
+///
+/// Regression: the processor's cancel path returns `Ok`, and the sync spawn
+/// path used to treat every `Ok` as a successful completion.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_sync_task_is_recorded_as_cancelled() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(256));
+    let (mgr, _captured) = make_suspension_fixture(
+        event_bus,
+        vec![think_call(), ScriptedReply::TextOnly("late")],
+    )
+    .await;
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let handle = spawn_turn(&mgr, dir.path());
+
+    let task_id = poll_until(
+        || {
+            mgr.tasks_snapshot()
+                .now_or_never()?
+                .into_iter()
+                .find(|e| e.status == TaskStatus::Running)
+                .map(|e| e.id.clone())
+        },
+        "running task entry",
+    )
+    .await;
+    // Park the loop first so the cancel deterministically lands mid-turn.
+    mgr.suspend_task(&task_id)
+        .await
+        .expect("suspend a running task");
+    mgr.cancel_agent(&task_id)
+        .await
+        .expect("cancel a suspended task");
+
+    let result = tokio::time::timeout(std::time::Duration::from_secs(15), handle)
+        .await
+        .expect("cancelled turn ended promptly")
+        .expect("spawn_sync join")
+        .expect("cancel path returns Ok");
+    assert_eq!(
+        result.entry.status,
+        TaskStatus::Cancelled,
+        "a cancelled sub-agent must not be reported as completed"
+    );
+    Ok(())
+}

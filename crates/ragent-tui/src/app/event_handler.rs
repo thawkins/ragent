@@ -1172,15 +1172,7 @@ impl App {
                 // Show a short transient toast in the status bar.  We deliberately
                 // omit the "[warn]" prefix so that `arm_status_expiry()` will
                 // auto-clear the toast after the standard grace period.
-                let short_reason = if stderr.len() > 80 {
-                    let mut end = 80;
-                    while end > 0 && !stderr.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    format!("{}...", &stderr[..end])
-                } else {
-                    stderr.clone()
-                };
+                let short_reason = ragent_types::strutil::truncate_bytes(stderr, 80);
                 self.status = format!("hook warning: {} - {}", tool, short_reason);
                 self.arm_status_expiry();
                 self.push_log_no_agent(
@@ -2084,15 +2076,7 @@ impl App {
                     .map(|(name, score)| format!("{}={:.2}", name, score))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let prompt_display = if prompt.chars().count() > 80 {
-                    let mut end = 80;
-                    while end > 0 && !prompt.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    format!("{}...", &prompt[..end])
-                } else {
-                    prompt.clone()
-                };
+                let prompt_display = ragent_types::strutil::truncate_bytes(prompt, 80);
                 let fallback_note = requested_tier
                     .as_ref()
                     .filter(|rt| rt.as_str() != tier.as_str())

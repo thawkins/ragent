@@ -439,29 +439,46 @@ impl TeamStore {
     /// `team_task_create` tool and the `team_create` seed path alike - runs the
     /// same gate (spec `teamssetup` FR-017).
     pub async fn add_task(&self, task: Task) -> Result<HookOutcome> {
+        self.initialised_task_store()?.add_task(task).await
+    }
+
+    /// Add a task whose `task-NNN` id is allocated under the task-store lock,
+    /// so concurrent creators never compute the same id. See
+    /// [`TaskStore::add_task_with_next_id`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `tasks.json` cannot be initialised, locked, read
+    /// or written, or the `TaskCreated` hook errors.
+    pub async fn add_task_with_next_id(
+        &self,
+        build: impl FnOnce(String) -> Task,
+    ) -> Result<(Task, HookOutcome)> {
+        self.initialised_task_store()?
+            .add_task_with_next_id(build)
+            .await
+    }
+
+    /// The team's [`TaskStore`], creating an empty `tasks.json` first when the
+    /// team has none yet.
+    fn initialised_task_store(&self) -> Result<TaskStore> {
         let task_path = self.dir.join("tasks.json");
         if !task_path.exists() {
             let initial = TaskList::new(&self.config.name);
             fs::write(&task_path, serde_json::to_string_pretty(&initial)?)
                 .with_context(|| format!("initialise {}", task_path.display()))?;
         }
-        self.task_store()?.add_task(task).await
+        self.task_store()
     }
 
     /// Generate the next available task ID in the form `task-NNN`.
+    ///
+    /// Only a snapshot: a concurrent creator can take the same id before it
+    /// is used. Creators allocate through [`TeamStore::add_task_with_next_id`].
     pub fn next_task_id(&self) -> Result<String> {
         let store = self.task_store()?;
         let list = store.read()?;
-        let max = list
-            .tasks
-            .iter()
-            .filter_map(|t| {
-                t.id.strip_prefix("task-")
-                    .and_then(|n| n.parse::<u32>().ok())
-            })
-            .max()
-            .unwrap_or(0);
-        Ok(format!("task-{:03}", max + 1))
+        Ok(crate::team::task::next_task_id_in(&list))
     }
 
     /// Generate the next available agent ID in the form `tm-NNN`.

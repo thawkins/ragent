@@ -91,20 +91,32 @@ impl Tool for TeamTaskCreateTool {
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
         let store = TeamStore::load(&team_dir)?;
-        let task_id = store.next_task_id()?;
-
-        let mut task = Task::new(&task_id, title);
-        task.description = description.clone();
-        task.depends_on = depends_on.clone();
 
         // FR-017: the `TaskCreated` hook fires from the task store's mutation
         // path, not from here, so a task seeded by `team_create` fires it too.
-        let outcome = store.add_task(task).await?;
+        // The id is allocated under the store lock, so two concurrent creates
+        // never collide on the same `task-NNN`.
+        let (task, outcome) = store
+            .add_task_with_next_id(|task_id| {
+                let mut task = Task::new(&task_id, title);
+                task.description = description.clone();
+                task.depends_on = depends_on.clone();
+                task
+            })
+            .await?;
+        let task_id = task.id;
 
         if let HookOutcome::Feedback(feedback) = outcome {
-            // Hook rejected creation - remove the task.
+            // Hook rejected creation - remove the task. A failed removal leaves
+            // the task on the board, so it must not be silent.
             let task_store = TaskStore::open(&team_dir)?;
-            let _ = task_store.remove_task(&task_id);
+            if let Err(e) = task_store.remove_task(&task_id) {
+                tracing::warn!(
+                    task_id = %task_id,
+                    error = %e,
+                    "could not remove task rejected by the TaskCreated hook"
+                );
+            }
             return Ok(ToolOutput {
                 content: format!(
                     "TaskCreated hook rejected task '{task_id}'. \

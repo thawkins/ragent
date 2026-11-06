@@ -1297,6 +1297,60 @@ impl SessionProcessor {
         .await;
     }
 
+    /// End a turn that stopped early - a cancel request, a human interrupt, or
+    /// the tool watchdog - with the one shared epilogue.
+    ///
+    /// Persists the partial assistant message, records
+    /// [`FinishReason::Cancelled`] as the session's terminal reason (so the
+    /// task registry reports the sub-agent as cancelled rather than a healthy
+    /// `stop`), publishes `MessageEnd`, and logs the interruption to the
+    /// activity log. A storage failure is logged and does not skip the
+    /// `MessageEnd`: an early return there would leave the UI with an open
+    /// message.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - Session whose turn is ending.
+    /// * `assistant_parts` - Parts accumulated so far for the assistant message.
+    /// * `assistant_msg_id` - Id of the placeholder assistant message.
+    /// * `run_id` - Activity-log run the termination is recorded against.
+    async fn finish_cancelled_turn(
+        &self,
+        session_id: &str,
+        assistant_parts: Arc<Vec<MessagePart>>,
+        assistant_msg_id: String,
+        run_id: &ragent_types::id::RunId,
+    ) {
+        let parts_owned = Arc::try_unwrap(assistant_parts).unwrap_or_else(|arc| (*arc).clone());
+        let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
+        assistant_msg.id = assistant_msg_id;
+        let message_id = assistant_msg.id.clone();
+        if let Err(e) = self
+            .storage_op(move |s| s.update_message(&assistant_msg))
+            .await
+        {
+            tracing::warn!(error = %e, "cancelled-turn message persistence failed");
+        }
+        self.last_message_end_reason
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(session_id.to_string(), FinishReason::Cancelled);
+        self.event_bus.publish(Event::MessageEnd {
+            session_id: session_id.to_string(),
+            message_id,
+            reason: FinishReason::Cancelled,
+        });
+        let run_id = run_id.clone();
+        self.record_activity_event(move |log| {
+            log.record_termination(
+                &run_id,
+                ragent_types::activity::TerminationReason::Interrupted,
+            )
+            .map(Some)
+        })
+        .await;
+    }
+
     /// Record an activity-log event if logging is enabled.
     ///
     /// This is a no-op when [`ragent_config::activity_log::is_enabled`]
@@ -2354,28 +2408,8 @@ impl SessionProcessor {
                     cumulative_model_wait_ms,
                     other_ms
                 );
-                let parts_owned = std::sync::Arc::try_unwrap(assistant_parts)
-                    .unwrap_or_else(|arc| (*arc).clone());
-                let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
-                assistant_msg.id = assistant_msg_id;
-                let cancelled_id = assistant_msg.id.clone();
-                self.storage_op(move |s| s.update_message(&assistant_msg))
-                    .await?;
-                self.event_bus.publish(Event::MessageEnd {
-                    session_id: session_id.to_string(),
-                    message_id: cancelled_id,
-                    reason: FinishReason::Cancelled,
-                });
-                // Activity log: record interruption on cancel.
-                let run_id_for_cancel = run_id.clone();
-                self.record_activity_event(move |log| {
-                    log.record_termination(
-                        &run_id_for_cancel,
-                        ragent_types::activity::TerminationReason::Interrupted,
-                    )
-                    .map(Some)
-                })
-                .await;
+                self.finish_cancelled_turn(session_id, assistant_parts, assistant_msg_id, &run_id)
+                    .await;
                 tokio::task::yield_now().await;
                 publish_run_cost_summary(total_elapsed_ms);
                 return Ok(Message::new(session_id, Role::Assistant, vec![]));
@@ -3990,28 +4024,8 @@ impl SessionProcessor {
         // and resumable.
         if loop_interrupted {
             let total_elapsed_ms = total_start.elapsed().as_millis() as u64;
-            let parts_owned =
-                std::sync::Arc::try_unwrap(assistant_parts).unwrap_or_else(|arc| (*arc).clone());
-            let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
-            assistant_msg.id = assistant_msg_id;
-            let interrupted_id = assistant_msg.id.clone();
-            self.storage_op(move |s| s.update_message(&assistant_msg))
-                .await?;
-            self.event_bus.publish(Event::MessageEnd {
-                session_id: session_id.to_string(),
-                message_id: interrupted_id,
-                reason: FinishReason::Cancelled,
-            });
-            // Activity log: record the user interruption.
-            let run_id_for_interrupt = run_id.clone();
-            self.record_activity_event(move |log| {
-                log.record_termination(
-                    &run_id_for_interrupt,
-                    ragent_types::activity::TerminationReason::Interrupted,
-                )
-                .map(Some)
-            })
-            .await;
+            self.finish_cancelled_turn(session_id, assistant_parts, assistant_msg_id, &run_id)
+                .await;
             tokio::task::yield_now().await;
             publish_run_cost_summary(total_elapsed_ms);
             return Ok(Message::new(session_id, Role::Assistant, vec![]));
@@ -4022,34 +4036,8 @@ impl SessionProcessor {
         // watchdog-forced stop), and return a fatal error for the run.
         if watchdog_timed_out {
             let total_elapsed_ms = total_start.elapsed().as_millis() as u64;
-            let parts_owned =
-                std::sync::Arc::try_unwrap(assistant_parts).unwrap_or_else(|arc| (*arc).clone());
-            let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
-            assistant_msg.id = assistant_msg_id;
-            let msg_id = assistant_msg.id.clone();
-            // Best-effort cancelled-turn persistence; log a failure rather
-            // than swallowing it so a broken write is visible.
-            if let Err(e) = self
-                .storage_op(move |s| s.update_message(&assistant_msg))
-                .await
-            {
-                tracing::warn!(error = %e, "cancelled-turn message persistence failed");
-            }
-            self.event_bus.publish(Event::MessageEnd {
-                session_id: session_id.to_string(),
-                message_id: msg_id,
-                reason: FinishReason::Cancelled,
-            });
-            // Activity log: record interruption on watchdog timeout.
-            let run_id_for_watchdog = run_id.clone();
-            self.record_activity_event(move |log| {
-                log.record_termination(
-                    &run_id_for_watchdog,
-                    ragent_types::activity::TerminationReason::Interrupted,
-                )
-                .map(Some)
-            })
-            .await;
+            self.finish_cancelled_turn(session_id, assistant_parts, assistant_msg_id, &run_id)
+                .await;
             tokio::task::yield_now().await;
             publish_run_cost_summary(total_elapsed_ms);
             // T-007 (FR-011): a watchdog abort is an unrecoverable tool-stage
