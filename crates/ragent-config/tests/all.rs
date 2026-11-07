@@ -93,6 +93,9 @@ mod test_loop_config;
 #[path = "test_merge_project_privileged.rs"]
 mod test_merge_project_privileged;
 
+#[path = "test_mcp_type_default.rs"]
+mod test_mcp_type_default;
+
 #[path = "test_ms0_config_guards.rs"]
 mod test_ms0_config_guards;
 

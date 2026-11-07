@@ -350,10 +350,19 @@ async fn robots_allows(url: &str) -> bool {
     {
         Ok(allowed) => allowed,
         Err(err) => {
-            tracing::warn!(url = url, error = %err, "govcreate: robots.txt check failed; allowing by default");
+            tracing::warn!(url = %masked_url(url), error = %err, "govcreate: robots.txt check failed; allowing by default");
             true
         }
     }
+}
+
+/// `url = url` for a tracing event, with credentials masked.
+///
+/// A gathered source URL routinely carries `?access_token=...` or
+/// `user:pass@host`; the warn paths fire on every robots.txt failure, so a raw
+/// value would persist a presigned token in the log.
+fn masked_url(url: &str) -> String {
+    ragent_types::sanitize::mask_url_credentials(url)
 }
 
 /// Normalise a crawl result into a [`GatheredCorpus`] (FR-004, FR-016).

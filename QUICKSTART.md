@@ -492,7 +492,7 @@ the user-global `~/.config/ragent/ragent.json`. Rejected keys are logged at
   // refuses to start the surface.
   "openai": {
     "enabled": true,
-    "token": "sk-ragent-local"
+    "token": "[REDACTED]"
   },
 
   // UI internationalisation (optional). A non-English ambient `LANG` with an
@@ -1440,6 +1440,19 @@ HTTP alongside stdio:
 }
 ```
 
+`type` is optional and defaults to `stdio`, matching every other MCP client, so
+a command-launched server needs no transport key:
+
+```json
+{
+  "mcp": {
+    "my-stdio-server": { "command": "npx", "args": ["-y", "some-mcp-server"] }
+  }
+}
+```
+
+A config that is written back still carries an explicit `"type": "stdio"`.
+
 ### ACP server for IDE clients (`ragent acp-server`)
 
 ragent can serve the Agent Client Protocol (ACP) over stdio so an ACP-capable
@@ -2326,6 +2339,61 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.164
+
+- **An unattended sub-agent's write scope is now derived from a complete
+  read/write classification** - `READ_ONLY_PERMISSION_CATEGORIES` names every
+  read category the registry declares (`git:read`, `github:read`, `gitlab:read`,
+  `cron:read`, `agent:read`, `team:read`, `model:read`, `web:read`, plus `task`
+  and `system`). Previously a pure inspection sub-agent (`explore`, a plan
+  reviewer) offered only `git_status` or `github_list_issues` was classified
+  write-capable and handed the YOLO write scope instead of the ordinary prompt
+  policy. `tests/test_read_only_permission_categories.rs` keeps the list honest:
+  the registry's category vocabulary must stay closed, and the named read and
+  write surfaces must keep their classification.
+- **An MCP server entry no longer needs a `"type"`** - it defaults to `stdio`,
+  matching every other MCP client, so
+  `{"command": "npx", "args": ["-y", "server"]}` loads. The default applies to
+  the `mcp` section of `ragent.json`, plugin `mcpServers` bridges and connector
+  server entries alike, and a config written back still names its transport
+  explicitly.
+- **`--dry-run` no longer echoes credentials from a broken config**, the
+  background-task spawn log and the crawl/fetch URL warns mask URL userinfo and
+  the query string (`ragent_types::sanitize::mask_url_credentials`), and two
+  derived `Debug` impls that printed live secrets (`ragent_hyperresearch::Config`
+  provider keys, the Copilot `DeviceFlowStart` device code) are hand-written to
+  redact.
+- **A `GITLAB_URL` that is not `https` (or `http` on loopback) is refused by
+  name** - the value decides where the `PRIVATE-TOKEN` header is sent, so an
+  unvalidated environment value was a credential-exfiltration vector. One shared
+  rule (`ragent_types::url_validation`) covers the env var, the `ragent.json`
+  entry and an explicit `/reverse` host.
+- **`ragent config show | head -1` and `hyperresearch --help | head -1` exit
+  0** instead of aborting with `failed printing to stdout: Broken pipe`; the
+  broken-pipe-safe macro family moved into `ragent_types::cli_out`.
+- **`.gitignore` now ignores `*.zip`, `*.tar.gz` and `*.tgz`** (with the two
+  connector test fixtures explicitly re-included), so a credential-bearing
+  archive cannot be committed silently.
+
+## Version 1.0.163
+
+- **`/research deck <name>` exports a real `.pptx`** - the command-driven
+  DeckCraft sink sent `presentation.new` / `presentation.save`, which DeckCraft
+  does not implement (its ids are `file.new` / `file.save`), and
+  `McpClient::call_tool` ignored an `is_error` result, so the export reported a
+  misleading success and wrote nothing. It now honours `is_error`, surfaces the
+  server's own wording, and drives a command-channel server through its wrapper
+  tools. Verified end to end:
+  `ragent research deck aisurvey --force` writes a 15-slide
+  `DECK-2026-11-04.pptx` beside the markdown deck.
+- **Decks group findings under the report's concepts** - one slide per concept
+  carrying its name, status tag, definition and the findings that belong to it;
+  a finding no concept claims lands on an `Other Findings` slide, so every
+  finding appears exactly once. `Top 10 Implications` and `Open Questions` are
+  no longer deck elements.
+- **`calamine` 0.37 -> 0.38** clears RUSTSEC-2026-0436 (panic and unbounded
+  allocation in the CFB/OLE2 parser).
 
 ## Version 1.0.161
 

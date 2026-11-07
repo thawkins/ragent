@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use ragent_tools_extended::storage::{EmbeddingMatch, MemoryRow, StorageBackend, TaskRow};
+use ragent_tools_extended::storage::{MemoryRow, StorageBackend, TaskRow};
 use ragent_tools_extended::{ToolContext, ToolRegistry, create_extended_registry};
 use ragent_types::event::EventBus;
 use serde_json::json;
@@ -151,21 +151,6 @@ impl StorageBackend for MinimalStorage {
     fn list_memories(&self, _p: &str, _l: usize) -> anyhow::Result<Vec<MemoryRow>> {
         Ok(vec![])
     }
-    fn store_memory_embedding(&self, _id: i64, _b: &[u8]) -> anyhow::Result<bool> {
-        Ok(false)
-    }
-    fn list_memory_embeddings(&self) -> anyhow::Result<Vec<(i64, Vec<u8>)>> {
-        Ok(vec![])
-    }
-    fn search_memories_by_embedding(
-        &self,
-        _q: &[f32],
-        _d: usize,
-        _l: usize,
-        _m: f32,
-    ) -> anyhow::Result<Vec<EmbeddingMatch>> {
-        Ok(vec![])
-    }
 }
 
 #[test]
@@ -264,21 +249,6 @@ fn test_storage_default_create_task_simple_delegates_to_full_create_task() {
             Ok(vec![])
         }
         fn list_memories(&self, _p: &str, _l: usize) -> anyhow::Result<Vec<MemoryRow>> {
-            Ok(vec![])
-        }
-        fn store_memory_embedding(&self, _id: i64, _b: &[u8]) -> anyhow::Result<bool> {
-            Ok(false)
-        }
-        fn list_memory_embeddings(&self) -> anyhow::Result<Vec<(i64, Vec<u8>)>> {
-            Ok(vec![])
-        }
-        fn search_memories_by_embedding(
-            &self,
-            _q: &[f32],
-            _d: usize,
-            _l: usize,
-            _m: f32,
-        ) -> anyhow::Result<Vec<EmbeddingMatch>> {
             Ok(vec![])
         }
     }

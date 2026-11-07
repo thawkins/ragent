@@ -128,3 +128,43 @@ fn decode_error_display_never_produces_empty_text() {
         );
     }
 }
+
+#[test]
+fn no_parameters_schema_declares_an_object_with_no_properties() {
+    use ragent_types::tool_args::no_parameters_schema;
+
+    let schema = no_parameters_schema();
+    assert_eq!(schema["type"], json!("object"));
+    assert_eq!(schema["properties"], json!({}));
+    // Load-bearing: the registry refuses an undeclared property only when the
+    // schema declares that no property exists. A copy that drifted to `true`
+    // would let a model send arguments a parameterless tool silently ignores.
+    assert_eq!(schema["additionalProperties"], json!(false));
+}
+
+#[test]
+fn no_parameters_schema_is_exactly_three_keys() {
+    use ragent_types::tool_args::no_parameters_schema;
+
+    let schema = no_parameters_schema();
+    let object = schema.as_object().expect("schema is an object");
+    let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["additionalProperties", "properties", "type"],
+        "a parameterless schema that grows a key is no longer parameterless"
+    );
+}
+
+#[test]
+fn no_parameters_schema_is_stable_across_calls() {
+    use ragent_types::tool_args::no_parameters_schema;
+
+    assert_eq!(
+        no_parameters_schema(),
+        no_parameters_schema(),
+        "every call must build the same schema, or two parameterless tools \
+         would publish different contracts"
+    );
+}

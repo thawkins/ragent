@@ -840,20 +840,14 @@ start if any are present.
 
 ### 7.16 `memory`
 
-Memory system configuration: blocks, structured store, semantic search,
-retrieval, auto-extraction, decay, and cross-project sharing.
+Memory system configuration: blocks, structured store, retrieval,
+auto-extraction, decay, and cross-project sharing.
 
 ```json
 {
   "memory": {
     "enabled": true,
-    "tier": "core",
     "structured": { "enabled": true },
-    "semantic": {
-      "enabled": false,
-      "model": "all-MiniLM-L6-v2",
-      "dimensions": 384
-    },
     "retrieval": {
       "max_memories_per_prompt": 100,
       "max_memory_tokens": 4000,
@@ -882,10 +876,8 @@ retrieval, auto-extraction, decay, and cross-project sharing.
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
 | `enabled` | `bool` | `true` | Master switch for the memory system. |
-| `tier` | `String` | `"core"` | Memory tier: `"core"` (file blocks), `"structured"` (SQLite store), `"semantic"` (with embeddings). |
 | `structured` | `StructuredMemoryConfig` | `{ enabled: true }` | Structured store configuration. |
 | `retrieval` | `RetrievalConfig` | (see below) | Retrieval configuration for prompt injection. |
-| `semantic` | `SemanticConfig` | (see below) | Semantic search (embedding) configuration. |
 | `auto_extract` | `AutoExtractConfig` | (see below) | Automatic memory extraction. |
 | `decay` | `DecayConfig` | (see below) | Confidence decay. |
 | `cross_project` | `CrossProjectConfig` | (see below) | Cross-project memory sharing. |
@@ -902,14 +894,6 @@ retrieval, auto-extraction, decay, and cross-project sharing.
 | `max_memory_tokens` | `Option<usize>` | `4000` | Approximate token budget for the injected memory section. `null` disables the budget (uses only the row cap). |
 | `recency_weight` | `f64` | `0.3` | Weight for recency when ranking (0.0-1.0). |
 | `relevance_weight` | `f64` | `0.7` | Weight for relevance when ranking (0.0-1.0). |
-
-**`SemanticConfig`**:
-
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `enabled` | `bool` | `false` | Whether semantic search via embeddings is enabled. Requires the `embeddings` Cargo feature. |
-| `model` | `String` | `"all-MiniLM-L6-v2"` | ONNX sentence-transformer model name. |
-| `dimensions` | `usize` | `384` | Embedding vector dimensions (must match model output). |
 
 **`AutoExtractConfig`**:
 
@@ -2075,13 +2059,7 @@ need all of these — every section has defaults, so an empty `{}` is valid.
 
     "memory": {
       "enabled": true,
-      "tier": "core",
       "structured": { "enabled": true },
-      "semantic": {
-        "enabled": false,
-        "model": "all-MiniLM-L6-v2",
-        "dimensions": 384
-      },
       "retrieval": {
         "max_memories_per_prompt": 100,
         "max_memory_tokens": 4000,
@@ -2300,23 +2278,6 @@ The base URL can also be set via `GENERIC_OPENAI_API_BASE` env var.
   "code_index": { "enabled": false }
 }
 ```
-
-### Semantic memory with embeddings
-
-```json
-{
-  "memory": {
-    "semantic": {
-      "enabled": true,
-      "model": "all-MiniLM-L6-v2",
-      "dimensions": 384
-    }
-  }
-}
-```
-
-Requires the `embeddings` Cargo feature. When disabled, memory search falls
-back to FTS5-only mode.
 
 ### OpenTelemetry export to a collector
 

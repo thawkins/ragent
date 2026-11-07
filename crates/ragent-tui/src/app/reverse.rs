@@ -177,13 +177,22 @@ fn resolve_gitlab_token() -> Option<String> {
 ///
 /// Priority: explicit `host` from the identifier -> `GITLAB_URL` env var ->
 /// default `https://gitlab.com`.
+///
+/// Every candidate is validated by the shared
+/// [`ragent_types::url_validation::validate_instance_url`] because the instance
+/// base URL decides where the `PRIVATE-TOKEN` header goes. An explicit host is
+/// also a user-supplied string (a reverse-engineered identifier can carry one),
+/// so it gets the same check; an invalid candidate falls through to the next
+/// source and ultimately to the public default.
 fn resolve_gitlab_host(host: Option<&str>) -> String {
-    if let Some(h) = host {
-        return h.to_string();
+    if let Some(h) = host
+        && let Ok(validated) = ragent_types::url_validation::validate_instance_url(h)
+    {
+        return validated;
     }
     std::env::var("GITLAB_URL")
         .ok()
-        .filter(|u| !u.is_empty())
+        .and_then(|u| ragent_types::url_validation::validate_instance_url(&u).ok())
         .unwrap_or_else(|| "https://gitlab.com".to_string())
 }
 
@@ -481,7 +490,7 @@ impl App {
                     return;
                 }
             }
-            VcsProvider::GitLab { host, .. } => {
+            VcsProvider::GitLab { .. } => {
                 // FR-007: validate GitLab token.
                 let token = self.resolve_gitlab_token_for_reverse();
                 if token.is_none() {
@@ -494,7 +503,6 @@ impl App {
                     self.status = "reverse: no gitlab token".to_string();
                     return;
                 }
-                let _ = resolve_gitlab_host(host.as_deref()); // INTENTIONAL: host hint only; the parsed value is unused here
             }
         }
 

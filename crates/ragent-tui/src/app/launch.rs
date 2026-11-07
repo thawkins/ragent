@@ -144,7 +144,7 @@ impl App {
                 self.append_assistant_text(&format!(
                     "From: {label}\n## [err] Could not launch detached sub-agent\n\n{msg}\n"
                 ));
-                tracing::debug!(agent = %agent, "sub-agent launch failed");
+                tracing::warn!(agent = %agent, "sub-agent launch failed");
             }
         }
     }

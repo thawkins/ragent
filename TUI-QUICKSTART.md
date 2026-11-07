@@ -4,6 +4,34 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.164)
+
+- **An `explore` sub-agent can no longer be handed the YOLO write scope.**
+  `READ_ONLY_PERMISSION_CATEGORIES` - the list that answers "can a run offered
+  this tool mutate the workspace?" - now names every read category the registry
+  declares (`git:read`, `github:read`, `gitlab:read`, `cron:read`, `agent:read`,
+  `team:read`, `model:read`, `web:read`, plus `task` and `system`). A category it
+  forgot was silently treated as write-capable, so a pure inspection run offered
+  only `git_status` or `github_list_issues` resolved a non-empty write set and
+  skipped its interactive prompts. `tests/test_read_only_permission_categories.rs`
+  pins the classification from both directions.
+- **No more `"type"` requirement for an MCP server in `ragent.json`** - it
+  defaults to `stdio`, so `/mcp discover` and a hand-written entry with just
+  `command` and `args` connect. The same default applies to plugin `mcpServers`
+  bridges and connector server entries.
+- **`/telemetry`, `/mcp` and `/config` output no longer leaks credentials.** The
+  `--dry-run` config-parse error, the background-task spawn log and the
+  crawl/fetch URL warn paths redact, two `Debug` impls that printed provider API
+  keys and the Copilot device code now redact, and a `GITLAB_URL` that is not
+  `https` (or `http` on loopback) is refused by name instead of receiving the
+  `PRIVATE-TOKEN` header.
+- **`ragent config show | head -1` exits 0** rather than aborting with
+  `failed printing to stdout: Broken pipe`, and `/mcp config`,
+  `/mcp status` and `/team show` keep their tables intact.
+- **`/research deck <name>` exports a real `.pptx`** and groups findings under
+  the report's own concepts (one slide per concept, with an `Other Findings`
+  slide for anything no concept claims).
+
 ## Highlights (v1.0.161)
 
 - **`/research open <name>` still opens the right file after a re-run.** Research

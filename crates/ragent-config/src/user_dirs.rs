@@ -179,12 +179,6 @@ pub fn global_gitlab_config_path() -> Option<PathBuf> {
     global_state_dir().map(|d| d.join("gitlab_config.json"))
 }
 
-/// Global embedding model directory for `all-MiniLM-L6-v2`.
-#[must_use]
-pub fn global_embedding_model_dir() -> Option<PathBuf> {
-    global_models_dir().map(|d| d.join("all-MiniLM-L6-v2"))
-}
-
 /// Return the AGENTS.md global instruction file directory.
 ///
 /// This is the directory that `collect_agents_md_content_with_discovery`

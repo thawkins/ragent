@@ -3,6 +3,11 @@
 Bridge to external Model Context Protocol (MCP) servers with auto-discovery
 of known server types and stdio clients.
 
+A server entry's `"type"` is optional and defaults to `stdio`, so a
+command-launched server needs only `command` and `args`; the same default
+applies to plugin `mcpServers` bridges and connector `servers` / `remote`
+entries, and a config written back still names its transport explicitly.
+
 | Tool | Description |
 |------|-------------|
 | `mcp_tool` | Bridge to external Model Context Protocol servers. |

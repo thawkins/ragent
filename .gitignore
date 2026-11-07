@@ -114,6 +114,16 @@ mcp.json
 # the root anchor above does not reach it.
 assets/config/ragent.json
 assets/config/ragent.json.*
+# Archives are not tracked in this repo: a committed archive hides whatever it
+# unpacks to (a credential-bearing config or script) from both review and
+# `git grep`. If a fixture archive is genuinely needed, `git add -f` it by name.
+*.zip
+*.tar.gz
+*.tgz
+# The connector test fixtures are checked in on purpose: they are inert archive
+# files the extraction and auth tests open, not credential carriers.
+!assets/connectors/fixtures/archives/*.zip
+!assets/connectors/fixtures/archives/*.tar.gz
 *.crt
 *.cer
 *.der

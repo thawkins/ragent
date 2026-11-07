@@ -969,9 +969,27 @@ fn state_log_level_equality() {
     // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
     // under one-binary-per-crate (AGENTS.md "Test Layout").
     let _cwd_guard = crate::global_env_lock();
-    assert_eq!(LogLevel::Info, LogLevel::Info);
-    assert_ne!(LogLevel::Tool, LogLevel::Warn);
-    assert_ne!(LogLevel::Warn, LogLevel::Error);
+    // `LogLevel` is an ordinary derived enum, so asserting `Info == Info` and
+    // `Warn != Error` only re-tests `#[derive(PartialEq)]`. The behaviour that
+    // actually matters is that the four levels are distinct and exhaustive:
+    // a log window that filtered on a collapsed level would hide or duplicate
+    // entries, and a new variant must force a decision here rather than
+    // silently compare equal to an existing one.
+    let all = [
+        LogLevel::Info,
+        LogLevel::Tool,
+        LogLevel::Warn,
+        LogLevel::Error,
+    ];
+    for (i, a) in all.iter().enumerate() {
+        for (j, b) in all.iter().enumerate() {
+            assert_eq!(
+                a == b,
+                i == j,
+                "levels {a:?} and {b:?} must be equal only when they are the same level"
+            );
+        }
+    }
 }
 
 #[test]

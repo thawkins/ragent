@@ -1132,44 +1132,6 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
                 .collect()
         })
     }
-
-    fn store_memory_embedding(&self, id: i64, embedding_blob: &[u8]) -> anyhow::Result<bool> {
-        self.inner.store_memory_embedding(id, embedding_blob)
-    }
-
-    fn list_memory_embeddings(&self) -> anyhow::Result<Vec<(i64, Vec<u8>)>> {
-        self.inner.list_memory_embeddings()
-    }
-
-    fn search_memories_by_embedding(
-        &self,
-        query_embedding: &[f32],
-        dimensions: usize,
-        limit: usize,
-        min_similarity: f32,
-    ) -> anyhow::Result<Vec<ragent_tools_extended::storage::EmbeddingMatch>> {
-        // `Storage::search_memories_by_embedding` now lives in
-        // `ragent-storage` and takes a caller-supplied cosine-similarity
-        // closure so it does not need to depend on the embedding helpers
-        // (which live in `ragent-tools-extended`).
-        use ragent_tools_extended::memory::embedding::cosine_similarity as storage_cosine;
-        self.inner
-            .search_memories_by_embedding(
-                query_embedding,
-                dimensions,
-                limit,
-                min_similarity,
-                storage_cosine,
-            )
-            .map(|rows| {
-                rows.into_iter()
-                    .map(|row| ragent_tools_extended::storage::EmbeddingMatch {
-                        row_id: row.row_id,
-                        score: row.score,
-                    })
-                    .collect()
-            })
-    }
 }
 
 struct ExtractedExtendedToolAdapter {

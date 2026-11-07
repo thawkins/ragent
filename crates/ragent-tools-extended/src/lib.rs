@@ -28,12 +28,6 @@ pub mod task;
 pub mod webfetch;
 pub mod websearch;
 
-pub mod memory {
-    //! Memory helpers reused by the extracted memory tools.
-
-    pub mod embedding;
-}
-
 use anyhow::Result;
 use ragent_types::event::EventBus;
 use ragent_types::llm::ToolDefinition;
@@ -118,15 +112,6 @@ pub mod storage {
         pub access_count: i64,
         /// When the memory was last accessed.
         pub last_accessed: Option<String>,
-    }
-
-    /// Result row for embedding-based memory search.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct EmbeddingMatch {
-        /// The matching row identifier.
-        pub row_id: i64,
-        /// The similarity score of the match.
-        pub score: f32,
     }
 
     /// Storage backend abstraction used by session-scoped tools.
@@ -268,18 +253,6 @@ pub mod storage {
         ) -> Result<Vec<MemoryRow>>;
         /// List the most recent memories for a project.
         fn list_memories(&self, project: &str, limit: usize) -> Result<Vec<MemoryRow>>;
-        /// Store an embedding blob for a memory row.
-        fn store_memory_embedding(&self, id: i64, embedding_blob: &[u8]) -> Result<bool>;
-        /// List all memory embeddings as (id, blob) pairs.
-        fn list_memory_embeddings(&self) -> Result<Vec<(i64, Vec<u8>)>>;
-        /// Search memories by embedding similarity.
-        fn search_memories_by_embedding(
-            &self,
-            query_embedding: &[f32],
-            dimensions: usize,
-            limit: usize,
-            min_similarity: f32,
-        ) -> Result<Vec<EmbeddingMatch>>;
     }
 
     /// Compatibility alias for migrated code that still references `crate::storage::Storage`.

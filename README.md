@@ -211,7 +211,17 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   does not shrink until a `VACUUM`, which needs exclusive access
 - **Permission system** — multi-layered defense-in-depth with hardwired rules
   (codeindex tools always allowed), configurable allow/deny/ask rules, 7-layer bash
-  security, file-path guards, and YOLO mode for trusted environments
+  security, file-path guards, and YOLO mode for trusted environments. An
+  unattended sub-agent gets a YOLO-equivalent scope **for its write-capable tools
+  only**, and that set is derived per turn from the run's own offered tool
+  surface against `READ_ONLY_PERMISSION_CATEGORIES`, which names every read
+  category the registry declares (`file:read`, `codeindex`, `web`, `web:read`,
+  `network`, `model`, `model:read`, `git:read`, `github:read`, `gitlab:read`,
+  `cron:read`, `agent:read`, `team:read`, `task`, `system`, …). A pure
+  inspection run (`explore`, a plan reviewer, a loop restricted to reads)
+  therefore resolves an empty set and keeps the ordinary interactive prompt
+  policy; an uncategorised `none` tool stays write-capable because it bypasses
+  the permission layer entirely
 - **Agent presets** — `general`, `build`, `plan`, `explore`, `ask` and the internal
   `title`/`summary` helpers, plus language and domain specialists (`rust-coder`,
   `python-coder`, `typescript-coder`, `fastapi-agent`, `security-auditor`,
@@ -222,7 +232,10 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   `~/.local/share/ragent/`) into the system prompt so agents follow project-specific
   conventions
 - **MCP client** — Model Context Protocol support with auto-discovery of 18 known
-  server types, stdio and Streamable-HTTP clients, and tool bridging; TUI commands
+  server types, stdio and Streamable-HTTP clients, and tool bridging; a server
+  entry's `"type"` is optional and defaults to `stdio`, so a command-launched
+  server needs no transport key (a config written back still carries an explicit
+  `"type"`); TUI commands
   (`/mcp` / `/mcp status`, `/mcp config`, `/mcp discover`, `/mcp connect <id>`,
   `/mcp disconnect <id>`, `/mcp remove <id>`) with durable global enable/disable state
   (`mcp_state.json`) and live connect/disconnect. `/mcp config` reports where
@@ -290,9 +303,8 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   `codeindex_communities` (community detection); graph built in the background
   via `/codeindex graph build` (phased lock discipline keeps search available
   during derivation; status-bar `idx`/`graph` busy indicators show progress)
-- **Memory system** — three-tier system with file blocks, structured SQLite store,
-  and optional embedding-based semantic search; automatic extraction, decay,
-  compression, and knowledge graph support
+- **Memory system** — structured SQLite store with full-text (FTS5) recall,
+  automatic extraction, decay, compression, and knowledge graph support
 - **Spec management** — `/spec` slash commands for creating, listing, searching,
   validating, and tracking specification lifecycles; `/spec jtbd` performs
   Jobs-To-Be-Done analysis on existing specs; `/spec update` regenerates
@@ -694,8 +706,7 @@ live in the user-global config. Rejected keys are logged at `warn!`.
   ],
   "memory": {
     "enabled": true,
-    "structured": { "enabled": true },
-    "semantic": { "enabled": false, "dimensions": 384 }
+    "structured": { "enabled": true }
   },
   "compaction": {
     "auto": true,

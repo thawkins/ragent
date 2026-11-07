@@ -269,6 +269,26 @@ server id** (the key is the id, there is no separate `name` field).
 `command` may be a bare executable name (resolved on `PATH`) or an absolute path.
 If it contains a `/` or `\` it must point at an existing file.
 
+`type` is optional and defaults to `stdio`, matching the convention every other
+MCP client follows, so a command-launched server needs no transport key at all:
+
+```json
+{
+  "mcp": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/docs"]
+    }
+  }
+}
+```
+
+The same default applies on every path that parses a server definition - the
+`mcp` section of `ragent.json`, plugin `mcpServers` bridges, and connector
+`servers` / `remote` entries - so a definition that names no transport is a
+stdio server everywhere. A config that is written back still serialises an
+explicit `"type": "stdio"`, so the transport is never ambiguous on disk.
+
 ### SSE / HTTP server
 
 ```json

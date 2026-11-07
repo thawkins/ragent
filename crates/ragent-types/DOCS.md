@@ -31,7 +31,6 @@ Dev-dependencies: tokio (full), serial_test.
 
 - **activity** — Activity-log event schema: immutable, self-describing execution facts (model messages, tool calls, results, permissions, checkpoints, terminations).
 - **cron** — Cron scheduling types and parsers for the agent cron system.
-- **embedding** — Shared embedding serialisation helpers (`Vec<f32>` <-> byte blob for SQLite BLOB storage).
 - **error** — Structured error enum (`RagentError`) for all core operations.
 - **event** — Event streaming infrastructure: `EventBus` (Tokio broadcast) and `Event` lifecycle enum.
 - **html** — HTML tag-stripping helper (`strip_tags`).

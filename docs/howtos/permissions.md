@@ -864,8 +864,22 @@ per-turn function of the run's own offered tool surface:
   definitions.
 - A tool is write-capable unless its `permission_category()` is in
   `READ_ONLY_PERMISSION_CATEGORIES` (`file:read`, `codeindex`, `web`,
-  `network`, `model`, ...). An uncategorised (`none`) tool is write-capable,
-  because it bypasses the permission layer entirely.
+  `web:read`, `network`, `model`, `model:read`, `shell:open`, `memory:read`,
+  `spec:read`, `skill:read`, `git:read`, `github:read`, `gitlab:read`,
+  `cron:read`, `agent:read`, `team:read`, `task`, `system`). An uncategorised
+  (`none`) tool is write-capable, because it bypasses the permission layer
+  entirely.
+  The failure mode of a missing entry is silent and unsafe: a forgotten read
+  category is treated as write-capable, so a pure inspection run is handed the
+  YOLO *write* scope instead of the ordinary prompt policy. `git:read`,
+  `github:read`, `gitlab:read`, `cron:read`, `agent:read`, `team:read`,
+  `model:read`, `web:read`, `task` and `system` were all missing once and are
+  now listed. `tests/test_read_only_permission_categories.rs` keeps the list
+  honest from both directions: every registry tool's category must be a known
+  category (a typo such as `git:reed` fails loudly), the named read surfaces
+  must classify read-only, and the named write surfaces must still classify
+  write-capable. `team:tasks` stays write-capable because `team_task_claim` and
+  `team_task_complete` share it with the read-only `team_task_list`.
 - **Read-only runs get nothing**: an `explore` sub-agent, a plan reviewer, or a
   loop restricted to reads resolves to an empty set and keeps the ordinary
   prompt policy.

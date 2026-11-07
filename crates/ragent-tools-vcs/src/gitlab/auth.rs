@@ -146,7 +146,27 @@ pub fn load_token_checked(storage: &Storage) -> Result<Option<String>> {
 /// Priority: env vars -> `ragent.json` -> database settings.
 #[must_use]
 pub fn load_config(storage: &Storage) -> Option<GitLabConfig> {
-    let env_url = std::env::var("GITLAB_URL").ok().filter(|s| !s.is_empty());
+    let env_url = std::env::var("GITLAB_URL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        // The instance URL decides where the `PRIVATE-TOKEN` header is sent, so
+        // an unvalidated environment value is a credential-exfiltration vector:
+        // `http://` would send it in cleartext, and any host would receive it.
+        // A refused value is dropped with a warning rather than used.
+        .and_then(
+            |raw| match ragent_types::url_validation::validate_instance_url(&raw) {
+                Ok(url) => Some(url),
+                Err(e) => {
+                    tracing::warn!(
+                        var = "GITLAB_URL",
+                        raw = %ragent_types::sanitize::mask_url_credentials(&raw),
+                        error = %e,
+                        "ignoring invalid GITLAB_URL"
+                    );
+                    None
+                }
+            },
+        );
     let env_user = std::env::var("GITLAB_USERNAME")
         .ok()
         .filter(|s| !s.is_empty());
@@ -166,12 +186,13 @@ pub fn load_config(storage: &Storage) -> Option<GitLabConfig> {
     if let Ok(file_cfg) = Config::load() {
         if let Some(ref url) = file_cfg.gitlab.instance_url
             && !url.is_empty()
+            && let Ok(validated) = ragent_types::url_validation::validate_instance_url(url)
         {
             let cfg = config.get_or_insert_with(|| GitLabConfig {
                 instance_url: String::new(),
                 username: String::new(),
             });
-            cfg.instance_url = url.clone();
+            cfg.instance_url = validated;
         }
         if let Some(ref user) = file_cfg.gitlab.username
             && !user.is_empty()

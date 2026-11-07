@@ -543,18 +543,21 @@ pub fn load_gitlab_token() -> Option<String> {
 /// public `https://gitlab.com` default.
 #[must_use]
 pub fn load_gitlab_base_url() -> String {
+    // The base URL decides where the instance `PRIVATE-TOKEN` goes, so it is
+    // validated here exactly as `ragent_tools_vcs::gitlab::auth::load_config`
+    // does; a refused value falls through to the recorded config, then gitlab.com.
     if let Ok(url) = std::env::var("GITLAB_URL")
-        && !url.trim().is_empty()
+        && let Ok(validated) = ragent_types::url_validation::validate_instance_url(&url)
     {
-        return url.trim().to_owned();
+        return validated;
     }
     if let Some(path) = ragent_config::user_dirs::global_gitlab_config_path()
         && let Ok(raw) = std::fs::read_to_string(path)
         && let Ok(value) = serde_json::from_str::<Value>(&raw)
         && let Some(url) = value.get("instance_url").and_then(Value::as_str)
-        && !url.trim().is_empty()
+        && let Ok(validated) = ragent_types::url_validation::validate_instance_url(url)
     {
-        return url.trim().to_owned();
+        return validated;
     }
     GITLAB_API_BASE.to_owned()
 }

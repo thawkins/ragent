@@ -74,12 +74,8 @@ impl App {
         }
     }
 
-    pub(crate) fn execute_plan_delegation(
-        &mut self,
-        session_id: &str,
-        task: String,
-        context: String,
-    ) {
+    /// Open plan-delegation mode for `session_id` with the task text and context.
+    pub fn execute_plan_delegation(&mut self, session_id: &str, task: String, context: String) {
         // Push current agent to stack so ExitPlanMode can restore it
         self.agent_stack.push(self.agent_info.clone());
 
@@ -2329,7 +2325,7 @@ impl App {
     /// so the log panel and the row agree on ownership (NFR-008); a failure
     /// later logs a warn-level trace naming the task id and error, and the
     /// row converges on the next completion event or reconciliation pass.
-    pub(crate) fn cancel_bg_task(&mut self, task_id: &str) {
+    pub fn cancel_bg_task(&mut self, task_id: &str) {
         // Attribute the panel-triggered request to the row's own session
         // while the row is still tracked (NFR-008).
         let row_session = self
@@ -2383,12 +2379,7 @@ impl App {
     /// row untouched for the reconcile pass to retire. Because the request is
     /// fired on the async runtime the failure cannot rewrite the status line;
     /// the message window and log carry it instead.
-    pub(crate) fn request_agent_cancel(
-        &mut self,
-        task_id: &str,
-        agent: &str,
-        child_session: String,
-    ) {
+    pub fn request_agent_cancel(&mut self, task_id: &str, agent: &str, child_session: String) {
         let short = short_id(task_id);
         self.status = format!("Cancellation requested for {short} ({agent})");
         self.push_log_for(
@@ -2432,7 +2423,7 @@ impl App {
     /// FR-068). The request is logged attributed to the child session
     /// (NFR-008); a failure logs a warn-level trace with the task id and
     /// error, and the row reconciles on the next registry poll (FR-054).
-    pub(crate) fn suspend_agent_task(&mut self, task_id: &str) {
+    pub fn suspend_agent_task(&mut self, task_id: &str) {
         let child_session = self
             .active_tasks
             .iter()
@@ -2461,7 +2452,7 @@ impl App {
     /// Dispatch a sub-agent resume request on the async runtime (FR-035,
     /// FR-068). Attribution and failure logging match
     /// [`App::suspend_agent_task`].
-    pub(crate) fn resume_agent_task(&mut self, task_id: &str) {
+    pub fn resume_agent_task(&mut self, task_id: &str) {
         let child_session = self
             .active_tasks
             .iter()
@@ -2490,7 +2481,7 @@ impl App {
     /// Dispatch a sub-agent termination request on the async runtime (FR-036,
     /// FR-068). The request is logged attributed to the child session
     /// (NFR-008); a failure logs a warn-level trace naming the task id.
-    pub(crate) fn kill_agent_task(&mut self, task_id: &str) {
+    pub fn kill_agent_task(&mut self, task_id: &str) {
         let child_session = self
             .active_tasks
             .iter()
@@ -2523,7 +2514,7 @@ impl App {
     /// member session id when known, NFR-008); a failure logs a warn-level
     /// trace naming the teammate id and error, and the row keeps its current
     /// status until the next event (spec error table).
-    pub(crate) fn dispatch_suspend_teammate(&mut self, agent_id: &str) {
+    pub fn dispatch_suspend_teammate(&mut self, agent_id: &str) {
         self.log_teammate_action(agent_id, "[pause]", "suspend");
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let tm = self.session_processor.team_manager.get().cloned();
@@ -2541,7 +2532,7 @@ impl App {
     /// Dispatch a graceful shutdown request for team member `agent_id` on the
     /// async runtime (FR-040, FR-068). Attribution and failure logging match
     /// [`App::dispatch_suspend_teammate`].
-    pub(crate) fn dispatch_shutdown_teammate(&mut self, agent_id: &str) {
+    pub fn dispatch_shutdown_teammate(&mut self, agent_id: &str) {
         self.log_teammate_action(agent_id, "[stop]", "shutdown");
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let tm = self.session_processor.team_manager.get().cloned();
@@ -2562,7 +2553,7 @@ impl App {
     /// dialog - it restores a subject the user already suspended - so this
     /// is the only entry the control needs for that direction. Attribution
     /// and failure logging match [`App::dispatch_suspend_teammate`].
-    pub(crate) fn dispatch_resume_teammate(&mut self, agent_id: &str) {
+    pub fn dispatch_resume_teammate(&mut self, agent_id: &str) {
         self.log_teammate_action(agent_id, "[play]", "resume");
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let tm = self.session_processor.team_manager.get().cloned();
@@ -2599,7 +2590,8 @@ impl App {
         self.needs_redraw = true;
     }
 
-    pub(crate) fn open_output_view_team_member(
+    /// Open the output view for one team member, identified by team and agent.
+    pub fn open_output_view_team_member(
         &mut self,
         team_name: String,
         agent_id: String,
@@ -2628,66 +2620,71 @@ impl App {
         });
     }
 
-    pub(crate) fn scroll_output_view_by(&mut self, delta: i16) {
+    /// Scroll the open output view by `delta` lines, clamped to its length.
+    pub fn scroll_output_view_by(&mut self, delta: i16) {
         if let Some(ref mut view) = self.output_view {
             view.scroll_by(delta);
         }
     }
 
-    pub(crate) fn jump_output_view_start(&mut self) {
+    /// Jump the output view to its first line.
+    pub fn jump_output_view_start(&mut self) {
         if let Some(ref mut view) = self.output_view {
             view.jump_start();
         }
     }
 
-    pub(crate) fn jump_output_view_end(&mut self) {
+    /// Jump the output view to its last line.
+    pub fn jump_output_view_end(&mut self) {
         if let Some(ref mut view) = self.output_view {
             view.jump_end();
         }
     }
 
-    pub(crate) fn jump_research_view_start(&mut self) {
+    /// Jump the research view to its first line.
+    pub fn jump_research_view_start(&mut self) {
         if let Some(ref mut view) = self.research_view {
             view.jump_start();
         }
     }
 
-    pub(crate) fn jump_research_view_end(&mut self) {
+    /// Jump the research view to its last line.
+    pub fn jump_research_view_end(&mut self) {
         if let Some(ref mut view) = self.research_view {
             view.jump_end();
         }
     }
 
-    pub(crate) fn scroll_research_view_by(&mut self, delta: i16) {
+    /// Scroll the research view by `delta` lines, clamped to its length.
+    pub fn scroll_research_view_by(&mut self, delta: i16) {
         if let Some(ref mut view) = self.research_view {
             view.scroll_by(delta);
         }
     }
 
-    pub(crate) fn scroll_memory_view_by(&mut self, delta: i16) {
+    /// Scroll the memory view by `delta` lines, clamped to its length.
+    pub fn scroll_memory_view_by(&mut self, delta: i16) {
         if let Some(ref mut view) = self.memory_view {
             view.scroll_by(delta);
         }
     }
 
-    pub(crate) fn jump_memory_view_start(&mut self) {
+    /// Jump the memory view to its first line.
+    pub fn jump_memory_view_start(&mut self) {
         if let Some(ref mut view) = self.memory_view {
             view.jump_start();
         }
     }
 
-    pub(crate) fn jump_memory_view_end(&mut self) {
+    /// Jump the memory view to its last line.
+    pub fn jump_memory_view_end(&mut self) {
         if let Some(ref mut view) = self.memory_view {
             view.jump_end();
         }
     }
 
-    pub(crate) fn open_research_view(
-        &mut self,
-        name: String,
-        path: std::path::PathBuf,
-        markdown: String,
-    ) {
+    /// Open the research view for a topic, loading its markdown from `path`.
+    pub fn open_research_view(&mut self, name: String, path: std::path::PathBuf, markdown: String) {
         let base_dir = path
             .parent()
             .map(std::path::PathBuf::from)
@@ -2789,7 +2786,8 @@ impl App {
         }
     }
 
-    pub(crate) fn focus_teammate_by_name(&mut self, name: &str) -> Result<(), String> {
+    /// Move the teammate focus to the member named `name`.
+    pub fn focus_teammate_by_name(&mut self, name: &str) -> Result<(), String> {
         let lower = name.to_lowercase();
         let matches: Vec<_> = self
             .team_members
@@ -2868,7 +2866,8 @@ impl App {
         }
     }
 
-    pub(crate) fn is_current_session(&self, session_id: &str) -> bool {
+    /// Report whether `session_id` is the session this app is currently driving.
+    pub fn is_current_session(&self, session_id: &str) -> bool {
         self.session_id.as_deref() == Some(session_id)
     }
 
@@ -2935,7 +2934,7 @@ impl App {
     /// Returns the session id for a team member by agent id, if known.
     /// Used to attribute team-related log entries to the teammate's own
     /// output-view overlay.
-    pub(crate) fn team_member_session_id_by_agent_id(&self, agent_id: &str) -> Option<String> {
+    pub fn team_member_session_id_by_agent_id(&self, agent_id: &str) -> Option<String> {
         self.team_members
             .iter()
             .find(|m| m.agent_id == agent_id)
@@ -2947,7 +2946,7 @@ impl App {
     ///
     /// Used to mirror tool-call activity for those sessions into the shared
     /// log so the panels' step count (one per `ToolCallStart`) is auditable.
-    pub(crate) fn is_tracked_agent_session(&self, session_id: &str) -> bool {
+    pub fn is_tracked_agent_session(&self, session_id: &str) -> bool {
         self.active_tasks
             .iter()
             .any(|t| t.child_session_id == session_id)
@@ -2962,7 +2961,7 @@ impl App {
     ///
     /// Team members take precedence over sub-agent tasks when a session is
     /// registered in both (teammates also appear as sub-agent tasks).
-    pub(crate) fn agent_log_tag(&self, session_id: &str) -> Option<String> {
+    pub fn agent_log_tag(&self, session_id: &str) -> Option<String> {
         if let Some(member) = self
             .team_members
             .iter()
@@ -3008,7 +3007,7 @@ impl App {
     /// This lets nested sub-agents show up in the Agents panel even when
     /// the intermediate parent has already completed and been removed from
     /// `active_tasks`.
-    pub(crate) fn is_current_or_descendant_session(&self, session_id: &str) -> bool {
+    pub fn is_current_or_descendant_session(&self, session_id: &str) -> bool {
         if self.session_id.as_deref() == Some(session_id) {
             return true;
         }
@@ -3091,7 +3090,8 @@ impl App {
         self.refresh_research_progress_message(&name);
     }
 
-    pub(crate) fn refresh_research_progress_message(&mut self, name: &str) {
+    /// Refresh the research progress message shown for topic `name`.
+    pub fn refresh_research_progress_message(&mut self, name: &str) {
         let Some(progress) = self
             .research_progress
             .iter()
@@ -3151,7 +3151,7 @@ impl App {
     /// Append assistant streaming text to the chat log, reusing the last
     /// assistant message when possible (and starting a new Text part after a
     /// tool call so ordering is preserved).
-    pub(crate) fn append_assistant_text(&mut self, text: &str) {
+    pub fn append_assistant_text(&mut self, text: &str) {
         let rendered = self.render_markdown_to_ascii(text);
         if !self.force_new_message {
             if let Some(last) = self.messages.last_mut()
@@ -3188,7 +3188,8 @@ impl App {
         }
     }
 
-    pub(crate) fn append_reasoning_text(&mut self, text: &str) {
+    /// Append streamed reasoning text to the current assistant message.
+    pub fn append_reasoning_text(&mut self, text: &str) {
         if let Some(last) = self.messages.last_mut()
             && last.role == Role::Assistant
         {
@@ -3221,7 +3222,8 @@ impl App {
         }
     }
 
-    pub(crate) fn add_tool_call_part(&mut self, tool: &str, call_id: &str) {
+    /// Record a tool call, identified by `call_id`, in the transcript.
+    pub fn add_tool_call_part(&mut self, tool: &str, call_id: &str) {
         use ragent_agent::message::{ToolCallState, ToolCallStatus};
 
         if let Some(last) = self.messages.last_mut()
@@ -3266,7 +3268,8 @@ impl App {
         }
     }
 
-    pub(crate) fn update_tool_call_status(
+    /// Update the status of the tool call identified by `call_id`.
+    pub fn update_tool_call_status(
         &mut self,
         call_id: &str,
         success: bool,
@@ -3310,7 +3313,8 @@ impl App {
         }
     }
 
-    pub(crate) fn update_tool_call_input(&mut self, call_id: &str, args_json: &str) -> bool {
+    /// Replace or set the arguments of the tool call identified by `call_id`.
+    pub fn update_tool_call_input(&mut self, call_id: &str, args_json: &str) -> bool {
         // FR-007: the shared decoder, so the part shows the argument object the
         // tool will receive - the double-encoded string form included - and an
         // empty/whitespace payload is `{}` rather than "no input".
@@ -3357,7 +3361,8 @@ impl App {
         false
     }
 
-    pub(crate) fn find_tool_call_part(&self, call_id: &str) -> bool {
+    /// Report whether a tool call with `call_id` is present in the transcript.
+    pub fn find_tool_call_part(&self, call_id: &str) -> bool {
         for msg in self.messages.iter().rev() {
             for part in &msg.parts {
                 if let MessagePart::ToolCall { call_id: cid, .. } = part
@@ -3379,7 +3384,7 @@ impl App {
     /// the event variant extracted, or the batch itself was lost). Without
     /// this drain, the part would render with an empty input summary even
     /// though the args were received and logged correctly.
-    pub(crate) fn drain_pending_tool_args(&mut self) {
+    pub fn drain_pending_tool_args(&mut self) {
         if self.pending_tool_args.is_empty() {
             return;
         }
@@ -3429,7 +3434,8 @@ impl App {
         }
     }
 
-    pub(crate) fn update_tool_call_output(
+    /// Set the output of the tool call identified by `call_id`.
+    pub fn update_tool_call_output(
         &mut self,
         call_id: &str,
         content_line_count: usize,
@@ -3475,7 +3481,7 @@ impl App {
     /// as the next user turn. Clears the pending continue when the agent is
     /// busy, when autopilot is disabled, or when the task was already marked
     /// as completed by the agent (TaskCompleted consumed before or after us).
-    pub(crate) fn poll_autopilot_continue(&mut self) {
+    pub fn poll_autopilot_continue(&mut self) {
         if self.autopilot_continued_this_wake {
             return;
         }
@@ -3500,7 +3506,8 @@ impl App {
         }
     }
 
-    pub(crate) fn dispatch_spec_impl_task(
+    /// Dispatch a spec implementation task for the spec named by the arguments.
+    pub fn dispatch_spec_impl_task(
         &mut self,
         prompt: String,
         spec_id: &str,
@@ -3536,7 +3543,8 @@ impl App {
         });
     }
 
-    pub(crate) fn advance_spec_impl(&mut self) {
+    /// Advance the running spec implementation to its next task.
+    pub fn advance_spec_impl(&mut self) {
         use ragent_specs::{SpecManager, spec::SpecStatus};
 
         let Some(state) = self.spec_impl_state.clone() else {

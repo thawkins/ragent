@@ -18,14 +18,12 @@ engine.
 - reqwest (with cookies/gzip/deflate), tokio-tungstenite, regex, percent-encoding, url, rusqlite
 - html2text, readability-rs, lingua
 - quick-xml, printpdf, pdf-extract, lopdf
-- ort, tokenizers, ndarray (optional, `embeddings` feature)
 
 Dev-dependencies: tempfile, axum.
 
 ## Features
 
 - `default` — empty (no optional deps)
-- `embeddings` — enables local ONNX embedding model support (`ort`, `tokenizers`, `ndarray`)
 
 ## Public API (crate root)
 
@@ -60,6 +58,5 @@ Dev-dependencies: tempfile, axum.
 - **task** — Session-scoped task management: `TaskCreateTool`, `TaskUpdateTool`, `TaskGetTool`, `TaskListTool`.
 - **webfetch** — `WebFetchTool` (`webfetch`).
 - **websearch** — `WebSearchTool` (`websearch`), `SearchResult`, `hits_from_metadata`.
-- **memory::embedding** — `EmbeddingProvider` (trait), `NoOpEmbedding`, `LocalEmbeddingProvider` (feature-gated), `cosine_similarity`, `serialise_embedding`, `deserialise_embedding`, `SimilarityResult`.
-- **storage** (inline) — `TaskRow`, `MemoryRow`, `EmbeddingMatch`, `StorageBackend` (trait), `Storage` (type alias).
+- **storage** (inline) — `TaskRow`, `MemoryRow`, `StorageBackend` (trait), `Storage` (type alias).
 - **event** (inline) — Compatibility re-export of `ragent_types::event::{Event, EventBus}`.

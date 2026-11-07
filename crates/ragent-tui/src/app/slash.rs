@@ -879,7 +879,13 @@ impl App {
         agent
     }
 
-    pub(crate) fn get_command_suggestions(&self, trigger: &str) -> Vec<String> {
+    /// Return the subcommand completions offered for `trigger`.
+    ///
+    /// `trigger` is the slash command without its leading `/` (e.g. `"team"`).
+    /// The result is ranked for the autocomplete popup; an unknown or
+    /// subcommand-less trigger yields an empty list so the caller falls back to
+    /// the command-name completions.
+    pub fn get_command_suggestions(&self, trigger: &str) -> Vec<String> {
         match trigger {
             "team" | "teams" => {
                 // Suggest team-related subcommands
@@ -1322,7 +1328,7 @@ impl App {
     /// than onto a fresh default, or every unrelated setting (endpoint,
     /// protocol, service name, log level) is reset to its default by what
     /// looks like a one-flag change.
-    pub(crate) fn save_telemetry_otel(&self, otel: &OtelConfig) -> Result<(), String> {
+    pub fn save_telemetry_otel(&self, otel: &OtelConfig) -> Result<(), String> {
         let path = self
             .telemetry_config_source_path()
             .ok_or_else(|| "no telemetry config destination found".to_string())?;
@@ -1360,7 +1366,7 @@ impl App {
     /// Also called by
     /// [`poll_telemetry_export_health`](crate::app::App::poll_telemetry_export_health)
     /// to disable telemetry after repeated OTLP export failures.
-    pub(crate) fn set_telemetry_enabled(&mut self, enabled: bool) {
+    pub fn set_telemetry_enabled(&mut self, enabled: bool) {
         // Start from the block as it is stored on disk, not from the loaded
         // `Config`: the load path runs the repo-content guard, so a project
         // overlay's `telemetry` block is already gone by the time we get here
@@ -1409,7 +1415,7 @@ impl App {
     /// off" are different answers with different remedies, and only the master
     /// switch tells them apart - `logs_exporting()` is already `false` for
     /// both, so it cannot distinguish them on its own.
-    pub(crate) fn telemetry_counters_content(
+    pub fn telemetry_counters_content(
         otel: &ragent_config::OtelConfig,
         logs_exporting: bool,
     ) -> TelemetryCountersContent {
@@ -10830,7 +10836,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         .map(|c| c.memory)
                         .unwrap_or_default();
                     lines.push(format!(
-                        "{} memory system (blocks={}, structured={}, semantic={})",
+                        "{} memory system (blocks={}, structured={})",
                         if memory_config.enabled {
                             "[ok]"
                         } else {
@@ -10842,11 +10848,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             "disabled"
                         },
                         if memory_config.structured.enabled {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        },
-                        if memory_config.semantic.enabled {
                             "enabled"
                         } else {
                             "disabled"

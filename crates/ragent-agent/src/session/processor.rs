@@ -1721,8 +1721,7 @@ impl SessionProcessor {
                 && cached.file_mtimes.iter().all(|(path, mtime)| {
                     std::fs::metadata(path)
                         .and_then(|m| m.modified())
-                        .ok()
-                        .map_or(false, |current| current == *mtime)
+                        .is_ok_and(|current| current == *mtime)
                 })
             {
                 return cached.config.clone();
@@ -1787,8 +1786,7 @@ impl SessionProcessor {
                 && cached.dir_mtimes.iter().all(|(d, mt)| {
                     std::fs::metadata(d)
                         .and_then(|m| m.modified())
-                        .ok()
-                        .map_or(false, |current| current == *mt)
+                        .is_ok_and(|current| current == *mt)
                 })
             {
                 return Some(cached.registry.clone());

@@ -2,7 +2,7 @@
 autotests = false
 name = "ragent-tools-extended"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 rust-version.workspace = true
 license = "MIT"
 authors = ["Tim Hawkins"]
@@ -57,21 +57,8 @@ wiremock = "0.6"
 # "URL rejected by SSRF security check".
 ragent-tools-extended = { path = ".", features = ["test-ssrf-bypass"] }
 
-[dependencies.ort]
-workspace = true
-optional = true
-
-[dependencies.tokenizers]
-workspace = true
-optional = true
-
-[dependencies.ndarray]
-workspace = true
-optional = true
-
 [features]
 default = []
-embeddings = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
 # Integration-test only: compiles in the `RAGENT_TOOLS_EXTENDED_TEST_NO_SSRF`
 # escape hatch so the fetch/crawl tools can be exercised against a loopback
 # test server. Never enabled by a workspace member or a release build, so a

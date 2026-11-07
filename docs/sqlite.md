@@ -312,11 +312,10 @@ upserts maintains an index that is read zero times.
 ### P-10 - `Storage` declares 9 foreign keys and enforces none
 
 `PRAGMA foreign_keys` defaults to OFF in SQLite and is per-connection.
-`storage.rs` never sets it; `store.rs:161` does. The nine `FOREIGN KEY`
+`storage.rs` never sets it; `store.rs:161` does. The eight `FOREIGN KEY`
 declarations in `ragent.db` (`messages`, `snapshots`, `run_cost_summaries`,
-`background_tasks`, `todos`, `memory_tags`, `kg_relationships`,
-`messages_embedding`) therefore do nothing, and `ON DELETE CASCADE` never
-fires. There is no `DELETE FROM sessions` today, so nothing is currently broken
+`background_tasks`, `todos`, `memory_tags`, `kg_relationships`) therefore do
+nothing, and `ON DELETE CASCADE` never fires. There is no `DELETE FROM sessions` today, so nothing is currently broken
 - but the schema advertises an invariant that is not enforced, and the FTS
 shadow rows depend on manual cleanup anyway (see P-02).
 

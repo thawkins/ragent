@@ -13,3 +13,9 @@ pub fn global_env_lock() -> std::sync::MutexGuard<'static, ()> {
 
 #[path = "test_note_roundtrip.rs"]
 mod test_note_roundtrip;
+
+#[path = "test_vault_id.rs"]
+mod test_vault_id;
+
+#[path = "test_untrusted_fence.rs"]
+mod test_untrusted_fence;

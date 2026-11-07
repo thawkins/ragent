@@ -120,8 +120,25 @@ pub async fn send_one_shot(
                     bail!("LLM stream error: {message}")
                 }
                 StreamEvent::Finish { .. } => break,
-                _ => {
-                    warn!(?event, "unexpected stream event in one-shot call");
+                other => {
+                    // Only the variant name is logged: `StreamEvent` carries
+                    // model output and provider credentials (a reasoning
+                    // signature, a tool-call argument fragment), and a `?event`
+                    // dump would put both on the warn path.
+                    let variant = match &other {
+                        StreamEvent::ReasoningStart => "ReasoningStart",
+                        StreamEvent::ReasoningDelta { .. } => "ReasoningDelta",
+                        StreamEvent::ReasoningEnd => "ReasoningEnd",
+                        StreamEvent::ReasoningSignature { .. } => "ReasoningSignature",
+                        StreamEvent::TextDelta { .. } => "TextDelta",
+                        StreamEvent::ToolCallStart { .. } => "ToolCallStart",
+                        StreamEvent::ToolCallDelta { .. } => "ToolCallDelta",
+                        StreamEvent::ToolCallEnd { .. } => "ToolCallEnd",
+                        StreamEvent::Usage { .. } => "Usage",
+                        StreamEvent::RateLimit { .. } => "RateLimit",
+                        _ => "unexpected",
+                    };
+                    warn!(event = variant, "unexpected stream event in one-shot call");
                 }
             }
         }

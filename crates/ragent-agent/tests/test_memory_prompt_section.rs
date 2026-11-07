@@ -22,9 +22,7 @@ fn make_config(max_rows: usize, max_tokens: Option<usize>) -> Config {
     let mut config = Config::default();
     config.memory = MemoryConfig {
         enabled: true,
-        tier: "structured".to_string(),
         structured: Default::default(),
-        semantic: Default::default(),
         retrieval: RetrievalConfig {
             max_memories_per_prompt: max_rows,
             max_memory_tokens: max_tokens,

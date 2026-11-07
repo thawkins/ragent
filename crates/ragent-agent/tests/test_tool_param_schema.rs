@@ -402,3 +402,67 @@ async fn test_bg_refusals_carry_reason_codes() {
         .expect_err("no service must error");
     assert_eq!(reason_in(&err.to_string()), Some("service_unavailable"));
 }
+
+// ---------------------------------------------------------------------------
+// The shared parameterless schema (audit finding 24): every tool that takes no
+// parameters publishes `no_parameters_schema()`, and the validator therefore
+// refuses ANY argument to it. Before the helper existed the shape was
+// hand-copied into seven files, so a single divergent copy would have opened a
+// parameterless tool to silently-ignored arguments.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_parameterless_tools_publish_the_shared_schema() {
+    let tools: Vec<Box<dyn Tool>> = vec![
+        Box::new(ragent_agent::tool::tool_info::ToolInfoTool),
+        Box::new(ragent_agent::tool::tool_info::CommandsInfoTool),
+    ];
+    let expected = ragent_types::tool_args::no_parameters_schema();
+    for tool in &tools {
+        assert_eq!(
+            tool.parameters_schema(),
+            expected,
+            "{} must publish the shared parameterless schema",
+            tool.name()
+        );
+    }
+}
+
+#[test]
+fn test_parameterless_schema_is_a_closed_object() {
+    let schema = ragent_types::tool_args::no_parameters_schema();
+    // The validator only enforces closure when the schema names the type, the
+    // properties table and the refusal - all three together.
+    let names = closed_property_names(&schema).expect("closed schema");
+    assert!(
+        names.is_empty(),
+        "a parameterless schema declares no property, found {names:?}"
+    );
+}
+
+#[test]
+fn test_parameterless_schema_refuses_every_argument() {
+    let schema = ragent_types::tool_args::no_parameters_schema();
+
+    // The only accepted input is an empty object - what the harness sends for
+    // a tool call with no arguments.
+    assert!(validate_tool_input(&schema, &json!({})).is_ok());
+
+    for payload in [
+        json!({"anything": 1}),
+        json!({"path": "src/main.rs"}),
+        json!({"backgound": true}),
+    ] {
+        let err = validate_tool_input(&schema, &payload)
+            .expect_err("a parameterless tool must refuse any declared argument");
+        let text = err.to_string();
+        let key = payload
+            .as_object()
+            .and_then(|o| o.keys().next())
+            .expect("key");
+        assert!(
+            text.contains(key),
+            "refusal {text:?} must name the offending key {key:?}"
+        );
+    }
+}

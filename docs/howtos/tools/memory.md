@@ -1,8 +1,8 @@
 # Tools — Memory
 
-Three-tier memory: structured SQLite store (these tools), file blocks, and
-optional embedding-based semantic search. Structured memories carry a
-category, tags, and a confidence score.
+Two-tier memory: a structured SQLite store (these tools) and file blocks.
+Recall is full-text (SQLite FTS5); there is no embedding-based similarity
+tier. Structured memories carry a category, tags, and a confidence score.
 
 | Tool | Description |
 |------|-------------|

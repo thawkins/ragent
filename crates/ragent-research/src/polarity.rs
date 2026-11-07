@@ -5,6 +5,12 @@
 //! eliminate the duplicated `source_body_text` and `depth_from_count` helpers
 //! that previously existed in each module independently.
 
+// `polarity` is declared as a private module (`mod polarity;`), so `pub(crate)`
+// IS the minimum visibility here - widening to `pub` would expose internals the
+// module deliberately keeps crate-local. clippy's `redundant_pub_crate` assumes
+// the enclosing module is public, which it is not.
+#![allow(clippy::redundant_pub_crate)]
+
 use crate::locus::DepthLevel;
 use crate::source::Source;
 use regex::Regex;

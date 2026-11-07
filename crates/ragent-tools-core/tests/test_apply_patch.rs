@@ -252,8 +252,6 @@ async fn test_apply_patch_rejects_crlf_context_mismatch() {
 
 use ragent_tools_core::edit_log::{clear_edit_logs, is_edit_log_enabled, set_edit_log_enabled};
 
-static APPLY_PATCH_LOG_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 fn read_log_lines(log_dir: &std::path::Path) -> Vec<serde_json::Value> {
     let files: Vec<_> = std::fs::read_dir(log_dir)
         .unwrap()
@@ -282,7 +280,7 @@ fn read_log_lines(log_dir: &std::path::Path) -> Vec<serde_json::Value> {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_apply_patch_log_success_writes_jsonl() {
-    let _guard = APPLY_PATCH_LOG_MUTEX.lock().unwrap();
+    let _guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let log_dir = root.join("log").join("editlog");
@@ -324,7 +322,7 @@ async fn test_apply_patch_log_success_writes_jsonl() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_apply_patch_log_failure_writes_jsonl() {
-    let _guard = APPLY_PATCH_LOG_MUTEX.lock().unwrap();
+    let _guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let log_dir = root.join("log").join("editlog");

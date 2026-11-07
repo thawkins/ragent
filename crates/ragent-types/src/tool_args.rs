@@ -160,3 +160,34 @@ fn json_kind(value: &Value) -> &'static str {
         Value::Object(_) => "an object",
     }
 }
+/// The JSON schema for a tool that takes no parameters.
+///
+/// A parameterless tool (`codeindex_status`, `bash_reset`, `mf_version`,
+/// `tool_info`, `commands_info`, …) must still publish a schema, because the
+/// registry validates every tool definition and a model reads the schema to
+/// learn that the call takes nothing. The shape is always the same - an object
+/// that admits no properties - so it is written once here rather than
+/// hand-copied into every such tool, where a single divergent copy
+/// (`additionalProperties: true`, or a missing field) would let a model send
+/// arguments the tool silently ignores instead of the harness refusing them
+/// (spec `uniformtools` FR-032).
+///
+/// `additionalProperties: false` is load-bearing: the tool registry rejects a
+/// call carrying an undeclared property, and that rejection only fires when the
+/// schema says no property is declared.
+///
+/// # Examples
+///
+/// ```ignore
+/// fn parameters_schema(&self) -> Value {
+///     no_parameters_schema()
+/// }
+/// ```
+#[must_use]
+pub fn no_parameters_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+    })
+}

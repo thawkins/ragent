@@ -16,6 +16,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use ragent_types::tool_args::no_parameters_schema;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -146,11 +147,7 @@ impl Tool for ToolInfoTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        })
+        no_parameters_schema()
     }
 
     fn permission_category(&self) -> &'static str {
@@ -185,11 +182,7 @@ impl Tool for CommandsInfoTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        })
+        no_parameters_schema()
     }
 
     fn permission_category(&self) -> &'static str {

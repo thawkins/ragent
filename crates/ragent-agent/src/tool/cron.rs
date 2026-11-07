@@ -18,6 +18,7 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
+use ragent_types::tool_args::no_parameters_schema;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -241,11 +242,7 @@ impl Tool for CronListTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        })
+        no_parameters_schema()
     }
 
     fn permission_category(&self) -> &'static str {

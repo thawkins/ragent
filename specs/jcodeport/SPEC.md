@@ -98,8 +98,8 @@ server and headless Chrome when available.
 FR-M5-001: The `conversation_search` tool **shall** provide keyword, turn-range,
 and stats search modes over the current session messages.
 
-FR-M5-002: The `session_search` tool **shall** provide full-text + embedding
-search across all stored sessions, with filters for date, working_dir, provider,
+FR-M5-002: The `session_search` tool **shall** provide full-text (FTS5) search
+across all stored sessions, with filters for date, working_dir, provider,
 source, include_tools/system, and max_per_session.
 
 FR-M5-003: Session-message indexes **shall** be warmed in the background on

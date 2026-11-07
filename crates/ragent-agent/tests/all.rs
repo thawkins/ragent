@@ -415,6 +415,9 @@ mod test_perf023_task_cache;
 #[path = "test_permission_helpers.rs"]
 mod test_permission_helpers;
 
+#[path = "test_read_only_permission_categories.rs"]
+mod test_read_only_permission_categories;
+
 #[path = "test_plugin_bridge.rs"]
 mod test_plugin_bridge;
 
@@ -785,3 +788,9 @@ mod test_task_list_write_validation;
 
 #[path = "test_model_override_spellings.rs"]
 mod test_model_override_spellings;
+
+#[path = "test_permission_prompt.rs"]
+mod test_permission_prompt;
+
+#[path = "test_security_analyzer_request.rs"]
+mod test_security_analyzer_request;

@@ -76,7 +76,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use store::IndexStore;
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 use tree_cache::TreeCache;
 use types::{
     CodeIndexConfig, DEFAULT_SEARCH_LIMIT, DepDirection, FileEntry, GraphStatus, IndexResult,
@@ -290,7 +290,7 @@ impl CodeIndex {
         // and the background indexing worker.
         let mut results = {
             let fts = self.fts_guard();
-            debug!(
+            trace!(
                 query = %query.query,
                 kind = ?query.kind,
                 language = ?query.language,

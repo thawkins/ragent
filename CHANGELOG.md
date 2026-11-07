@@ -2,6 +2,147 @@
 
 ## [Unreleased]
 
+### Security
+
+- A GitLab instance base URL taken from `GITLAB_HOST`/`GITLAB_URL`, `ragent.json`,
+  or an explicit `/reverse` host is now validated before use by one shared rule
+  (`ragent_types::url_validation`). The URL must be absolute with no credentials
+  in it, and must be `https`, or `http` only on a loopback host; anything else is
+  refused by name instead of being silently accepted as a credential-exfiltrating
+  or plaintext endpoint. All three resolution sites agree.
+- Two types carried a derived `Debug` that printed live secrets:
+  `ragent_hyperresearch::Config` and the Copilot `DeviceFlowStart` device code.
+  Both now redact through `ragent_types::sanitize` / the shared config renderer.
+- The LLM security analyzer could be prompt-injected by the action it judges.
+  `tool_name` and `tool_input` are model-authored and were interpolated raw into
+  the analyzer prompt, so an input containing a newline could forge additional
+  `- tool:` / `- input:` lines and present the analyzer with a second, innocuous
+  action while the real one ran. Both values are now escaped to a single
+  `<value>...</value>` line, and the system prompt states that fenced bytes are
+  data and must never be followed as instructions.
+- `READ_ONLY_PERMISSION_CATEGORIES` classified thirteen genuinely read-only
+  permission categories as write-capable (`git:read`, `github:read`,
+  `gitlab:read`, `cron:read`, `agent:read`, `team:read`, `model:read`,
+  `web:read`, plus the `task` and `system` surfaces). A pure inspection
+  sub-agent (`explore`, plan reviewer) offered only `git_status`,
+  `github_list_issues` or `codeindex_search` therefore resolved a non-empty
+  write-capable set and received the automatic YOLO write scope instead of the
+  ordinary prompt policy. The list now names every read category the registry
+  actually declares, and `tests/test_read_only_permission_categories.rs` pins
+  it: the registry's category vocabulary is closed (a typo such as `git:reed`
+  fails loudly), the named read surfaces classify read-only, and the named
+  write surfaces still classify write-capable.
+
+### Fixed
+- Code audit remediation (rows 1-25 of `docs/reports/code-audit.md`):
+  - Redacted credentials on `--dry-run`, background-command, raw-URL and TUI
+    transition-spool log paths; deleted two tracked archives that carried live
+    secrets and added archive rules to `.gitignore`.
+  - Redacting `Debug` impls for the provider-key-bearing `Config` and for
+    `DeviceFlowStart` (which carried `device_code`).
+  - Routed the hyperresearch CLI's remaining `println!` through the
+    pipe-safe `cli_out` macros and registered that module in `ragent-types`.
+  - Demoted routine-success logging out of `warn!` (config attribution trail,
+    Git-Bash fallback, sub-agent launch) and moved the code-index per-query
+    message to `trace!`; `one_shot` now logs only the `StreamEvent` variant
+    name instead of its `Debug` body.
+  - Replaced a tautological `LogLevel` test and an empty language-detector
+    test with real assertions (pairwise distinctness; a reproducible
+    single-character result and genuine `None` cases).
+  - Patched six crates with patch-level updates (`uuid`, `flate2`, `globset`,
+    `notify`, `tree-sitter-cmake`, `unicode-width`) and moved nine crates to
+    `edition.workspace = true`.
+  - Unified three `EDIT_LOG_MODE` test guards on the crate-wide
+    `global_env_lock()` and standardised two `map_or(false, ..)` calls on
+    `is_some_and(..)`.
+  - Added the shared `no_parameters_schema()` helper and routed all eight
+    parameterless tools through it, with unit and end-to-end tests that fail
+    if the schema is opened up.
+  - Recorded audit row 21 as not-a-defect at the time: the 44 lockfile entries
+    flagged as orphans were live edges of `ragent-tools-extended`'s optional
+    `embeddings` dependencies. Those dependencies have since been removed
+    outright (see Changed), which retires the finding.
+
+- A closed stdout pipe no longer aborts the CLI with
+  `failed printing to stdout: Broken pipe`. The broken-pipe-safe helpers that
+  lived only in the `ragent` binary moved to `ragent_types::cli_out`, so
+  `hyperresearch` uses them too instead of `println!`. `ragent config show |
+  head -1` and `hyperresearch --help | head -1` now exit 0.
+- An MCP server entry that omitted `"type"` failed the whole config load. The
+  transport now defaults to `stdio`, matching the MCP convention every other
+  client follows, so a command-launched server needs no transport key. The same
+  default applies on every path that parses a server definition — the `mcp`
+  section of `ragent.json`, plugin `mcpServers` bridges, and connector
+  `servers`/`remote` entries — and serde still serializes an explicit `"type"`
+  when a config is written back.
+
+### Tests
+
+- Three undocumented security primitives now have direct coverage
+  (`tests/test_vault_id.rs`, `tests/test_untrusted_fence.rs`,
+  `tests/test_permission_prompt.rs`): note-id path-traversal rejection (empty,
+  `..`, separators, leading dot, non-ASCII, over-length, and a valid id that
+  stays inside the vault), fence-escape resistance (`Untrusted::fence` cannot be
+  closed early by a body or a source carrying the marker), and the interactive
+  permission prompt (timeout denies, a forged cross-session approval is ignored
+  and records no grant, `Always` records a durable grant, `--yes` does not
+  prompt, and a forced destructive-action checkpoint outranks `--yes`).
+- The LLM security analyzer's request is now pinned by
+  `tests/test_security_analyzer_request.rs`: no tools are offered, the response
+  is bounded (`temperature` 0.0, `max_tokens` 400), the reply schema and the
+  "prefer ask when uncertain" bias are stated, and the prompt shape is fixed
+  whatever the input contains.
+- `tests/test_mcp_type_default.rs` pins the `stdio` default from both ends: a
+  server entry that omits `type` deserialises as `McpTransport::Stdio`, and a
+  config written back still carries an explicit `"type": "stdio"`.
+- `tests/test_read_only_permission_categories.rs` guards the read/write
+  classification of the default registry (see Security above).
+- `tests/test_tool_param_schema.rs` grows the parameterless-tool cases: every
+  one of the eight `no_parameters_schema()` tools refuses an undeclared
+  argument end to end, so the shared helper cannot drift back open.
+
+### Changed
+
+- Removed the unfinished semantic-memory layer. The embeddings subsystem was
+  complete and tested but unwired at every link: the `embeddings` Cargo feature
+  was unreachable from any binary, `MemoryConfig.semantic` and `MemoryConfig.tier`
+  had no readers, and no code ever constructed an embedding provider, so
+  memory recall has always run on SQLite FTS5. Rather than advertise a tier that
+  could not be reached, the dead surface is deleted: `SemanticConfig` and the
+  `memory.tier` knob, the `EmbeddingProvider`/`NoOpEmbedding`/
+  `LocalEmbeddingProvider` module and its `cosine_similarity`/serialisation
+  helpers, `ragent_types::embedding`, the `EmbeddingMatch` DTO and the three
+  embedding methods on the tools-extended `StorageBackend` trait, and the
+  `memories.embedding` column, `messages_embedding` table plus its index, the
+  `store_*_embedding` / `list_*_embeddings` / `search_*_by_embedding` storage
+  methods and the `EmbeddingMatch` / `MessageEmbeddingMatch` types in
+  `ragent-storage`. The `ort`, `tokenizers` and `ndarray` workspace pins go with
+  them. `/doctor` now reports `memory system (blocks=..., structured=...)`, and
+  `session_search` is documented as FTS5-only (spec `jcodeport` FR-M5-002).
+- Sixteen items in `ragent-research`, `ragent-tui` and `ragent-agent` that were
+  declared `pub(crate)` inside private modules are now `pub`, because the
+  functions they expose (`parse_analysis_response_with_outcome`,
+  `reorder_findings_by_dependency`, `mcp_display_servers`,
+  `render_mcp_config`, `cancel_bg_task`, `request_agent_cancel`,
+  `execute_plan_delegation`, …) are reachable through a public module path and
+  are exercised by the external `tests/` suites. Each now carries a doc comment;
+  no behaviour changes.
+- `unused_async_trait_impl` joins `[workspace.lints.clippy]` as an allow. Clippy
+  1.99 extended the check from free functions to trait impls and inherent
+  methods; the flagged sites are the `opentelemetry_sdk` exporter traits (whose
+  signatures the SDK fixes) and the all-async `SpecIo` / `ResearchIo` /
+  `AgentManager` / `TeamManager` surfaces, where dropping `async` from the few
+  non-awaiting methods would force call sites to mix both forms of one helper
+  family.
+- `ragent_config::config::render_redacted` is now `pub` so a secret-bearing
+  config in another crate reuses the one JSON-then-redact renderer instead of
+  hand-writing a second `Debug` body.
+- `.gitignore` gains `*.zip`, `*.tar.gz` and `*.tgz` with an explicit
+  `!assets/connectors/fixtures/archives/*` negation, so an archive can no longer
+  be committed silently while the inert test fixtures stay tracked.
+- The code index's per-query message drops from `debug!` to `trace!`; it fires
+  on every search, which is the hot path rather than a debugging aid.
+
 ## [1.0.164] - 2026-11-06
 
 Deep-refactor audit train (`docs/reports/deep-refactor-audit.md`): fifteen

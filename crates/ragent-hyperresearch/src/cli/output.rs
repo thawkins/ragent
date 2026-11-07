@@ -20,6 +20,6 @@ pub enum Format {
 /// Returns a JSON error when the value cannot be serialised.
 pub fn emit_json(value: &impl serde::Serialize) -> crate::core::error::Result<()> {
     let text = serde_json::to_string_pretty(value)?;
-    println!("{text}");
+    ragent_types::cliprintln!("{text}");
     Ok(())
 }

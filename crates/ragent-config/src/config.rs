@@ -452,7 +452,13 @@ redacted_debug_impl!(Config);
 ///
 /// Falls back to a fixed placeholder when serialisation fails, so the impl can
 /// never panic and never leaks a partially-rendered value.
-fn render_redacted<T: serde::Serialize>(value: &T) -> String {
+///
+/// Public so a secret-bearing config in another crate can reuse this one
+/// implementation rather than hand-writing a second `Debug` body:
+/// `ragent_hyperresearch::Config` holds its provider API keys in a plain
+/// `Vec<(String, String)>` and routes its `Debug` through this function.
+#[must_use]
+pub fn render_redacted<T: serde::Serialize>(value: &T) -> String {
     match serde_json::to_string_pretty(value) {
         Ok(json) => ragent_types::sanitize::redact_secrets(&json),
         Err(e) => format!("<config: unserialisable: {e}>"),
@@ -1296,7 +1302,11 @@ pub struct CommandDef {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
     /// Transport mechanism used to communicate with the server.
-    #[serde(rename = "type")]
+    ///
+    /// A server entry that omits `type` is a stdio server: that is the MCP
+    /// convention every other client follows, so a missing key must load
+    /// rather than fail.
+    #[serde(rename = "type", default)]
     pub type_: McpTransport,
     /// Executable path or name (for stdio transport).
     pub command: Option<String>,
@@ -1359,10 +1369,14 @@ pub struct PriceEntry {
 }
 
 /// Transport protocol for MCP server communication.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum McpTransport {
     /// Communicate over the server process's stdin/stdout.
+    ///
+    /// The default: an MCP server entry that declares no `type` is a stdio
+    /// server.
+    #[default]
     Stdio,
     /// Communicate via Server-Sent Events over HTTP.
     Sse,
@@ -2613,7 +2627,7 @@ impl Config {
         // config's privileged runtime-flag keys, so an unexplained flip on disk
         // (the intermittent "YOLO keeps going off" report) can be tied back to
         // the keystroke or code path that caused it.
-        tracing::warn!(
+        tracing::info!(
             key,
             value,
             path = %path.display(),
@@ -3524,21 +3538,14 @@ impl Config {
 
 /// Memory system configuration.
 ///
-/// Controls the behaviour of the persistent memory system including file-based
-/// blocks, structured SQLite storage, semantic search (embeddings), and
-/// context retrieval.
+/// Controls the behaviour of the persistent memory system including
+/// structured SQLite storage and context retrieval.
 ///
 /// Override in `ragent.json`:
 /// ```json
 /// {
 ///   "memory": {
-///     "enabled": true,
-///     "tier": "semantic",
-///     "semantic": {
-///       "enabled": true,
-///       "model": "all-MiniLM-L6-v2",
-///       "dimensions": 384
-///     }
+///     "enabled": true
 ///   }
 /// }
 /// ```
@@ -3547,19 +3554,12 @@ pub struct MemoryConfig {
     /// Whether the memory system is enabled.
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Memory tier: "core" (file blocks only), "structured" (SQLite store),
-    /// or "semantic" (with embeddings).
-    #[serde(default = "default_memory_tier")]
-    pub tier: String,
     /// Structured store configuration.
     #[serde(default)]
     pub structured: StructuredMemoryConfig,
     /// Retrieval configuration for prompt injection.
     #[serde(default)]
     pub retrieval: RetrievalConfig,
-    /// Semantic search (embedding) configuration.
-    #[serde(default)]
-    pub semantic: SemanticConfig,
     /// Automatic memory extraction configuration.
     #[serde(default)]
     pub auto_extract: AutoExtractConfig,
@@ -3575,10 +3575,8 @@ impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            tier: default_memory_tier(),
             structured: StructuredMemoryConfig::default(),
             retrieval: RetrievalConfig::default(),
-            semantic: SemanticConfig::default(),
             auto_extract: AutoExtractConfig::default(),
             decay: DecayConfig::default(),
             cross_project: CrossProjectConfig::default(),
@@ -3598,73 +3596,6 @@ impl Default for StructuredMemoryConfig {
     fn default() -> Self {
         Self { enabled: true }
     }
-}
-
-/// Semantic search (embedding) configuration.
-///
-/// When enabled, structured memories are embedded using a local
-/// sentence-transformer model for similarity-based retrieval. This extends
-/// the existing FTS5 keyword search with cosine-similarity ranking.
-///
-/// # Feature flag
-///
-/// The `embeddings` Cargo feature must be enabled for the local ONNX-based
-/// embedding provider. When the feature is disabled, memory search falls back
-/// to FTS5-only mode regardless of this config.
-///
-/// ```json
-/// {
-///   "memory": {
-///     "semantic": {
-///       "enabled": true,
-///       "model": "all-MiniLM-L6-v2",
-///       "dimensions": 384
-///     }
-///   }
-/// }
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SemanticConfig {
-    /// Whether semantic search via embeddings is enabled.
-    ///
-    /// When `false` (default), memory search uses FTS5 keyword search only.
-    /// When `true` and the `embeddings` feature is compiled in, entries are
-    /// embedded and searched by cosine similarity.
-    #[serde(default = "default_semantic_enabled")]
-    pub enabled: bool,
-    /// Name of the ONNX sentence-transformer model to use.
-    ///
-    /// Currently only `all-MiniLM-L6-v2` is supported. The model file is
-    /// downloaded on first use to the ragent data directory.
-    #[serde(default = "default_semantic_model")]
-    pub model: String,
-    /// Embedding vector dimensions (must match the model output).
-    ///
-    /// `all-MiniLM-L6-v2` produces 384-dimensional vectors.
-    #[serde(default = "default_semantic_dimensions")]
-    pub dimensions: usize,
-}
-
-impl Default for SemanticConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_semantic_enabled(),
-            model: default_semantic_model(),
-            dimensions: default_semantic_dimensions(),
-        }
-    }
-}
-
-fn default_semantic_enabled() -> bool {
-    false
-}
-
-fn default_semantic_model() -> String {
-    "all-MiniLM-L6-v2".to_string()
-}
-
-fn default_semantic_dimensions() -> usize {
-    384
 }
 
 /// Retrieval configuration for injecting memories into the system prompt.
@@ -3703,10 +3634,6 @@ impl Default for RetrievalConfig {
             relevance_weight: default_relevance_weight(),
         }
     }
-}
-
-fn default_memory_tier() -> String {
-    "core".to_string()
 }
 
 fn default_max_memories_per_prompt() -> usize {

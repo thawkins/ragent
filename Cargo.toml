@@ -119,6 +119,17 @@ double_must_use = "allow"
 # An intentional production `.unwrap()`/`.expect()` is exempted in place with a
 # same-line `// no-panic-ok: <reason>` (see scripts/check_security_unwraps.py).
 unused_async = "allow"
+# Clippy 1.99 extended the unused-async check from free functions to trait
+# impls and inherent methods (`unused_async_trait_impl`). The sites it flags in
+# this workspace are deliberate, for the same reason `unused_async` above is
+# allowed:
+#   * `opentelemetry_sdk` async trait impls (`LogExporter::export`,
+#     `PushMetricExporter::export`) whose signatures are fixed by the SDK;
+#   * an all-async file-I/O surface (`SpecIo`, `ResearchIo`) and an all-async
+#     manager API (`AgentManager`, `TeamManager`, `Coordinator`) where dropping
+#     `async` from the few methods that happen not to await would force call
+#     sites to mix `.await` and non-`.await` forms of the same helper family.
+unused_async_trait_impl = "allow"
 # Additional lints from second auto-fix pass
 bool_to_int_with_if = "allow"
 cast_lossless = "allow"
@@ -294,11 +305,6 @@ ragent-tools-extended = { path = "crates/ragent-tools-extended" }
 
 # ── Benchmarking ─────────────────────────────────────────────────────────
 criterion = { version = "0.8", features = ["html_reports"] }
-
-# ── Embeddings (optional, feature-gated) ────────────────────────────────
-ort = { version = "2.0.0-rc.12", features = ["download-binaries", "load-dynamic"] }
-tokenizers = { version = "0.21", default-features = false, features = ["onig", "esaxx_fast"] }
-ndarray = "0.17"
 
 # ── Natural-language detection ──────────────────────────────────────────
 # Used by masterfetch (`mf_fetch`) to derive the human language of each

@@ -31,6 +31,7 @@ use ragent_connectors::{ConnectorSession, store_dirs};
 
 mod cli;
 mod cli_out;
+use crate::cli_out::{cliprint, cliprintln, cliprintln_err};
 
 mod cli_surface;
 mod connectors;

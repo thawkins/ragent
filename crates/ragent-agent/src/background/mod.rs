@@ -212,7 +212,7 @@ impl BackgroundTaskService {
         debug!(
             task_id = %task_id,
             session_id = %session_id,
-            command = %command,
+            command = %crate::sanitize::redact_secrets(command),
             "Background task spawned"
         );
         Ok(task_id)

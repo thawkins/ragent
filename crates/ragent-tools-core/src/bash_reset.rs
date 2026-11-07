@@ -4,7 +4,8 @@
 //! command starts fresh from the agent's working directory.
 
 use anyhow::Result;
-use serde_json::{Value, json};
+use ragent_types::tool_args::no_parameters_schema;
+use serde_json::Value;
 
 use super::bash::state_file_path;
 use super::{Tool, ToolContext, ToolOutput};
@@ -28,11 +29,7 @@ impl Tool for BashResetTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        })
+        no_parameters_schema()
     }
 
     fn permission_category(&self) -> &'static str {

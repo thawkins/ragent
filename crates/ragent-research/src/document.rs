@@ -2376,19 +2376,7 @@ pub fn neutralise_fenced_body(body: &str) -> String {
 /// Non-URL input is returned unchanged.
 #[must_use]
 pub fn mask_url_credentials(url: &str) -> String {
-    let Some((scheme, rest)) = url.split_once("://") else {
-        return url.to_string();
-    };
-    let (authority, tail) = match rest.find(['/', '?', '#']) {
-        Some(pos) => (&rest[..pos], &rest[pos..]),
-        None => (rest, ""),
-    };
-    let host = authority.rsplit('@').next().unwrap_or(authority);
-    let path = match tail.find(['?', '#']) {
-        Some(pos) => &tail[..pos],
-        None => tail,
-    };
-    format!("{scheme}://{host}{path}")
+    ragent_types::sanitize::mask_url_credentials(url)
 }
 
 /// Truncate `body` to at most `max_bytes` UTF-8 bytes, cutting at the nearest

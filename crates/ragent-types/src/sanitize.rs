@@ -324,6 +324,42 @@ pub fn mask_key(key: &str) -> String {
     format!("...{}", &key[start..])
 }
 
+/// Strip userinfo and the query string from a URL for safe logging.
+///
+/// Search-hit and open-access-recovered URLs regularly carry credentials or
+/// presigned tokens in the query string (`?access_token=...`) and in the
+/// userinfo component (`user:pass@host`). A log line keeps the scheme/host/path
+/// so it stays diagnostically useful while the secret-bearing components are
+/// dropped. Non-URL input is returned unchanged.
+///
+/// # Examples
+///
+/// ```rust
+/// use ragent_types::sanitize::mask_url_credentials;
+///
+/// assert_eq!(
+///     mask_url_credentials("https://user:pw@example.com/a?access_token=x"),
+///     "https://example.com/a"
+/// );
+/// assert_eq!(mask_url_credentials("not a url"), "not a url");
+/// ```
+#[must_use]
+pub fn mask_url_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let (authority, tail) = match rest.find(['/', '?', '#']) {
+        Some(pos) => (&rest[..pos], &rest[pos..]),
+        None => (rest, ""),
+    };
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    let path = match tail.find(['?', '#']) {
+        Some(pos) => &tail[..pos],
+        None => tail,
+    };
+    format!("{scheme}://{host}{path}")
+}
+
 /// Recursively redact credential-shaped strings inside a JSON value.
 ///
 /// Walks every object and array and applies [`redact_secrets`] to each string

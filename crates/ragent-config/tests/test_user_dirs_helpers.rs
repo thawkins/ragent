@@ -114,11 +114,6 @@ fn test_global_state_and_subdirectory_helpers() {
         &user_dirs::global_gitlab_config_path(),
         "gitlab_config.json",
     );
-    assert_child(
-        &root.join("models"),
-        &user_dirs::global_embedding_model_dir(),
-        "all-MiniLM-L6-v2",
-    );
 }
 
 #[test]

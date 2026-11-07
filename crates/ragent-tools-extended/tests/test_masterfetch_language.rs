@@ -29,11 +29,54 @@ fn empty_text_returns_none() {
 }
 
 #[test]
-fn very_short_text_returns_none_or_some() {
-    // Single characters are not reliably detectable; the helper must not
-    // panic regardless of the outcome.
-    let _ = detect_language("a");
+fn single_character_returns_some_or_none_but_never_a_panic() {
+    // `lingua` returns whichever language its n-gram model scores highest, so a
+    // single character can yield a confident-but-meaningless guess ("a" and "x"
+    // both score Somali) rather than `None`. Pinning the exact language would
+    // encode a training-data accident, so this pins the CONTRACT instead: the
+    // call terminates with a well-formed answer and never panics, and any
+    // language it does return is a non-empty name from the supported set.
+    for text in ["a", "x", "ab", "a b"] {
+        match detect_language(text) {
+            Some(name) => assert!(
+                !name.trim().is_empty(),
+                "detect_language({text:?}) returned a blank language name"
+            ),
+            None => {}
+        }
+    }
 }
+
+#[test]
+fn single_character_result_is_reproducible() {
+    // A one-character input is the marginal case where a change in the model,
+    // the language set, or the accuracy mode would show up first. Whatever it
+    // decides, it must decide it consistently - a detector that answered
+    // differently on a second call would make the References Index unstable.
+    for text in ["a", "x", "ab"] {
+        assert_eq!(
+            detect_language(text),
+            detect_language(text),
+            "detect_language({text:?}) is not reproducible"
+        );
+    }
+}
+
+#[test]
+fn digit_only_text_returns_none() {
+    // Digits carry no linguistic signal in any supported language, so `lingua`
+    // declines to answer. This is the genuine `None` short-input case - the
+    // counterpart to the single-character one above, which does produce a guess.
+    assert_eq!(detect_language("1"), None);
+    assert_eq!(detect_language("12345"), None);
+}
+
+#[test]
+fn punctuation_only_text_returns_none() {
+    assert_eq!(detect_language("!!"), None);
+    assert_eq!(detect_language("... --- ..."), None);
+}
+
 #[test]
 fn best_effort_falls_back_for_short_text() {
     // The normal detector may or may not return None for very short snippets

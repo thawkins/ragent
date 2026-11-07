@@ -54,8 +54,6 @@ mod test_cron_storage_round_trip;
 mod test_dead_tables_dropped;
 #[path = "test_discovered_models.rs"]
 mod test_discovered_models;
-#[path = "test_embedding_store.rs"]
-mod test_embedding_store;
 #[path = "test_format_version_cache.rs"]
 mod test_format_version_cache;
 #[path = "test_initiative_lifecycle.rs"]
@@ -66,8 +64,6 @@ mod test_initiatives;
 mod test_knowledge_graph_crud;
 #[path = "test_memory_crud.rs"]
 mod test_memory_crud;
-#[path = "test_message_embeddings.rs"]
-mod test_message_embeddings;
 #[path = "test_message_parts_update.rs"]
 mod test_message_parts_update;
 #[path = "test_message_retention.rs"]

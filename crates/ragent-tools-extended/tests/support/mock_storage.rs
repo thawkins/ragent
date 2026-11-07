@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use ragent_tools_extended::storage::{EmbeddingMatch, MemoryRow, StorageBackend, TaskRow};
+use ragent_tools_extended::storage::{MemoryRow, StorageBackend, TaskRow};
 
 /// In-memory mock storage for testing the todo tool.
 ///
@@ -265,21 +265,6 @@ impl StorageBackend for MockStorage {
         Ok(Vec::new())
     }
     fn list_memories(&self, _project: &str, _limit: usize) -> anyhow::Result<Vec<MemoryRow>> {
-        Ok(Vec::new())
-    }
-    fn store_memory_embedding(&self, _id: i64, _embedding_blob: &[u8]) -> anyhow::Result<bool> {
-        Ok(false)
-    }
-    fn list_memory_embeddings(&self) -> anyhow::Result<Vec<(i64, Vec<u8>)>> {
-        Ok(Vec::new())
-    }
-    fn search_memories_by_embedding(
-        &self,
-        _query_embedding: &[f32],
-        _dimensions: usize,
-        _limit: usize,
-        _min_similarity: f32,
-    ) -> anyhow::Result<Vec<EmbeddingMatch>> {
         Ok(Vec::new())
     }
 }

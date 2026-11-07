@@ -608,11 +608,6 @@ async fn test_batch_stale_file_rejected() {
 // -- Edit-log instrumentation for multi_edit (editlog spec) ------------------
 
 use ragent_tools_core::edit_log::{clear_edit_logs, set_edit_log_enabled};
-use std::sync::Mutex;
-
-/// All edit-log tests use a process-wide flag and the working-dir `log/` path,
-/// so they must run serialised to avoid one test clearing logs another just wrote.
-static EDIT_LOG_MUTEX: Mutex<()> = Mutex::new(());
 
 /// Wait up to one second for an edits jsonl file to appear in `log_dir`.
 fn wait_for_edit_log_file(log_dir: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -638,7 +633,7 @@ fn wait_for_edit_log_file(log_dir: &std::path::Path) -> Option<std::path::PathBu
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_multiedit_log_success_writes_jsonl() {
-    let _guard = EDIT_LOG_MUTEX.lock().unwrap();
+    let _guard = crate::global_env_lock();
     clear_edit_logs(std::env::temp_dir().as_path());
     let tmp = TempDir::new().unwrap();
     let log_dir = tmp.path().join("log").join("editlog");
@@ -683,7 +678,7 @@ async fn test_multiedit_log_success_writes_jsonl() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_multiedit_log_failure_writes_jsonl() {
-    let _guard = EDIT_LOG_MUTEX.lock().unwrap();
+    let _guard = crate::global_env_lock();
     clear_edit_logs(std::env::temp_dir().as_path());
     let tmp = TempDir::new().unwrap();
     let log_dir = tmp.path().join("log").join("editlog");

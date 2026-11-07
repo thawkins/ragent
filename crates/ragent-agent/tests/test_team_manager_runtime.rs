@@ -478,7 +478,7 @@ async fn test_add_task_with_next_id_allocates_unique_ids_concurrently() {
         let store = std::sync::Arc::clone(&store);
         handles.push(tokio::spawn(async move {
             store
-                .add_task_with_next_id(|id| Task::new(&id, &format!("t{i}")))
+                .add_task_with_next_id(|id| Task::new(&id, format!("t{i}")))
                 .await
                 .map(|(task, _)| task.id)
         }));

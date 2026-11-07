@@ -720,7 +720,13 @@ fn parse_api_error_message(body: &str) -> Option<String> {
 // -- Device Flow OAuth --------------------------------------------
 
 /// Response from `github.com/login/device/code`.
-#[derive(Debug, Clone, Deserialize)]
+///
+/// `device_code` is the OAuth credential the poll endpoint exchanges for an
+/// access token - the workspace treats it as secret everywhere else (T-066) -
+/// so there is no derived `Debug`: the hand-written impl below redacts it. The
+/// user-facing `user_code` and `verification_uri` stay readable, because they
+/// are what the operator has to type into a browser.
+#[derive(Clone, Deserialize)]
 pub struct DeviceFlowStart {
     /// Opaque device code used when polling for the access token.
     pub device_code: String,
@@ -732,6 +738,18 @@ pub struct DeviceFlowStart {
     pub expires_in: u64,
     /// Minimum polling interval in seconds.
     pub interval: u64,
+}
+
+impl std::fmt::Debug for DeviceFlowStart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceFlowStart")
+            .field("device_code", &"[REDACTED]")
+            .field("user_code", &self.user_code)
+            .field("verification_uri", &self.verification_uri)
+            .field("expires_in", &self.expires_in)
+            .field("interval", &self.interval)
+            .finish()
+    }
 }
 
 /// Initiates the GitHub device flow for Copilot OAuth.

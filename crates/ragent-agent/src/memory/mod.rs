@@ -6,16 +6,11 @@
 //! source). Freeform Markdown file blocks have been removed in favour of the
 //! structured-memory backend.
 
-pub mod embedding;
 pub mod extract;
 pub mod knowledge_graph;
 pub mod store;
 pub mod visualisation;
 
-pub use embedding::{
-    EmbeddingProvider, NoOpEmbedding, SimilarityResult, cosine_similarity, deserialise_embedding,
-    serialise_embedding,
-};
 pub use extract::{
     ExtractionEngine, MemoryCandidate, SessionMessageSummary, ToolCallSummary, decay_confidence,
 };

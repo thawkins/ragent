@@ -16,8 +16,9 @@
 
 pub mod activity;
 pub mod automation;
+/// Broken-pipe-safe stdout/stderr output for CLI presentation surfaces.
+pub mod cli_out;
 pub mod cron;
-pub mod embedding;
 pub mod error;
 pub mod event;
 /// SEC-ragent-*-001 (SECTASKS MS-05 T-067/T-068): shared security guards.
@@ -47,6 +48,7 @@ pub mod tool_bridge;
 /// The FR-023 tool-rename table (spec `uniformtools`).
 pub mod tool_rename;
 pub mod trigger;
+pub mod url_validation;
 
 // Re-export commonly used types
 pub use activity::{

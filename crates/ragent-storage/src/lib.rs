@@ -2,7 +2,7 @@
 //!
 //! This crate provides:
 //! - Session storage (conversations, messages, history)
-//! - Memory storage (memory blocks, structured memories, embeddings)
+//! - Memory storage (memory blocks, structured memories)
 //! - Snapshot storage (file snapshots, diffs)
 //! - Team storage (team state, mailboxes, tasks)
 
@@ -16,11 +16,11 @@ pub mod storage;
 pub use activity_log::{ActivityLog, AppendError};
 pub use snapshot::{IncrementalSnapshot, Snapshot};
 pub use storage::{
-    BackgroundTaskRow, ConversationStats, CronEventRow, CycleError, EmbeddingMatch,
-    InitiativeMilestone, InitiativeRow, KgEntityRow, KgRelationshipRow, MemoryRow,
-    MessageEmbeddingMatch, MessageSearchResult, RunCostSummaryRow, SCHEMA_VERSION, SessionRow,
-    SessionSearchParams, Storage, TaskDerived, TaskRow, TaskUpdateParams, TaskView,
-    compute_task_dag, decrypt_key, deobfuscate_key, detect_cycle, encrypt_key, obfuscate_key,
+    BackgroundTaskRow, ConversationStats, CronEventRow, CycleError, InitiativeMilestone,
+    InitiativeRow, KgEntityRow, KgRelationshipRow, MemoryRow, MessageSearchResult,
+    RunCostSummaryRow, SCHEMA_VERSION, SessionRow, SessionSearchParams, Storage, TaskDerived,
+    TaskRow, TaskUpdateParams, TaskView, compute_task_dag, decrypt_key, deobfuscate_key,
+    detect_cycle, encrypt_key, obfuscate_key,
 };
 
 // Backward-compatible aliases for code that has not yet migrated (e.g.

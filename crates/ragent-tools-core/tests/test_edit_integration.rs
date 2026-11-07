@@ -575,12 +575,10 @@ async fn test_read_then_edit_no_stale_error() {
 
 use ragent_tools_core::edit_log::{clear_edit_logs, is_edit_log_enabled, set_edit_log_enabled};
 
-static LOG_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_edit_log_success_writes_jsonl() {
-    let _guard = LOG_TEST_MUTEX.lock().unwrap();
+    let _guard = crate::global_env_lock();
     let tmp = TempDir::new().unwrap();
     let log_dir = tmp.path().join("log").join("editlog");
     set_edit_log_enabled(true);
@@ -638,7 +636,7 @@ async fn test_edit_log_success_writes_jsonl() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_edit_log_dry_run_writes_jsonl() {
-    let _guard = LOG_TEST_MUTEX.lock().unwrap();
+    let _guard = crate::global_env_lock();
     let tmp = TempDir::new().unwrap();
     let log_dir = tmp.path().join("log").join("editlog");
     set_edit_log_enabled(true);
@@ -692,7 +690,7 @@ async fn test_edit_log_dry_run_writes_jsonl() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_edit_log_failure_writes_jsonl() {
-    let _guard = LOG_TEST_MUTEX.lock().unwrap();
+    let _guard = crate::global_env_lock();
     let tmp = TempDir::new().unwrap();
     let log_dir = tmp.path().join("log").join("editlog");
     set_edit_log_enabled(true);
@@ -743,7 +741,7 @@ async fn test_edit_log_failure_writes_jsonl() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_edit_log_disabled_does_not_write() {
-    let _guard = LOG_TEST_MUTEX.lock().unwrap();
+    let _guard = crate::global_env_lock();
     // Disable logging before creating the temp dir so `log/` is never created.
     set_edit_log_enabled(false);
     assert!(!is_edit_log_enabled());
@@ -924,7 +922,7 @@ async fn test_edit_log_captures_match_lane_for_flexible_fallback() {
     // outcome so future analyses can quantify fallback frequency.
     // Guard held across await on purpose: edit-log tests run serialised to
     // avoid one test clearing logs another just wrote.
-    let _guard = LOG_TEST_MUTEX.lock().unwrap();
+    let _guard = crate::global_env_lock();
     let tmp = TempDir::new().unwrap();
     set_edit_log_enabled(true);
 

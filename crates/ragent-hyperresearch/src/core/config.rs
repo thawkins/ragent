@@ -33,7 +33,14 @@ pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
 pub const DEFAULT_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Fully resolved configuration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Note there is no derived `Debug`: `provider_keys` holds plaintext provider
+/// API keys, and a derived impl printed them verbatim on any `{:?}`. The
+/// hand-written impl below routes the rendering through
+/// [`ragent_config::config::render_redacted`], the same JSON-then-redact
+/// renderer `ragent_config::Config` uses, so a newly-added secret field is
+/// masked automatically.
+#[derive(Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Config {
     /// Root directory of the research vault.
     pub vault_root: PathBuf,
@@ -47,6 +54,12 @@ pub struct Config {
     pub max_body_bytes: u64,
     /// Active research profile name (FR-031).
     pub profile: String,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&ragent_config::config::render_redacted(self))
+    }
 }
 
 impl Default for Config {

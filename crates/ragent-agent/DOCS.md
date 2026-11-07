@@ -27,7 +27,6 @@ storage, LLM, tools, and types crates behind the agent runtime.
 - chrono, uuid, regex, once_cell
 - futures, async-trait, async-stream
 
-Optional: `embeddings` feature for local ONNX semantic search.
 Benchmarks: criterion (`agent_loop`).
 
 ## Public API (crate root)
@@ -54,7 +53,7 @@ etc.).
 - **id** — Newtype IDs: `SessionId`, `MessageId`, `ProviderId`, `ToolCallId`.
 - **loop_state** — Stateful cron mode: `<loop-state>`/`<inbox>` tag parsing + persistence.
 - **mcp** — MCP client (stdio + HTTP), server discovery, tool bridging.
-- **memory** — Structured memory, extraction engine, knowledge graph, embedding search, visualisation.
+- **memory** — Structured memory, extraction engine, knowledge graph, visualisation.
 - **message** — Re-export of `ragent_types::message`.
 - **orchestrator** — Multi-agent orchestration: registry, router, coordinator, leader election, conflict resolution.
 - **perf** — Agent-loop profiling flag (env/config/runtime override).

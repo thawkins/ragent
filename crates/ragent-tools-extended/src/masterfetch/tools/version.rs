@@ -8,6 +8,7 @@
 //! formatted text with structured metadata.
 
 use anyhow::Result;
+use ragent_types::tool_args::no_parameters_schema;
 use serde_json::{Value, json};
 
 use super::super::MASTERFETCH_VERSION;
@@ -40,11 +41,7 @@ impl Tool for MfVersionTool {
     }
 
     fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        })
+        no_parameters_schema()
     }
     fn permission_category(&self) -> &'static str {
         "system"

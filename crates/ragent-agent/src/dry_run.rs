@@ -365,6 +365,10 @@ fn parse_config_str(content: &str, source: &str) -> Result<Config, String> {
             .lines()
             .nth(line.saturating_sub(1))
             .unwrap_or("<line not found>");
+        // The echoed line is whatever the user pasted into the file, so a
+        // `"tavily_api_key": "..."` or a `"token": "..."` would be printed
+        // verbatim to stdout. Redact before it reaches the report.
+        let problematic_line = crate::sanitize::redact_secrets(problematic_line);
         format!(
             "Failed to parse {source} at line {line}, column {column}: {e}\nProblematic line: {problematic_line}"
         )

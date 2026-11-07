@@ -305,7 +305,7 @@ impl CrawlFetcher for HttpCrawlFetcher {
         // SSRF validation (defence in depth - the start URL was already
         // validated, but discovered links should also be checked).
         if let Err(e) = validate_url(url) {
-            tracing::warn!(url = url, error = %e, "crawl: skipping URL that failed SSRF validation");
+            tracing::warn!(url = %masked_url(url), error = %e, "crawl: skipping URL that failed SSRF validation");
             return None;
         }
 
@@ -315,11 +315,11 @@ impl CrawlFetcher for HttpCrawlFetcher {
             match self.robots.is_allowed(url, DEFAULT_USER_AGENT).await {
                 Ok(true) => {}
                 Ok(false) => {
-                    tracing::debug!(url = url, "crawl: skipping URL disallowed by robots.txt");
+                    tracing::debug!(url = %masked_url(url), "crawl: skipping URL disallowed by robots.txt");
                     return None;
                 }
                 Err(e) => {
-                    tracing::warn!(url = url, error = %e, "crawl: robots.txt check failed; allowing by default");
+                    tracing::warn!(url = %masked_url(url), error = %e, "crawl: robots.txt check failed; allowing by default");
                 }
             }
         }
@@ -330,18 +330,18 @@ impl CrawlFetcher for HttpCrawlFetcher {
             Err(e) => {
                 // Non-fatal: the single page is skipped and the crawl
                 // continues, so this is a warning, not an error.
-                tracing::warn!(url = url, error = %e, "crawl: failed to get HTTP client");
+                tracing::warn!(url = %masked_url(url), error = %e, "crawl: failed to get HTTP client");
                 return None;
             }
         };
 
-        tracing::debug!(url = url, "crawl: fetching page");
+        tracing::debug!(url = %masked_url(url), "crawl: fetching page");
 
         // Fetch the URL.
         let response = match client.get(url).send().await {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!(url = url, error = %e, "crawl: HTTP request failed");
+                tracing::warn!(url = %masked_url(url), error = %e, "crawl: HTTP request failed");
                 return None;
             }
         };
@@ -364,23 +364,25 @@ impl CrawlFetcher for HttpCrawlFetcher {
         let content_length = response.content_length().unwrap_or(0) as usize;
         if content_length > MAX_CRAWL_PAGE_BYTES {
             tracing::warn!(
-                url = url,
+                url = %masked_url(url),
                 content_length,
                 cap = MAX_CRAWL_PAGE_BYTES,
                 "crawl: skipping page whose declared size exceeds the cap"
             );
             return None;
         }
-        let body =
-            match crate::masterfetch::http::read_body_capped_lossy(response, MAX_CRAWL_PAGE_BYTES)
-                .await
-            {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::warn!(url = url, error = %e, "crawl: failed to read body");
-                    return None;
-                }
-            };
+        let body = match crate::masterfetch::http::read_body_capped_lossy(
+            response,
+            MAX_CRAWL_PAGE_BYTES,
+        )
+        .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(url = %masked_url(url), error = %e, "crawl: failed to read body");
+                return None;
+            }
+        };
 
         // Classify and extract content.
         let classify_result =
@@ -418,6 +420,18 @@ impl CrawlFetcher for HttpCrawlFetcher {
 }
 
 // ---------------------------------------------------------------------------
+// Secret-safe log formatting
+// ---------------------------------------------------------------------------
+
+/// `url = url` for a tracing event, with credentials masked.
+///
+/// A discovered crawl link routinely carries `?access_token=...` or
+/// `user:pass@host`; the warn paths fire on every failure, so a raw value would
+/// persist a presigned token in the log.
+fn masked_url(url: &str) -> String {
+    ragent_types::sanitize::mask_url_credentials(url)
+}
+
 // Report formatting
 // ---------------------------------------------------------------------------
 

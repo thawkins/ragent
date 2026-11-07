@@ -3414,8 +3414,11 @@ impl App {
         };
         // Control characters in the buffer would break one-transition-per-line
         // readability, so newlines and tabs are escaped rather than emitted raw.
+        // The buffer is also redacted before it is persisted: a pasted API key
+        // reaches the input field verbatim, and this spool outlives the session.
         let escape = |s: &str| {
-            s.replace('\\', "\\\\")
+            ragent_types::sanitize::redact_secrets(s)
+                .replace('\\', "\\\\")
                 .replace('\n', "\\n")
                 .replace('\r', "\\r")
                 .replace('\t', "\\t")

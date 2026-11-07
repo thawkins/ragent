@@ -77,9 +77,6 @@ mod test_codeindex_registry;
 #[path = "test_codeindex_status_busy.rs"]
 mod test_codeindex_status_busy;
 
-#[path = "test_embedding.rs"]
-mod test_embedding;
-
 #[path = "test_govcreate_nfr004.rs"]
 mod test_govcreate_nfr004;
 

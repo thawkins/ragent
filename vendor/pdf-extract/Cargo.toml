@@ -78,3 +78,14 @@ version = "2.6.2"
 
 [profile.release]
 debug = 2
+
+# The crate is vendored into the ragent workspace but consumed via a path
+# dependency; this empty workspace table keeps it out of ragent's workspace
+# resolution so its own tests can be run standalone from this directory.
+[workspace]
+
+# Dev-dependencies used only by this vendored crate's own standalone test
+# suite. ragent consumes the crate as a path dependency, so its dev-deps are
+# never built; cargo-machete cannot see the references and flags them.
+[package.metadata.cargo-machete]
+ignored = ["simple_logger", "test-log", "ureq"]

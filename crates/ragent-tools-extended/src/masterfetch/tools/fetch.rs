@@ -244,6 +244,16 @@ impl Tool for MfFetchTool {
     }
 }
 
+/// `url = url` for a tracing event, with credentials masked.
+///
+/// A fetch target routinely carries `?access_token=...` or `user:pass@host`
+/// (presigned links are the normal case for an open-access paper); the warn
+/// paths fire on every robots.txt failure, so a raw value would persist the
+/// token in the log.
+fn masked_url(url: &str) -> String {
+    ragent_types::sanitize::mask_url_credentials(url)
+}
+
 /// Fetch and extract a single URL.
 ///
 /// This helper contains the full fetch pipeline for one target URL: SSRF
@@ -270,7 +280,7 @@ async fn fetch_one_url(
             }
             Ok(true) => {}
             Err(e) => {
-                tracing::warn!(url = url, error = %e, "mf_fetch: robots.txt check failed; allowing by default");
+                tracing::warn!(url = %masked_url(url), error = %e, "mf_fetch: robots.txt check failed; allowing by default");
             }
         }
     }

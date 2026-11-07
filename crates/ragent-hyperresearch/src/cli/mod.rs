@@ -3,7 +3,8 @@
 //! One module per subcommand group. Every command returns `Result<_, Error>`
 //! and every result is emitted through [`cli::output`], which supports plain and
 //! JSON formats and maps failures to a non-zero exit status without panicking on
-//! user input. `println!` is allowed here and nowhere else in the crate (NFR-005).
+//! user input. Output goes through [`ragent_types::cli_out`], whose macros
+//! tolerate a closed pipe; `println!` is used nowhere in the crate (NFR-005).
 
 pub mod args;
 pub mod output;
@@ -18,7 +19,7 @@ use crate::core::error::Result;
 pub fn run(args: args::Cli) -> Result<()> {
     match args.command {
         args::Command::Help => {
-            println!("{}", args::USAGE);
+            ragent_types::cliprintln!("{}", args::USAGE);
             Ok(())
         }
     }

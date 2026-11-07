@@ -179,12 +179,40 @@ pub const READ_ONLY_PERMISSION_CATEGORIES: &[&str] = &[
     "web",
     "web:fetch",
     "web:search",
+    "web:read",
     "network",
     "model",
+    "model:read",
     "shell:open",
     "memory:read",
     "spec:read",
     "skill:read",
+    // Version-control and forge READ surfaces. These read the working tree or
+    // a remote API and never mutate either, so a sub-agent offered only these
+    // stays a read-only explorer. Omitting them classified `git_status`,
+    // `github_list_issues`, `gitlab_list_pipelines` and friends as
+    // write-capable and handed a pure inspection run the YOLO write scope.
+    "git:read",
+    "github:read",
+    "gitlab:read",
+    // Non-mutating scheduling and coordination surfaces: `cron_list` reads the
+    // schedule, `list_agents` reads the sub-agent table, and the team read
+    // tools (task list, mailbox read, team memory read) never write. The
+    // mutating team categories (`team:manage`, `team:communicate`) stay
+    // write-capable, as does `team:tasks` - `team_task_claim` and
+    // `team_task_complete` share it with the read-only `team_task_list`.
+    "cron:read",
+    "agent:read",
+    "team:read",
+    // `TaskList`/`TaskGet` (the session task tracker) and the read-only
+    // plan-mode and system introspection tools. `task` is declared by all four
+    // `Task*` tools; three of them only read the session task list, and the
+    // mutating `TaskCreate`/`TaskUpdate` are separately permission-gated by the
+    // tracker itself.
+    "task",
+    // `model_info` is covered by `model`; `mf_version` / `mf_cache_clear` are
+    // host introspection and must not be read as workspace writes.
+    "system",
 ];
 
 /// Return `true` when a tool whose declared permission category is `category`

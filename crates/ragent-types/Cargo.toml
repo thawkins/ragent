@@ -2,7 +2,7 @@
 autotests = false
 name = "ragent-types"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 rust-version.workspace = true
 authors = ["Tim Hawkins"]
 license = "MIT"
@@ -20,6 +20,7 @@ chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 memchr = "2"
 rusqlite = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

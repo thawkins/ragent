@@ -1,33 +1,43 @@
 # Project Statistics
 
-**Version:** 1.0.161
+**Version:** 1.0.164
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
 > Metrics below are measured against the current working tree at the
-> `1.0.161` state **plus the uncommitted research pass**. That pass adds the
-> `newsletter` output format (a reader-facing layout that drops the audit-trail
-> sections), names the report title with the LLM from the generated executive
-> summary (`LlmAnalysisEngine::summarize_title` normalised by
-> `clean_generated_title`) instead of truncating that summary's first 80
-> characters, and widens a concept's `**Definition**` from one paragraph to
-> three (roughly 120-200 words). Two test modules land with it
-> (`tests/test_newsletter_format.rs`, `tests/test_title_extraction.rs`) and the
-> `research` slash-command page, `docs/howtos/research.md`, README, QUICKSTART
-> and TUI-QUICKSTART now document the new format.
+> `1.0.164` state **plus the uncommitted code-audit remediation pass**. That
+> pass closes rows 1-25 of `docs/reports/code-audit.md`: it redacts credentials
+> on five logging paths and two `Debug` impls, validates the `GITLAB_*` instance
+> URL through one shared rule (`ragent_types::url_validation`), fences the LLM
+> security analyzer's model-authored values, defaults an MCP server entry's
+> `"type"` to `stdio`, moves the broken-pipe-safe output macros into
+> `ragent_types::cli_out`, and completes `READ_ONLY_PERMISSION_CATEGORIES` so a
+> pure inspection sub-agent no longer resolves a write scope. Seven new test
+> modules land with it (`test_vault_id`, `test_untrusted_fence`,
+> `test_permission_prompt`, `test_read_only_permission_categories`,
+> `test_security_analyzer_request`, `test_mcp_type_default`, plus the extended
+> `test_tool_param_schema`) and five new runtime modules
+> (`ragent_types::cli_out`, `ragent_types::url_validation`,
+> `ragent_types::tool_args::no_parameters_schema`).
 >
-> The `1.0.161` baseline gives research output
-> files a **dated name** (`RESEARCH-<YYYY-MM-DD>.md` / `CORPA-<YYYY-MM-DD>.md`,
-> resolved through `ResearchIo::find_research_md` /
-> `resolve_research_md` with the legacy undated `RESEARCH.md` still accepted),
-> so a `/research update` re-run keeps the earlier report instead of
-> overwriting it; it also fixes an automation in-flight-marker ordering bug
-> (`execute_run` cleared `running` after `finalise()` had persisted the terminal
-> outcome), adds the missing in-process half of two test-isolation exclusions
-> (`test_tool_rename_guard`'s `guard_lock()`, `ragent-telemetry`'s
-> `global_env_lock()`), adds `docs/howtos/skills.md`, and records the first
-> build/test/coverage cost measurement in `BUILDSTATS.md`. That measurement is
-> the source of every coverage figure below.
+> The `1.0.164` baseline is the deep-refactor audit train
+> (`docs/reports/deep-refactor-audit.md`): fifteen defects fixed - a file-tool
+> path-guard escape on the not-yet-existing tail, a runtime-flag toggle that
+> rewrote the whole global `ragent.json` when it existed but could not be read,
+> a cancelled sub-agent reported `Completed`, a dropped `MessageEnd` on an
+> aborted turn, concurrent `team_task_create` id collisions, an unembedded web
+> UI, and seven panics or off-by-one defects in `/swarm`, `/spec govcreate`,
+> the router modifier and the research topic deriver - plus the dead-code drain
+> (16 functions and one module with no callers) and the clippy 1.97 CI gate.
+>
+> The `1.0.163` pass adds the research diff deck (`/research deck <name>`),
+> groups findings under the report's own concepts, makes the PowerPoint export
+> actually write the `.pptx`, and moves `calamine` to 0.38 to clear
+> RUSTSEC-2026-0436. The `1.0.161` baseline gave research output files a **dated
+> name** (`RESEARCH-<YYYY-MM-DD>.md` / `CORPA-<YYYY-MM-DD>.md`, resolved through
+> `ResearchIo::find_research_md` / `resolve_research_md` with the legacy undated
+> `RESEARCH.md` still accepted), so a `/research update` re-run keeps the
+> earlier report instead of overwriting it.
 >
 > The `1.0.159` baseline (OTLP log-export and endpoint-resolution
 > pass on top of the session-message-retention and `/db` operator-surface work,
@@ -90,42 +100,41 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 748,724 (741,416 in `crates/` + 7,308 in root `src/`/`tests/`) |
-| Total Rust files | 1,930 (1,909 workspace crates + 21 root `src/`/`tests/`) |
-| Tests defined | 15,268 (`#[test]` / `#[tokio::test]` attributes, including `flavor = ...` variants, across `crates/`, `src/`, and root `tests/`) |
-| Test files | 1,209 under crate `tests/` trees (1,054 consolidated `test_*.rs` + 127 `tests/inline/*` modules, 18 `tests/all.rs` roots and 8 shared `support` helpers); the 18 `tests/all.rs` roots are the per-crate targets |
-| Test binaries | 36 (18 consolidated `[[test]] name = "all"` integration targets - one per crate, 17 crate lib targets and the 1 root bin) |
+| Total Rust lines | 768,862 (760,840 in `crates/` + 8,022 in root `src/`/`tests/`) |
+| Total Rust files | 2,010 (1,988 workspace crates + 22 root `src/`/`tests/`) |
+| Tests defined | 15,652 (`#[test]` / `#[tokio::test]` attributes, including `flavor = ...` variants, across `crates/`, `src/`, and root `tests/`) |
+| Test files | 1,211 under crate `tests/` trees (1,082 consolidated `test_*.rs` + 129 `tests/inline/*` modules, 19 `tests/all.rs` roots and 8 shared `support` helpers); the 19 `tests/all.rs` roots are the per-crate targets |
+| Test binaries | 38 (19 consolidated `[[test]] name = "all"` integration targets - one per crate, 18 crate lib targets and the 1 root bin) |
 | Tests executed | 15,240 passed / 0 failed / 16 ignored across **40 reporting targets** (`cargo test --workspace --all-targets`, see `BUILDSTATS.md`) |
 | Line coverage | 86.7% (146,001 of 168,392 instrumented lines) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 150 in 21 families (`mf_screenshot` engine-gated above the shown count) |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
-| Workspace crates | 18 |
-| Specs on disk | 61 directories in `specs/` |
+| Workspace crates | 19 |
+| Specs on disk | 62 directories in `specs/` |
 | Research output formats | 6 (`report`, `executive-summary`, `comparison-table`, `source-bibliography`, `imrad`, `newsletter`) |
 | Documentation | 24 top-level how-tos (including the new `skills.md`), 23 files in `docs/howtos/tools/` (22 per-category tool how-tos + `INDEX.md`, + generated PDFs), 83 files in `docs/howtos/slashcommands/` (82 command pages + `INDEX.md`, + generated PDFs) |
 | Authors | 1 |
-| Version | 1.0.161 |
+| Version | 1.0.164 |
 
-The tool registry is unchanged this pass: research output naming is a file-layout
-change inside `ragent-research`, and the automation fix is an ordering change in
-`execute_run`, so nothing is added to or removed from the registry and the count
-stays at 150 across 21 families. `ragent-research` is the crate that moves
-materially (64,960 -> 65,569 lines, +609) for the dated-name primitives, the
-resolution helpers, the LLM report-title derivation
-(`LlmAnalysisEngine::summarize_title` + `clean_generated_title`), the
-`newsletter` output format (`assemble_newsletter_body`, its synthesis prompt and
-its brief) and the three-paragraph concept-definition prompt, plus the two new
-test modules; `ragent-tui` (+153) and `ragent-telemetry` (+20) move only by
-their test-side isolation changes, and `ragent-agent` (+38) by the `execute_run`
-reordering and its test lock.
+The tool registry is unchanged this pass: the code-audit remediation adds a
+shared `no_parameters_schema()` helper and reroutes the eight parameterless tools
+through it without adding or removing a tool, so the count stays at 150 across 21
+families. The crate count moves 18 -> 19 because `ragent-hyperresearch` is now
+picked up by `crates/*` (it was already a member; earlier measurements excluded
+it). `ragent-research` (+11,871 lines) is the largest single mover across the
+1.0.161 -> 1.0.164 span, carrying the research diff deck (`deck.rs`,
+`deck_enrich.rs`, `deck_pptx.rs`), its concept-grouped model stage and the
+`imrad`/`newsletter` assembly; `ragent-tui` (+1,641) and `ragent-agent` (+3,331)
+move by the deep-refactor fixes and their regression tests, and `ragent-types`
+(+541) by `cli_out`, `url_validation` and `tool_args`.
 
 The test-binary count is the headline effect of the consolidation rollout: the
-tree still holds 1,049 consolidated `test_*.rs` files plus 127 `tests/inline/*`
-modules, but each crate compiles them into
-ONE `tests/all.rs` target (`autotests = false` + `[[test]] name = "all"` +
-`#[path = "test_x.rs"] mod test_x;`), so a full run links 18 integration
-binaries instead of ~1,039. Tests run under `cargo nextest`
+tree holds 1,082 consolidated `test_*.rs` files plus 129 `tests/inline/*`
+modules, but each crate compiles them into ONE `tests/all.rs` target
+(`autotests = false` + `[[test]] name = "all"` +
+`#[path = "test_x.rs"] mod test_x;`), so a full run links 19 integration
+binaries instead of ~1,214. Tests run under `cargo nextest`
 (`.config/nextest.toml`); run one file by filter:
 `cargo nextest run -p <crate> -E 'test(test_foo::)'`.
 
@@ -145,32 +154,33 @@ total is 150 rather than 151.
 
 ## Breakdown by Crate
 
-The project is organised as a Cargo workspace of 18 focused crates. The table below
+The project is organised as a Cargo workspace of 19 focused crates. The table below
 shows the file count, line count, and test-file count for each crate (including
 `src/`, `tests/`, `benches/`, and `examples/` directories where present, with
 `target/` pruned).
 
 | Crate | Rust files | Rust lines | Test files |
 |---|---|---|---|
-| `ragent-agent` | 449 | 170,174 | 280 |
-| `ragent-bench` | 34 | 10,844 | 12 |
-| `ragent-codeindex` | 82 | 25,573 | 52 |
-| `ragent-config` | 78 | 19,661 | 53 |
-| `ragent-connectors` | 45 | 19,729 | 22 |
-| `ragent-llm` | 98 | 39,119 | 57 |
-| `ragent-plugins` | 66 | 23,647 | 39 |
-| `ragent-research` | 172 | 65,569 | 105 |
-| `ragent-server` | 27 | 11,205 | 18 |
-| `ragent-specs` | 38 | 20,640 | 25 |
-| `ragent-storage` | 57 | 18,979 | 52 |
-| `ragent-surface` | 19 | 2,475 | 9 |
-| `ragent-telemetry` | 42 | 14,383 | 31 |
-| `ragent-tools-core` | 76 | 22,024 | 38 |
-| `ragent-tools-extended` | 164 | 62,300 | 87 |
-| `ragent-tools-vcs` | 75 | 18,121 | 34 |
-| `ragent-tui` | 316 | 181,376 | 252 |
-| `ragent-types` | 71 | 15,597 | 45 |
-| **Total** | **1,909** | **741,416** | **1,209** |
+| `ragent-agent` | 455 | 173,505 | 254 |
+| `ragent-bench` | 34 | 10,844 | 8 |
+| `ragent-codeindex` | 82 | 25,558 | 50 |
+| `ragent-config` | 79 | 19,802 | 52 |
+| `ragent-connectors` | 45 | 19,729 | 20 |
+| `ragent-hyperresearch` | 47 | 1,576 | 3 |
+| `ragent-llm` | 98 | 39,188 | 37 |
+| `ragent-plugins` | 66 | 23,647 | 37 |
+| `ragent-research` | 195 | 78,049 | 77 |
+| `ragent-server` | 27 | 11,248 | 14 |
+| `ragent-specs` | 38 | 20,686 | 18 |
+| `ragent-storage` | 55 | 18,421 | 49 |
+| `ragent-surface` | 19 | 2,475 | 8 |
+| `ragent-telemetry` | 42 | 14,383 | 26 |
+| `ragent-tools-core` | 76 | 22,078 | 33 |
+| `ragent-tools-extended` | 163 | 62,517 | 81 |
+| `ragent-tools-vcs` | 75 | 18,142 | 30 |
+| `ragent-tui` | 320 | 183,012 | 242 |
+| `ragent-types` | 72 | 16,041 | 43 |
+| **Total** | **1,988** | **760,840** | **1,082** |
 
 ---
 
@@ -178,24 +188,25 @@ shows the file count, line count, and test-file count for each crate (including
 
 ```
 
-ragent-tui            ############  181,376 lines (24.5%)
-ragent-agent          ###########   170,174 lines (23.0%)
-ragent-research       ####          65,569 lines (8.8%)
-ragent-tools-extended ####          62,300 lines (8.4%)
-ragent-llm            ##            39,119 lines (5.3%)
-ragent-codeindex      #             25,573 lines (3.5%)
-ragent-plugins        #             23,647 lines (3.2%)
-ragent-tools-core     #             22,024 lines (3.0%)
-ragent-specs          #             20,640 lines (2.8%)
-ragent-connectors     #             19,729 lines (2.7%)
-ragent-config         #             19,661 lines (2.7%)
-ragent-storage        #             18,979 lines (2.6%)
-ragent-tools-vcs      #             18,121 lines (2.4%)
-ragent-types          #             15,597 lines (2.1%)
+ragent-tui            ###########   183,017 lines (24.0%)
+ragent-agent          ###########   173,505 lines (22.8%)
+ragent-research       #####         78,049 lines (10.2%)
+ragent-tools-extended ####          62,517 lines (8.2%)
+ragent-llm            ##            39,188 lines (5.1%)
+ragent-codeindex      #             25,558 lines (3.4%)
+ragent-plugins        #             23,647 lines (3.1%)
+ragent-tools-core     #             22,078 lines (2.9%)
+ragent-specs          #             20,686 lines (2.7%)
+ragent-config         #             19,802 lines (2.6%)
+ragent-connectors     #             19,729 lines (2.6%)
+ragent-storage        #             18,421 lines (2.5%)
+ragent-tools-vcs      #             18,142 lines (2.4%)
+ragent-types          #             16,041 lines (2.1%)
 ragent-telemetry      #             14,383 lines (1.9%)
-ragent-server         #             11,205 lines (1.5%)
-ragent-bench          #             10,844 lines (1.5%)
-ragent-surface        #             2,475 lines (0.3%)
+ragent-server         #             11,248 lines (1.5%)
+ragent-bench                       10,844 lines (1.4%)
+ragent-surface                     2,475 lines (0.3%)
+ragent-hyperresearch               1,576 lines (0.2%)
 ```
 
 ---
@@ -204,35 +215,40 @@ ragent-surface        #             2,475 lines (0.3%)
 
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
-| `ragent-tui` | 252 | ~3,952 |
-| `ragent-agent` | 280 | ~2,580 |
-| `ragent-tools-extended` | 87 | ~1,893 |
-| `ragent-research` | 103 | ~1,184 |
-| `ragent-specs` | 25 | ~688 |
-| `ragent-llm` | 57 | ~665 |
-| `ragent-plugins` | 39 | ~494 |
-| `ragent-tools-vcs` | 34 | ~483 |
-| `ragent-codeindex` | 52 | ~458 |
-| `ragent-config` | 53 | ~444 |
-| `ragent-types` | 45 | ~429 |
-| `ragent-tools-core` | 38 | ~422 |
-| `ragent-storage` | 52 | ~371 |
-| `ragent-connectors` | 22 | ~369 |
-| `ragent-telemetry` | 31 | ~333 |
-| `ragent-server` | 18 | ~209 |
-| `ragent-bench` | 12 | ~146 |
-| `ragent-surface` | 9 | ~70 |
-| **Total** | **1,209** | **~15,190** |
+| `ragent-tui` | 242 | ~3,572 |
+| `ragent-agent` | 254 | ~2,611 |
+| `ragent-tools-extended` | 81 | ~1,891 |
+| `ragent-research` | 77 | ~1,469 |
+| `ragent-specs` | 18 | ~685 |
+| `ragent-llm` | 37 | ~668 |
+| `ragent-plugins` | 37 | ~494 |
+| `ragent-tools-vcs` | 30 | ~483 |
+| `ragent-codeindex` | 50 | ~457 |
+| `ragent-config` | 52 | ~451 |
+| `ragent-types` | 43 | ~440 |
+| `ragent-tools-core` | 33 | ~425 |
+| `ragent-storage` | 49 | ~356 |
+| `ragent-connectors` | 20 | ~369 |
+| `ragent-telemetry` | 26 | ~332 |
+| `ragent-server` | 14 | ~210 |
+| `ragent-bench` | 8 | ~145 |
+| `ragent-surface` | 8 | ~70 |
+| `ragent-hyperresearch` | 3 | ~22 |
+| **Total** | **1,082** | **~15,165** |
 
 The per-crate test attributes above include both the external `tests/` suites
 (included as child modules of each crate's single `tests/all.rs` target) and the
-inline `#[cfg(test)]` modules in library sources (`crates/` totals 15,190; the
-root `src/`+`tests/` tree adds 67, for 15,257 workspace-wide). The dated
-research-output pass adds the four new `io_tests` cases that pin the date
-predicate, the picker and the creation-date canonical path. The
+inline `#[cfg(test)]` modules in library sources (`crates/` totals 15,165; the
+root `src/`+`tests/` tree adds 487, for 15,652 workspace-wide). The code-audit
+remediation pass adds `test_vault_id` (note-id path traversal), `test_untrusted_fence`
+(fence-escape resistance), `test_permission_prompt` (timeout, forged approval,
+`Always` grant, `--yes`), `test_read_only_permission_categories` (read/write
+classification over the live registry), `test_security_analyzer_request` (the
+analyzer's bounded request shape) and `test_mcp_type_default` (the `stdio`
+default from both ends). The
 v1.0.137 test-coverage campaign added 170 new external test files (roughly 80 in
 `ragent-agent` plus suites across 12 further crates) and a set of inline test
-files, moving 13 of the 18 crates past 85% line coverage; the follow-up
+files, moving 13 of the 19 crates past 85% line coverage; the follow-up
 `ragent-tui` deep-coverage work adds 17 more files (642 tests, ~16.1k lines) on
 top of the phase-1 TUI suites, and the `agentui` line adds about 20
 more TUI suites (roughly 900 tests) plus the suspension, write-target, and
@@ -249,7 +265,9 @@ executes **15,240 passed / 0 failed / 16 ignored** across 40 reporting test
 targets (the 19 consolidated `tests/all.rs` integration targets, 18 crate
 `src/lib.rs` targets, the 1 root `src/main.rs` target and the doc-test targets
 `--all-targets` reports), measured on the 2026-11-02 1.0.161
-tree against the v1.0.138 baseline of 13,862 passed. Note this is the
+tree against the v1.0.138 baseline of 13,862 passed; the 1.0.161 -> 1.0.164
+span does not re-run the full count (`cargo check` is the gate for this pass).
+Note this is the
 single-process `cargo test` shape that exposed the three isolation defects the
 same report documents; the CI runner uses `cargo nextest`, which runs every test
 in its own process.
@@ -348,12 +366,12 @@ Notes:
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 49 lines (15,257 tests / 748,115 lines)
-- Largest crate: `ragent-tui` (181,376 lines, 24.5%)
-- Smallest crate: `ragent-surface` (2,475 lines, 0.3%)
-- Median crate size: ~20,188 lines (between `ragent-config` and `ragent-connectors`)
-- Crates over 10k lines: 17 of 18
-- Crates under 5k lines: 1 of 18
+- Test-to-code ratio: ~1 test per 49 lines (15,652 tests / 768,862 lines)
+- Largest crate: `ragent-tui` (183,017 lines, 24.0%)
+- Smallest crate: `ragent-hyperresearch` (1,576 lines, 0.2%)
+- Median crate size: ~20,244 lines (between `ragent-specs` and `ragent-config`)
+- Crates over 10k lines: 17 of 19
+- Crates under 5k lines: 2 of 19
 
 Function definitions by crate (lexical lower bounds, 2026-10-21 tree):
 
@@ -385,14 +403,15 @@ most test-dominant crates by ratio are `ragent-tui` (82%), `ragent-tools-extende
 
 ---
 
-_Generated 2026-11-02 (v1.0.161 tree: dated research output
-files (`RESEARCH-<YYYY-MM-DD>.md` / `CORPA-<YYYY-MM-DD>.md`, with the legacy
-undated names still resolved), the `execute_run` in-flight-marker ordering fix,
-the in-process halves of the two test-isolation exclusions,
-`docs/howtos/skills.md`, and the first `BUILDSTATS.md` measurement - on top of
-the v1.0.160 OTLP log export and session-message retention, the v1.0.153 team
-state-machine tightening, the v1.0.152 `/research --age` work and the v1.0.149
-`agentui` keyboard-first rework; see the CHANGELOG for the full line). The
+_Generated 2026-11-07 (v1.0.164 tree plus the code-audit remediation pass:
+credential redaction on the remaining log and `Debug` paths, one shared
+`ragent_types::url_validation` rule for the GitLab instance URL, prompt fenced
+LLM security analyzer values, the `stdio` default for an MCP server entry that
+omits `"type"`, the broken-pipe-safe `ragent_types::cli_out` macros, the shared
+`no_parameters_schema()` helper and a completed
+`READ_ONLY_PERMISSION_CATEGORIES`, on top of the v1.0.164 deep-refactor audit
+train, the v1.0.163 research diff deck and the v1.0.161 dated research output
+files; see the CHANGELOG for the full line). The
 previous generation note is retained below for the tree it measured: the
 Agents/Teams block cursor replacing mouse row clicks (FR-033..FR-046,
 FR-065, FR-069..FR-070; click-to-select retained), the `Esc`-only dismissal with

@@ -97,7 +97,7 @@ const CANONICAL_HOMES: &[(&str, &str, &str)] = &[
     // Storage family (D1) - canonical in ragent-storage/src/storage.rs.
     // The agent crate's `storage/mod.rs` is now a re-export shim.
     // NOTE: `ragent-tools-extended::storage` defines its own `TaskRow` /
-    // `MemoryRow` / `EmbeddingMatch` as part of the `StorageBackend` trait
+    // `MemoryRow` as part of the `StorageBackend` trait
     // surface (they are DTOs for the trait, not storage-row types).  Those
     // are intentional parallel definitions used by the extracted tools and
     // are NOT covered by this guard; only the storage-row types in

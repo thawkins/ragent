@@ -128,7 +128,7 @@ fn discover_shell() -> ShellType {
 
     // 4. Try pwsh.exe (PowerShell 7+)
     if let Ok(path) = which::which("pwsh") {
-        tracing::info!(path = %path.display(), "Git Bash not found; falling back to PowerShell 7+");
+        tracing::warn!(path = %path.display(), "Git Bash not found; falling back to PowerShell 7+");
         return ShellType::PowerShell(path);
     }
 
