@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [1.0.165] - 2026-11-07
+
+Security-hardening release: four credential- or sandbox-relevant defects closed
+(GitLab endpoint validation, two secret-bearing `Debug` impls, prompt injection
+of the LLM security analyzer, and an over-broad write scope handed to read-only
+sub-agents), plus the code-audit remediation for rows 1-25 of
+`docs/reports/code-audit.md`. The unfinished semantic-memory layer is removed
+(it was complete but unwired at every link), and the CI dead-code lint now
+passes workspace-wide.
+
 ### Security
 
 - A GitLab instance base URL taken from `GITLAB_HOST`/`GITLAB_URL`, `ragent.json`,
@@ -119,14 +129,15 @@
   `ragent-storage`. The `ort`, `tokenizers` and `ndarray` workspace pins go with
   them. `/doctor` now reports `memory system (blocks=..., structured=...)`, and
   `session_search` is documented as FTS5-only (spec `jcodeport` FR-M5-002).
-- Sixteen items in `ragent-research`, `ragent-tui` and `ragent-agent` that were
-  declared `pub(crate)` inside private modules are now `pub`, because the
-  functions they expose (`parse_analysis_response_with_outcome`,
-  `reorder_findings_by_dependency`, `mcp_display_servers`,
-  `render_mcp_config`, `cancel_bg_task`, `request_agent_cancel`,
-  `execute_plan_delegation`, …) are reachable through a public module path and
-  are exercised by the external `tests/` suites. Each now carries a doc comment;
-  no behaviour changes.
+- Fifty-five items in `ragent-research` and `ragent-tui` that were declared
+  `pub` inside private modules — and so were reachable only within their own
+  crate — are now `pub(crate)`. This is what the CI dead-code lint's
+  `-D unreachable_pub` requires, and the lint now passes. The external `tests/`
+  suites that exercise them (`parse_analysis_response_with_outcome`,
+  `reorder_findings_by_dependency`, `mcp_display_servers`, `render_mcp_config`,
+  …) reach them by including the source module with `#[path = "../src/..."]
+  mod ...;`, not through a public path, so the narrower visibility does not
+  affect them. No behaviour changes.
 - `unused_async_trait_impl` joins `[workspace.lints.clippy]` as an allow. Clippy
   1.99 extended the check from free functions to trait impls and inherent
   methods; the flagged sites are the `opentelemetry_sdk` exporter traits (whose
