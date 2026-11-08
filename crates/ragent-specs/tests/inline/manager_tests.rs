@@ -49,8 +49,10 @@ fn test_invalid_transitions() {
         SpecStatus::Approved,
         SpecStatus::Draft
     ));
+    // `implemented -> in_progress` is the deliberate reopen edge; going
+    // back from `verified` is still refused.
     assert!(!is_valid_transition(
-        SpecStatus::Implemented,
+        SpecStatus::Verified,
         SpecStatus::InProgress
     ));
 }

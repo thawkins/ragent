@@ -134,6 +134,9 @@ pub struct PlanTask {
     /// Milestone this task belongs to, parsed from the `## Milestones`
     /// section by matching the bullet text to the task title.
     pub milestone: Option<String>,
+    /// Completion time (Unix epoch seconds, UTC), parsed from a Status cell
+    /// such as `completed (2026-11-08T10:12:00Z)`.
+    pub completed_at: Option<u64>,
 }
 
 impl PlanTask {
@@ -157,7 +160,7 @@ impl PlanTask {
             self.requirement,
             self.effort.as_str(),
             self.priority.as_str(),
-            self.status.as_str(),
+            self.status.status_cell(self.completed_at),
             deps
         )
     }
@@ -443,12 +446,10 @@ impl PlanParser {
                 continue;
             }
 
-            // Parse data row
-            let cells: Vec<&str> = trimmed
-                .split('|')
-                .map(str::trim)
-                .filter(|c| !c.is_empty())
-                .collect();
+            // Parse data row. Empty cells are kept so a blank column (for
+            // example an unlinked Requirement) does not shift every later
+            // column one place to the left.
+            let cells = Self::split_row(trimmed);
 
             // Need at least 6 columns: ID, Title, Requirement, Effort, Priority, Dependencies
             // With Status column: 7 columns: ID, Title, Requirement, Effort, Priority, Status, Dependencies
@@ -494,27 +495,27 @@ impl PlanParser {
                 Priority::Medium
             };
 
-            let (status, dependencies) = if has_status_column && cells.len() >= 7 {
+            let (status, completed_at, dependencies) = if has_status_column && cells.len() >= 7 {
                 // 7-column: ID | Title | Req | Effort | Priority | Status | Dependencies
                 let status_str = cells.get(5).copied().unwrap_or("");
-                let status = match TaskStatus::parse(status_str) {
-                    Some(s) => s,
+                let (status, completed_at) = match TaskStatus::parse_status_cell(status_str) {
+                    Some(parsed) => parsed,
                     None => {
                         tracing::warn!(
                             "Task {id}: unrecognized status '{}', defaulting to Pending",
                             status_str
                         );
-                        TaskStatus::Pending
+                        (TaskStatus::Pending, None)
                     }
                 };
                 let deps_str = cells.get(6).copied().unwrap_or("");
                 let deps = Self::parse_dependencies(deps_str);
-                (status, deps)
+                (status, completed_at, deps)
             } else {
                 // 6-column: ID | Title | Req | Effort | Priority | Dependencies
                 let deps_str = cells.get(5).copied().unwrap_or("");
                 let deps = Self::parse_dependencies(deps_str);
-                (TaskStatus::Pending, deps)
+                (TaskStatus::Pending, None, deps)
             };
 
             tasks.push(PlanTask {
@@ -526,6 +527,7 @@ impl PlanParser {
                 dependencies,
                 status,
                 milestone: None,
+                completed_at,
             });
         }
 
@@ -534,6 +536,23 @@ impl PlanParser {
         Self::attach_milestones(&mut tasks, &milestones);
 
         tasks
+    }
+
+    /// Split a markdown table row into trimmed cells, preserving empty cells.
+    ///
+    /// Only the single outer pipe on each side is stripped.
+    fn split_row(row: &str) -> Vec<&str> {
+        let inner = row.strip_prefix('|').unwrap_or(row);
+        let inner = inner.strip_suffix('|').unwrap_or(inner);
+        inner.split('|').map(str::trim).collect()
+    }
+
+    /// Returns `true` for an empty table cell or a dash placeholder
+    /// (`-`, en dash, em dash). [`crate::spec::Task::table_row`] writes an
+    /// em dash for empty lists, so every reader must treat it as "none".
+    #[must_use]
+    pub(crate) fn is_placeholder_cell(cell: &str) -> bool {
+        matches!(cell.trim(), "" | "-" | "\u{2013}" | "\u{2014}")
     }
 
     /// Parse the `## Milestones` section from a PLAN.md string.
@@ -647,7 +666,7 @@ impl PlanParser {
 
     /// Parse the Dependencies table column into a flat list of task IDs.
     ///
-    /// Accepts a comma-separated list of IDs, or the empty markers `-` / `-`,
+    /// Accepts a comma-separated list of IDs, or an empty/dash placeholder cell,
     /// and expands an inclusive range such as `T-001-T-014`, `T-001..T-014`, or
     /// `T-001 through T-014` into every ID it spans. Without expansion a range
     /// is a single unknown ID, so a final verification task that depends on the
@@ -660,7 +679,7 @@ impl PlanParser {
     /// about an unknown dependency.
     fn parse_dependencies(deps_str: &str) -> Vec<String> {
         let trimmed = deps_str.trim();
-        if trimmed.is_empty() || trimmed == "-" {
+        if Self::is_placeholder_cell(trimmed) {
             return Vec::new();
         }
         let mut deps = Vec::new();

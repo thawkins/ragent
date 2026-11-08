@@ -3754,10 +3754,20 @@ impl App {
                     );
                 }
             }
+            // Report the status the spec actually has: it only becomes
+            // `implemented` from `in_progress`, and the transition can fail.
+            let status_note = if spec.status == SpecStatus::Implemented {
+                "Spec status set to `implemented`.".to_string()
+            } else {
+                format!(
+                    "Spec status left as `{}` (only an `in_progress` spec moves to \
+                     `implemented`).",
+                    spec.status.as_str()
+                )
+            };
             self.append_assistant_text(&format!(
-                "From: /spec impl\n\n[done] All {} tasks completed for spec **{}**. \
-                 Spec status set to `implemented`.",
-                state.total, state.spec_id,
+                "From: /spec impl\n\n[done] All {} tasks completed for spec **{}**. {}",
+                state.total, state.spec_id, status_note,
             ));
             self.status = format!("spec: {} implemented", state.spec_id);
             return;

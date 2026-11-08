@@ -68,11 +68,11 @@ impl Tool for SpecReadTool {
             .iter()
             .map(|r| {
                 format!(
-                    "- `{}` ({:?}) - {} {}",
+                    "- `{}` ({}) - {}{}",
                     r.id,
-                    r.template,
+                    r.template.as_str(),
                     r.text,
-                    if r.implemented { "(implemented)" } else { "" }
+                    if r.implemented { " (implemented)" } else { "" }
                 )
             })
             .collect::<Vec<_>>()
@@ -93,10 +93,13 @@ impl Tool for SpecReadTool {
                     t.title,
                     t.status.as_str(),
                     reqs,
-                    if t.completed_at.is_some() {
-                        " [ok]"
-                    } else {
-                        ""
+                    match (t.status, t.completed_at) {
+                        (ragent_specs::spec::TaskStatus::Completed, Some(secs)) => {
+                            ragent_specs::spec::format_utc_timestamp(secs)
+                                .map_or_else(|| " [ok]".to_string(), |ts| format!(" [ok {ts}]"))
+                        }
+                        (ragent_specs::spec::TaskStatus::Completed, None) => " [ok]".to_string(),
+                        _ => String::new(),
                     }
                 )
             })

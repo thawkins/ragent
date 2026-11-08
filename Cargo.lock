@@ -5219,6 +5219,7 @@ dependencies = [
 name = "ragent-specs"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "ragent-tools-extended",
  "regex",
  "serde",

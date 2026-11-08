@@ -138,3 +138,20 @@ fn test_transition_graph_completeness() {
         }
     }
 }
+
+#[test]
+fn test_manager_implemented_can_reopen_to_in_progress() {
+    assert!(is_valid_transition(
+        SpecStatus::Implemented,
+        SpecStatus::InProgress
+    ));
+    assert!(is_valid_transition(
+        SpecStatus::Implemented,
+        SpecStatus::Verified
+    ));
+    // Reopen is only from `implemented`; a verified spec stays closed.
+    assert!(!is_valid_transition(
+        SpecStatus::Verified,
+        SpecStatus::InProgress
+    ));
+}

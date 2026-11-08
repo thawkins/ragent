@@ -2897,12 +2897,15 @@ specs/
 
 ```mermaid
 graph LR
-    draft[draft] --> in_progress[in_progress]
-    in_progress --> implemented[implemented]
-    implemented --> in_review[in_review]
-    in_review --> verified[verified]
+    draft[draft] --> in_review[in_review]
     in_review --> draft
+    in_review --> approved[approved]
+    approved --> in_progress[in_progress]
+    in_progress --> implemented[implemented]
+    implemented --> verified[verified]
+    implemented -->|reopen| in_progress
     verified --> archived[archived]
+    archived --> draft
 ```
 
 ### 10.4 Spec Tools
@@ -3028,6 +3031,16 @@ updated when it exists, or created (seeded from the PLAN.md task row,
 status mapped from the spec task status) when it does not. The
 `/spec impl` driver no longer pre-creates milestone tracker rows; the
 tracker is populated lazily by the agent's `spec_task_update` calls.
+
+### 10.10e Task Completion Timestamps
+
+When a task is marked `completed` (via `/spec task` or `spec_task_update`),
+its completion time is written into the PLAN.md Status cell as RFC 3339
+UTC, e.g. `| completed (2026-11-08T10:12:00Z) |`. No extra column is added,
+so 6- and 7-column task tables keep parsing; a bare `completed` (older
+plans) or an unparseable stamp reads as completed with no time. Moving the
+task to any other status drops the stamp. `/spec task <id> <task-id>` shows
+the time in the local time zone; `spec_read` reports it in UTC.
 
 ### 10.11 Constitutional Amendment Process
 
@@ -6635,12 +6648,15 @@ specs/
 
 ```mermaid
 graph LR
-    draft[draft] --> in_progress[in_progress]
-    in_progress --> implemented[implemented]
-    implemented --> in_review[in_review]
-    in_review --> verified[verified]
+    draft[draft] --> in_review[in_review]
     in_review --> draft
+    in_review --> approved[approved]
+    approved --> in_progress[in_progress]
+    in_progress --> implemented[implemented]
+    implemented --> verified[verified]
+    implemented -->|reopen| in_progress
     verified --> archived[archived]
+    archived --> draft
 ```
 
 ### 10.4 Spec Tools
@@ -6766,6 +6782,16 @@ updated when it exists, or created (seeded from the PLAN.md task row,
 status mapped from the spec task status) when it does not. The
 `/spec impl` driver no longer pre-creates milestone tracker rows; the
 tracker is populated lazily by the agent's `spec_task_update` calls.
+
+### 10.10e Task Completion Timestamps
+
+When a task is marked `completed` (via `/spec task` or `spec_task_update`),
+its completion time is written into the PLAN.md Status cell as RFC 3339
+UTC, e.g. `| completed (2026-11-08T10:12:00Z) |`. No extra column is added,
+so 6- and 7-column task tables keep parsing; a bare `completed` (older
+plans) or an unparseable stamp reads as completed with no time. Moving the
+task to any other status drops the stamp. `/spec task <id> <task-id>` shows
+the time in the local time zone; `spec_read` reports it in UTC.
 
 ### 10.11 Constitutional Amendment Process
 

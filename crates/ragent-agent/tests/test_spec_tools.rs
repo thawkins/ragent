@@ -154,9 +154,8 @@ async fn test_spec_task_update_happy_path() {
     let spec = mgr2.read_spec(&id).await.unwrap();
     let task = spec.tasks.iter().find(|t| t.id == "T-001").unwrap();
     assert_eq!(task.status, ragent_specs::spec::TaskStatus::Completed);
-    // completed_at is not preserved across the PLAN.md table round-trip
-    // (the table has no timestamp column; io.rs parse_tasks returns None).
-    assert_eq!(task.completed_at, None);
+    // The completion time is persisted in the PLAN.md Status cell.
+    assert!(task.completed_at.is_some());
 }
 
 #[tokio::test]
@@ -315,9 +314,8 @@ async fn test_spec_task_update_status_transitions() {
     let spec = mgr.read_spec(&id).await.unwrap();
     let task = spec.tasks.iter().find(|t| t.id == "T-001").unwrap();
     assert_eq!(task.status, ragent_specs::spec::TaskStatus::Completed);
-    // completed_at is not preserved across the PLAN.md table round-trip
-    // (the table has no timestamp column; io.rs parse_tasks returns None).
-    assert_eq!(task.completed_at, None);
+    // The completion time is persisted in the PLAN.md Status cell.
+    assert!(task.completed_at.is_some());
 }
 
 #[tokio::test]

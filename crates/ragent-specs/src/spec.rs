@@ -244,6 +244,36 @@ impl TaskStatus {
         }
     }
 
+    /// Render a PLAN.md Status cell. A completed task with a known
+    /// completion time is written as `completed (2026-11-08T10:12:00Z)`;
+    /// every other case is the bare status name.
+    #[must_use]
+    pub fn status_cell(&self, completed_at: Option<u64>) -> String {
+        match (self, completed_at.and_then(format_utc_timestamp)) {
+            (Self::Completed, Some(ts)) => format!("{} ({ts})", self.as_str()),
+            _ => self.as_str().to_string(),
+        }
+    }
+
+    /// Parse a PLAN.md Status cell written by [`TaskStatus::status_cell`]:
+    /// a status name optionally followed by `(<RFC 3339 UTC time>)`.
+    ///
+    /// Returns `None` when the status name is unknown. An unparseable
+    /// timestamp is ignored (the status is still returned).
+    #[must_use]
+    pub fn parse_status_cell(cell: &str) -> Option<(Self, Option<u64>)> {
+        let cell = cell.trim();
+        let (name, rest) = cell.split_once(char::is_whitespace).unwrap_or((cell, ""));
+        let status = Self::parse(name)?;
+        let completed_at = rest
+            .trim()
+            .strip_prefix('(')
+            .and_then(|r| r.strip_suffix(')'))
+            .and_then(parse_utc_timestamp)
+            .filter(|_| status == Self::Completed);
+        Some((status, completed_at))
+    }
+
     /// Short ASCII status symbol for table and coverage renderers.
     ///
     /// Single source of truth shared by the TUI `/spec coverage` arm and the
@@ -257,6 +287,23 @@ impl TaskStatus {
             Self::Blocked => "[stop]",
         }
     }
+}
+
+/// Format Unix epoch seconds as an RFC 3339 UTC string
+/// (`2026-11-08T10:12:00Z`). Returns `None` for an out-of-range value.
+#[must_use]
+pub fn format_utc_timestamp(secs: u64) -> Option<String> {
+    let secs = i64::try_from(secs).ok()?;
+    chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0)
+        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+}
+
+/// Parse an RFC 3339 timestamp into Unix epoch seconds (UTC).
+/// Returns `None` for malformed input or a time before the epoch.
+#[must_use]
+pub fn parse_utc_timestamp(text: &str) -> Option<u64> {
+    let dt = chrono::DateTime::parse_from_rfc3339(text.trim()).ok()?;
+    u64::try_from(dt.timestamp()).ok()
 }
 
 /// A single implementation task in a plan.
@@ -307,7 +354,7 @@ impl Task {
             req,
             self.effort,
             self.priority,
-            self.status.as_str(),
+            self.status.status_cell(self.completed_at),
             deps
         )
     }

@@ -118,6 +118,7 @@ fn test_find_dependents() {
             dependencies: vec![],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-002".into(),
@@ -128,6 +129,7 @@ fn test_find_dependents() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-003".into(),
@@ -138,6 +140,7 @@ fn test_find_dependents() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-004".into(),
@@ -148,6 +151,7 @@ fn test_find_dependents() {
             dependencies: vec!["T-002".into(), "T-003".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
     ];
     let deps = find_dependents(&tasks, "T-001");
@@ -172,6 +176,7 @@ fn test_effort_summary_calculation() {
                 dependencies: vec![],
                 status: TaskStatus::Pending,
                 milestone: None,
+                completed_at: None,
             },
             PlanTask {
                 id: "T-002".into(),
@@ -182,6 +187,7 @@ fn test_effort_summary_calculation() {
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::Pending,
                 milestone: None,
+                completed_at: None,
             },
             PlanTask {
                 id: "T-003".into(),
@@ -192,6 +198,7 @@ fn test_effort_summary_calculation() {
                 dependencies: vec!["T-002".into()],
                 status: TaskStatus::Pending,
                 milestone: None,
+                completed_at: None,
             },
         ],
         execution_order: vec![0, 1, 2],
@@ -218,6 +225,7 @@ fn runner_with_titles(titles: &[&str]) -> SpecImplRunner {
             dependencies: vec![],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         })
         .collect();
     let execution_order: Vec<usize> = (0..tasks.len()).collect();
@@ -332,6 +340,7 @@ fn test_file_creation_tier_contracts() {
         dependencies: vec![],
         status: TaskStatus::Pending,
         milestone: None,
+        completed_at: None,
     };
     assert_eq!(file_creation_tier(&task), 1);
 }
@@ -347,6 +356,7 @@ fn test_file_creation_tier_contract_tests() {
         dependencies: vec![],
         status: TaskStatus::Pending,
         milestone: None,
+        completed_at: None,
     };
     assert_eq!(file_creation_tier(&task), 2);
 }
@@ -362,6 +372,7 @@ fn test_file_creation_tier_integration_tests() {
         dependencies: vec![],
         status: TaskStatus::Pending,
         milestone: None,
+        completed_at: None,
     };
     assert_eq!(file_creation_tier(&task), 3);
 }
@@ -377,6 +388,7 @@ fn test_file_creation_tier_e2e_tests() {
         dependencies: vec![],
         status: TaskStatus::Pending,
         milestone: None,
+        completed_at: None,
     };
     assert_eq!(file_creation_tier(&task), 4);
 }
@@ -392,6 +404,7 @@ fn test_file_creation_tier_unit_tests() {
         dependencies: vec![],
         status: TaskStatus::Pending,
         milestone: None,
+        completed_at: None,
     };
     assert_eq!(file_creation_tier(&task), 5);
 }
@@ -407,6 +420,7 @@ fn test_file_creation_tier_source_files() {
         dependencies: vec![],
         status: TaskStatus::Pending,
         milestone: None,
+        completed_at: None,
     };
     assert_eq!(file_creation_tier(&task), 6);
 }
@@ -423,6 +437,7 @@ fn test_file_creation_tier_contract_test_not_misclassified() {
         dependencies: vec![],
         status: TaskStatus::Pending,
         milestone: None,
+        completed_at: None,
     };
     assert_eq!(file_creation_tier(&task), 2);
 }

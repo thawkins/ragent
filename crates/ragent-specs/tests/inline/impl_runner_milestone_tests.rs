@@ -18,6 +18,7 @@ fn test_milestone_groups_group_by_milestone() {
             dependencies: vec![],
             status: TaskStatus::Pending,
             milestone: Some("Milestone 1: Core".into()),
+            completed_at: None,
         },
         PlanTask {
             id: "T-002".into(),
@@ -28,6 +29,7 @@ fn test_milestone_groups_group_by_milestone() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
             milestone: Some("Milestone 1: Core".into()),
+            completed_at: None,
         },
         PlanTask {
             id: "T-003".into(),
@@ -38,6 +40,7 @@ fn test_milestone_groups_group_by_milestone() {
             dependencies: vec!["T-002".into()],
             status: TaskStatus::Pending,
             milestone: Some("Milestone 2: Tests".into()),
+            completed_at: None,
         },
     ];
     let execution_order = vec![0, 1, 2];
@@ -69,6 +72,7 @@ fn test_milestone_groups_unmapped_tasks_are_grouped() {
             dependencies: vec![],
             status: TaskStatus::Pending,
             milestone: Some("Known".into()),
+            completed_at: None,
         },
         PlanTask {
             id: "T-002".into(),
@@ -79,6 +83,7 @@ fn test_milestone_groups_unmapped_tasks_are_grouped() {
             dependencies: vec![],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
     ];
     let execution_order = vec![0, 1];

@@ -134,6 +134,7 @@ fn test_topological_sort_simple_chain() {
             dependencies: vec![],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-002".into(),
@@ -144,6 +145,7 @@ fn test_topological_sort_simple_chain() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-003".into(),
@@ -154,6 +156,7 @@ fn test_topological_sort_simple_chain() {
             dependencies: vec!["T-002".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
     ];
     let order = resolve_execution_order(&tasks).unwrap();
@@ -181,6 +184,7 @@ fn test_topological_sort_diamond() {
             dependencies: vec![],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-002".into(),
@@ -191,6 +195,7 @@ fn test_topological_sort_diamond() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-003".into(),
@@ -201,6 +206,7 @@ fn test_topological_sort_diamond() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-004".into(),
@@ -211,6 +217,7 @@ fn test_topological_sort_diamond() {
             dependencies: vec!["T-002".into(), "T-003".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
     ];
     let order = resolve_execution_order(&tasks).unwrap();
@@ -237,6 +244,7 @@ fn test_topological_sort_cycle_detection() {
             dependencies: vec!["T-002".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-002".into(),
@@ -247,6 +255,7 @@ fn test_topological_sort_cycle_detection() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
     ];
     let result = resolve_execution_order(&tasks);
@@ -277,6 +286,7 @@ fn test_filter_for_task() {
             dependencies: vec![],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-002".into(),
@@ -287,6 +297,7 @@ fn test_filter_for_task() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-003".into(),
@@ -297,6 +308,7 @@ fn test_filter_for_task() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-004".into(),
@@ -307,6 +319,7 @@ fn test_filter_for_task() {
             dependencies: vec!["T-002".into(), "T-003".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
     ];
     // --task T-003 should include T-001 and T-003
@@ -329,6 +342,7 @@ fn test_filter_for_resume() {
             dependencies: vec![],
             status: TaskStatus::Completed,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-002".into(),
@@ -339,6 +353,7 @@ fn test_filter_for_resume() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::InProgress,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-003".into(),
@@ -349,6 +364,7 @@ fn test_filter_for_resume() {
             dependencies: vec!["T-002".into()],
             status: TaskStatus::Pending,
             milestone: None,
+            completed_at: None,
         },
     ];
     let order = resolve_execution_order(&tasks).unwrap();
@@ -371,6 +387,7 @@ fn test_filter_for_resume_blocked_unblocked() {
             dependencies: vec![],
             status: TaskStatus::Completed,
             milestone: None,
+            completed_at: None,
         },
         PlanTask {
             id: "T-002".into(),
@@ -381,6 +398,7 @@ fn test_filter_for_resume_blocked_unblocked() {
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Blocked,
             milestone: None,
+            completed_at: None,
         },
     ];
     let order = resolve_execution_order(&tasks).unwrap();
