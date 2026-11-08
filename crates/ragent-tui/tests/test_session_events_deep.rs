@@ -1214,6 +1214,8 @@ async fn subagent_complete_marks_the_task_completed() {
         success: true,
         duration_ms: 12,
         finish_reason: "stop".to_string(),
+        status: String::new(),
+        output_file: None,
     })
     .await;
     assert!(

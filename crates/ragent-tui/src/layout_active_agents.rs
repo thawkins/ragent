@@ -176,10 +176,7 @@ const _: () = assert!(
 
 /// Whether `status` is terminal, in which case the row carries no controls.
 fn is_terminal(status: &TaskStatus) -> bool {
-    matches!(
-        status,
-        TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
-    )
+    status.is_terminal()
 }
 
 /// An unbanded filler row: a blank line that reserves one row of the table

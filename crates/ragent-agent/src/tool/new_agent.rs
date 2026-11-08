@@ -385,7 +385,10 @@ impl Tool for NewAgentTool {
                     "task_id": result.entry.id,
                     "agent": result.entry.agent_name,
                     "background": false,
-                    "status": "completed",
+                    // The registry's recorded status: a foreground run that
+                    // was cancelled mid-turn returns `Ok` too, so this must
+                    // not be hard-coded to `completed`.
+                    "status": result.entry.status.as_str(),
                     "child_session_id": result.entry.child_session_id,
                     "time_bound_secs": result.entry.time_bound_secs
                 })),

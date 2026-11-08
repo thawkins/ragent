@@ -119,16 +119,32 @@ impl App {
     ///
     /// Returns `None` when no row was painted for the task (the completion is
     /// then log-only and must not mutate anything else).
+    ///
+    /// `status` is the registry's terminal status as carried on the event
+    /// (`TaskStatus::as_str`), so a failed or timed-out run is not recorded as
+    /// `completed`; an empty or unknown label falls back to `success`
+    /// (`completed` / `failed`). `output_file` is the durable report path the
+    /// event carries, when one was written.
     pub(crate) fn note_subagent_completed(
         &mut self,
         task_id: &str,
         finish_reason: &str,
+        success: bool,
+        status: &str,
+        output_file: Option<&std::path::Path>,
     ) -> Option<ReportStatus> {
         let idx = self.active_tasks.iter().position(|t| t.id == task_id)?;
         let report_status = ReportStatus::from_finish_reason_label(finish_reason);
         if let Some(entry) = self.active_tasks.get_mut(idx) {
             entry.report_status = report_status;
-            entry.status = TaskStatus::Completed;
+            entry.status = match terminal_status_from_label(status) {
+                Some(recorded) => recorded,
+                None if success => TaskStatus::Completed,
+                None => TaskStatus::Failed,
+            };
+            if let Some(path) = output_file {
+                entry.output_file = Some(path.to_path_buf());
+            }
             entry.completed_at = Some(chrono::Utc::now());
         }
         let entry = self.active_tasks.remove(idx);
@@ -149,12 +165,62 @@ impl App {
             .active_tasks
             .get(idx)
             .map(|t| t.child_session_id.clone());
-        let entry = self.active_tasks.remove(idx);
+        let mut entry = self.active_tasks.remove(idx);
+        // The row may still be painted `terminating` (a kill request); the
+        // history must record the terminal status the run actually reached.
+        entry.status = TaskStatus::Cancelled;
+        entry.completed_at = Some(chrono::Utc::now());
         // A cancelled run is finished too, and it is exactly the status most
         // likely to have lost its durable copy (FR-032), so it is snapshotted
         // on the same record-before-removal rule as a completion (FR-028).
         self.record_completed_task(&entry);
         child_session_id
+    }
+
+    /// Apply a `SubagentKilled` event to the tracked row.
+    ///
+    /// A plain kill only *requests* termination: the row stays painted as
+    /// `terminating` (it is still live, and may yet finish on its own) and the
+    /// later `SubagentCancelled` / `SubagentComplete` event retires it with its
+    /// real terminal status. A forced kill is final - the registry has already
+    /// marked the run `failed` - so the row is recorded into history and
+    /// removed.
+    ///
+    /// Returns `true` when a row was removed, so the caller can keep the
+    /// active-agents telemetry gauge in step.
+    pub(crate) fn note_subagent_killed(&mut self, task_id: &str, force: bool) -> bool {
+        let Some(idx) = self.active_tasks.iter().position(|t| t.id == task_id) else {
+            return false;
+        };
+        if !force {
+            if let Some(entry) = self.active_tasks.get_mut(idx) {
+                entry.status = TaskStatus::Terminating;
+            }
+            return false;
+        }
+        let mut entry = self.active_tasks.remove(idx);
+        entry.status = TaskStatus::Failed;
+        entry.completed_at = Some(chrono::Utc::now());
+        self.record_completed_task(&entry);
+        true
+    }
+
+    /// Retire a row the task registry reports as finished, recording it into
+    /// history with the registry's terminal status and durable `output_file`
+    /// (the repair path for a dropped completion event, FR-054).
+    ///
+    /// Returns `true` when a row was removed.
+    pub(crate) fn retire_reconciled_task(&mut self, registry: &TaskEntry) -> bool {
+        let Some(idx) = self.active_tasks.iter().position(|t| t.id == registry.id) else {
+            return false;
+        };
+        let mut entry = self.active_tasks.remove(idx);
+        entry.status = registry.status.clone();
+        entry.output_file = registry.output_file.clone();
+        entry.report_status = registry.report_status;
+        entry.completed_at = registry.completed_at.or_else(|| Some(chrono::Utc::now()));
+        self.record_completed_task(&entry);
+        true
     }
 
     /// Snapshot a finished task into the completed history (FR-021, FR-028).
@@ -210,4 +276,18 @@ impl App {
         entry.status = status;
         true
     }
+}
+
+/// Parse a terminal [`TaskStatus::as_str`] label carried on a completion
+/// event. Returns `None` for an empty label (an older or test event) and for a
+/// non-terminal one, so the caller falls back to the event's `success` flag.
+fn terminal_status_from_label(label: &str) -> Option<TaskStatus> {
+    [
+        TaskStatus::Completed,
+        TaskStatus::Failed,
+        TaskStatus::Cancelled,
+        TaskStatus::TimedOut,
+    ]
+    .into_iter()
+    .find(|status| status.as_str() == label)
 }

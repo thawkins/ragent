@@ -410,6 +410,8 @@ fn all_variants() -> Vec<(Event, &'static str, Option<&'static str>)> {
                 success: true,
                 duration_ms: 9,
                 finish_reason: s("stop"),
+                status: String::new(),
+                output_file: None,
             },
             "SubagentComplete",
             Some("s"),

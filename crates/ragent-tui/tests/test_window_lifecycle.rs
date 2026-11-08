@@ -145,6 +145,8 @@ async fn the_last_subagent_completion_closes_the_agents_window() {
         success: true,
         duration_ms: 42,
         finish_reason: "stop".to_string(),
+        status: String::new(),
+        output_file: None,
     })
     .await;
 
@@ -184,6 +186,8 @@ async fn a_completion_with_a_row_remaining_keeps_the_window_open() {
         success: true,
         duration_ms: 42,
         finish_reason: "stop".to_string(),
+        status: String::new(),
+        output_file: None,
     })
     .await;
 

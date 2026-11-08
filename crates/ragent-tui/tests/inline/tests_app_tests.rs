@@ -684,6 +684,8 @@ async fn test_nested_subagent_events_are_tracked() {
         success: true,
         duration_ms: 100,
         finish_reason: "complete".to_string(),
+        status: String::new(),
+        output_file: None,
     })
     .await;
     assert_eq!(app.active_tasks.len(), 1);
@@ -696,6 +698,8 @@ async fn test_nested_subagent_events_are_tracked() {
         success: true,
         duration_ms: 200,
         finish_reason: "complete".to_string(),
+        status: String::new(),
+        output_file: None,
     })
     .await;
     assert!(app.active_tasks.is_empty());

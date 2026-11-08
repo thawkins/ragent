@@ -1468,6 +1468,8 @@ async fn event_subagent_lifecycle_tracks_active_tasks() {
         success: true,
         duration_ms: 100,
         finish_reason: "stop".to_string(),
+        status: String::new(),
+        output_file: None,
     })
     .await;
     assert!(app.active_tasks.is_empty());

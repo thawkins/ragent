@@ -225,6 +225,8 @@ mod test_event_handler_more;
 mod test_event_swarm_research_deep;
 #[path = "test_force_cleanup_modal.rs"]
 mod test_force_cleanup_modal;
+#[path = "test_subagent_lifecycle_review.rs"]
+mod test_subagent_lifecycle_review;
 
 #[path = "test_autopilot_alt_o.rs"]
 mod test_autopilot_alt_o;

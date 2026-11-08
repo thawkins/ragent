@@ -5494,8 +5494,9 @@ impl App {
     ///
     /// Merge semantics (FR-054):
     /// - entries tracked by the registry but finished (completed, failed,
-    ///   cancelled, terminating) are removed from `active_tasks` - the ghost a
-    ///   dropped completion event would otherwise leave behind;
+    ///   cancelled, timed out) are moved from `active_tasks` into the completed
+    ///   history - the ghost a dropped completion event would otherwise leave
+    ///   behind; a `terminating` run is still live and keeps its row;
     /// - registry `Running` entries missing from `active_tasks` are added
     ///   (repairing a dropped `SubagentStart` event);
     /// - registry `Suspended` entries keep their painted row (FR-049: a
@@ -5515,28 +5516,25 @@ impl App {
 
         // Ghosts the merge is about to drop need their identity captured first
         // so the removal log line can be attributed to the child session.
+        // A row is a ghost only when the registry reports a TERMINAL status
+        // (including `timed_out`); `suspended` and `terminating` runs are
+        // still live and keep their painted row until they settle.
         let removed_ghosts: Vec<ragent_agent::task::TaskEntry> = registry
             .values()
             .filter(|entry| {
-                matches!(
-                    entry.status,
-                    TaskStatus::Completed
-                        | TaskStatus::Failed
-                        | TaskStatus::Cancelled
-                        | TaskStatus::Terminating
-                ) && self.active_tasks.iter().any(|t| t.id == entry.id)
+                entry.status.is_terminal() && self.active_tasks.iter().any(|t| t.id == entry.id)
             })
             .cloned()
             .collect();
 
-        // Remove entries the registry tracks but that are finished; a registry
-        // `Suspended` status keeps the row painted (FR-049).
-        self.active_tasks.retain(|t| match registry.get(&t.id) {
-            Some(entry) => {
-                matches!(entry.status, TaskStatus::Running | TaskStatus::Suspended)
+        // Retire each ghost through history (FR-028) so a run whose
+        // completion event was dropped still shows up in the finished list
+        // with its real status, and keep the active-agents gauge in step.
+        for ghost in &removed_ghosts {
+            if self.retire_reconciled_task(ghost) {
+                ragent_telemetry::counters::add_agents_active(-1);
             }
-            None => true, // not registry-tracked (bench etc.) - keep
-        });
+        }
 
         // Add missing running entries; refresh status for tracked ones.
         let mut added: Vec<&ragent_agent::task::TaskEntry> = Vec::new();
@@ -5551,6 +5549,9 @@ impl App {
             } else if entry.status == TaskStatus::Running {
                 self.active_tasks.push(entry.clone());
                 added.push(entry);
+                // Balance the decrement a later retirement of this row makes:
+                // the dropped `SubagentStart` never incremented the gauge.
+                ragent_telemetry::counters::add_agents_active(1);
             }
         }
 
