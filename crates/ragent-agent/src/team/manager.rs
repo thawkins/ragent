@@ -3918,7 +3918,8 @@ pub fn poll_mailbox_once<S: BuildHasher>(
     team_name: &str,
 ) -> Result<usize> {
     let unread = Mailbox::open(team_dir, agent_id)?.peek_unread()?;
-    announced.retain(|id| unread.iter().any(|m| &m.message_id == id));
+    let unread_ids: HashSet<&str> = unread.iter().map(|m| m.message_id.as_str()).collect();
+    announced.retain(|id| unread_ids.contains(id.as_str()));
     let mut published = 0;
     for msg in &unread {
         if announced.insert(msg.message_id.clone()) {
