@@ -201,16 +201,39 @@ fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
     text
 }
 
-fn enter_temp_config_dir() -> tempfile::TempDir {
+/// A tempdir that is both the process cwd and the `XDG_CONFIG_HOME`.
+///
+/// Runtime-flag toggles (`/yolo`, Alt+Y, `/editlog`, Alt+E) persist to the
+/// **user-global** config, so redirecting only the cwd let these tests write
+/// `"yolo": false` into the developer's real `~/.config/ragent/ragent.json`
+/// and YOLO came up off on the next ragent start. Fields drop in declaration
+/// order: `XDG_CONFIG_HOME` is restored before the tempdir is deleted.
+struct TempConfigDir {
+    _xdg: XdgGuard,
+    temp: tempfile::TempDir,
+}
+
+impl TempConfigDir {
+    /// Contents of the isolated user-global `ragent.json`.
+    fn global_config(&self) -> String {
+        std::fs::read_to_string(self.temp.path().join("ragent").join("ragent.json"))
+            .expect("read isolated global config")
+    }
+}
+
+/// Callers must already hold `cwd_lock()`: this mutates cwd and
+/// `XDG_CONFIG_HOME`.
+fn enter_temp_config_dir() -> TempConfigDir {
     let temp = tempfile::tempdir().expect("tempdir");
     std::env::set_current_dir(temp.path()).expect("set cwd");
+    let xdg = XdgGuard::set(temp.path());
     let ragent_dir = temp.path().join(".ragent");
     std::fs::create_dir_all(&ragent_dir).expect("create .ragent");
     // Prime a project-local config with a known YOLO state so persistence tests
     // do not race on Config::load's default-config creation path.
     std::fs::write(ragent_dir.join("ragent.json"), r#"{"yolo": false}"#)
         .expect("write project config");
-    temp
+    TempConfigDir { _xdg: xdg, temp }
 }
 
 /// Create a tempdir, chdir into it, and return a guard that restores the
@@ -3569,7 +3592,7 @@ async fn test_slash_yolo_toggles_and_persists() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    let _temp = enter_temp_config_dir();
+    let temp = enter_temp_config_dir();
     let _guard = CwdGuard {
         prev: original_cwd,
         lock,
@@ -3594,6 +3617,13 @@ async fn test_slash_yolo_toggles_and_persists() {
         .await;
     assert!(!ragent_config::yolo::is_enabled());
     assert!(app.status.contains("disabled"));
+
+    // The persisted value must land in the isolated global config, never in
+    // the developer's real one.
+    assert!(
+        temp.global_config().contains(r#""yolo": false"#),
+        "yolo toggle must persist to the isolated XDG config"
+    );
 }
 
 #[test]
