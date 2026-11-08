@@ -155,3 +155,18 @@ fn test_continue_trailing_words_are_the_follow_up() {
         }
     );
 }
+
+#[test]
+fn test_create_value_flag_followed_by_flag_is_rejected() {
+    let message = invalid_message("create my-item topic --depth --use-local");
+    assert_eq!(message, "`--depth` requires a value");
+}
+
+#[test]
+fn test_recorded_invocation_with_odd_quotes_still_replays() {
+    // `argv.join(" ")` of a topic holding a literal `"` records an odd count.
+    let req =
+        ResearchRunRequest::from_invocation("ragent research create my-item the \"quoted word")
+            .expect("recorded invocation should replay");
+    assert_eq!(req.name, "my-item");
+}

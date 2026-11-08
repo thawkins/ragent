@@ -316,7 +316,10 @@ impl ResearchCliCommand {
     }
 
     fn parse_with(input: &str, strict: bool) -> Self {
-        if input.chars().filter(|c| *c == '"').count() % 2 == 1 {
+        // Typed input only: a CLI recording is `argv.join(" ")`, so a topic
+        // that contained a literal `"` legitimately records an odd count and
+        // must still replay.
+        if strict && input.chars().filter(|c| *c == '"').count() % 2 == 1 {
             return Self::Invalid("unterminated `\"` in arguments".to_string());
         }
         let tokens = split_args(input);
@@ -483,10 +486,18 @@ impl ResearchCliCommand {
                 | "--max-findings"
                 | "--age"
                 | "--brief" => {
-                    i += 1;
-                    if strict && rest.get(i).is_none() && rejected.is_none() {
-                        rejected = Some(format!("`{arg}` requires a value"));
+                    // Typed input: a missing value, or another `--flag` where
+                    // the value belongs, is refused without consuming that
+                    // flag (`--depth --use-local` must not set depth to
+                    // "--use-local" and drop `--use-local`).
+                    if strict && rest.get(i + 1).is_none_or(|next| next.starts_with("--")) {
+                        if rejected.is_none() {
+                            rejected = Some(format!("`{arg}` requires a value"));
+                        }
+                        i += 1;
+                        continue;
                     }
+                    i += 1;
                     if let Some(v) = rest.get(i) {
                         match arg {
                             "--from-url" | "--from-urls" => from_urls.push((*v).to_string()),

@@ -149,3 +149,23 @@ async fn test_continue_runs_and_reports_a_missing_item() {
         "the run's tracker is ended by a failure report"
     );
 }
+
+#[test]
+fn test_text_after_a_progress_message_starts_its_own_message() {
+    let mut app = app_with_session();
+    app.begin_research_progress(ResearchProgress::new("alpha", "topic"));
+    app.append_assistant_text("From: /research create\n\n[ok] result for beta");
+    // A refresh of the alpha run must not erase the text that followed it.
+    app.refresh_research_progress_message("alpha");
+    let texts = assistant_texts(&app);
+    assert!(
+        texts.iter().any(|t| t.contains("result for beta")),
+        "the result survives the progress refresh: {texts:?}"
+    );
+    assert!(
+        !texts
+            .iter()
+            .any(|t| t.starts_with("[research] Research Progress") && t.contains("result for beta")),
+        "the result is not inside the progress message: {texts:?}"
+    );
+}

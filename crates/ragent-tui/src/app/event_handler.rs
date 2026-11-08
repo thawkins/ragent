@@ -3192,17 +3192,25 @@ impl App {
                 *text = rendered;
                 msg.touch();
                 self.mark_message_dirty(i);
+                // Text arriving next (a result block, another run's output,
+                // streamed agent text) must not be appended into this
+                // message: the next refresh replaces its text wholesale and
+                // would erase it.
+                if i + 1 == self.messages.len() {
+                    self.force_new_message = true;
+                }
                 return;
             }
         }
 
         if let Some(ref sid) = self.session_id {
-            self.force_new_message = false;
             self.messages.push(Message::new(
                 sid.clone(),
                 Role::Assistant,
                 vec![MessagePart::Text { text: rendered }],
             ));
+            // See above: keep later text out of the progress message.
+            self.force_new_message = true;
             self.trim_messages_if_needed();
         }
     }
