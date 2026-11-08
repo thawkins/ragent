@@ -316,7 +316,7 @@ impl ResearchCliCommand {
     }
 
     fn parse_with(input: &str, strict: bool) -> Self {
-        if input.chars().filter(|c| *c == '"').count() % 2 == 1 {
+        if strict && input.chars().filter(|c| *c == '"').count() % 2 == 1 {
             return Self::Invalid("unterminated `\"` in arguments".to_string());
         }
         let tokens = split_args(input);
