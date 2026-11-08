@@ -78,6 +78,8 @@ pub struct DeckTracker {
     pub rows: Vec<DeckStageRow>,
     /// `true` once the run has finished, so the renderer can close the list.
     pub finished: bool,
+    /// Why the run failed, once it has; rendered instead of `[ok] Complete`.
+    pub failure: Option<String>,
 }
 
 impl DeckTracker {
@@ -117,6 +119,12 @@ impl DeckTracker {
         self.finished = true;
     }
 
+    /// Mark the whole run as ended by a failure.
+    pub fn fail(&mut self, reason: impl Into<String>) {
+        self.finished = true;
+        self.failure = Some(reason.into());
+    }
+
     /// The stage the run is currently working on, if any.
     #[must_use]
     pub fn current(&self) -> Option<&DeckStageRow> {
@@ -147,7 +155,10 @@ impl DeckTracker {
                 row.detail
             ));
         }
-        if self.finished {
+        if let Some(reason) = &self.failure {
+            out.push('\n');
+            out.push_str(&format!("[err] Failed: {reason}\n"));
+        } else if self.finished {
             out.push('\n');
             out.push_str("[ok] Complete\n");
         }

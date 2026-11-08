@@ -4256,6 +4256,13 @@ pub struct App {
     /// the results of older research runs remain visible in the message
     /// window instead of being overwritten by the latest run.
     pub research_progress: Vec<crate::research_progress::ResearchProgress>,
+    /// Names of `/research` runs (create, update, continue, cluster, deck)
+    /// whose background task is still running. A second run for a live name
+    /// is refused, because progress events are keyed by item name and two
+    /// overlapping runs would write into one tracker. Each run's task holds a
+    /// guard that removes its name when the task ends, so the set never
+    /// depends on a final progress event arriving.
+    pub research_live_runs: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 
     // -- Skill-registry cache (slash autocomplete hot path) ------------------
     /// Cached skill registry, lazily populated by [`App::skill_registry`].

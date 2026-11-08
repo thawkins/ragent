@@ -15,11 +15,8 @@ use ragent_research::run_config::{Depth, OutputFormat, ResearchMode, Tier};
 // -- Verb dispatch ---------------------------------------------------------
 
 #[test]
-fn parse_empty_is_unknown() {
-    assert_eq!(
-        ResearchCliCommand::parse(""),
-        ResearchCliCommand::Unknown(String::new())
-    );
+fn parse_empty_is_help() {
+    assert_eq!(ResearchCliCommand::parse(""), ResearchCliCommand::Help);
 }
 
 #[test]
@@ -51,10 +48,7 @@ fn parse_show_name_and_json() {
     );
     assert_eq!(
         ResearchCliCommand::parse("show"),
-        ResearchCliCommand::Show {
-            name: String::new(),
-            json: false
-        }
+        ResearchCliCommand::Invalid("`show` requires a research item name".to_string())
     );
 }
 
@@ -337,20 +331,20 @@ fn parse_create_invalid_numeric_is_rejected() {
 }
 
 #[test]
-fn parse_create_without_name_is_unknown() {
+fn parse_create_without_name_names_the_problem() {
     assert_eq!(
         ResearchCliCommand::parse("create --depth deep"),
-        ResearchCliCommand::Unknown("create".to_string())
+        ResearchCliCommand::Invalid("`create` requires a research item name".to_string())
     );
 }
 
 #[test]
-fn parse_create_flag_without_value_is_tolerated() {
-    // A trailing value flag with no value must not panic; the flag is ignored.
-    match ResearchCliCommand::parse("create t topic --depth") {
-        ResearchCliCommand::Create { depth, .. } => assert_eq!(depth, None),
-        other => panic!("expected Create, got {other:?}"),
-    }
+fn parse_create_flag_without_value_is_rejected() {
+    // A trailing value flag with no value is reported, not silently dropped.
+    assert_eq!(
+        ResearchCliCommand::parse("create t topic --depth"),
+        ResearchCliCommand::Invalid("`--depth` requires a value".to_string())
+    );
 }
 
 // -- split_args quoting (via search query) --------------------------------

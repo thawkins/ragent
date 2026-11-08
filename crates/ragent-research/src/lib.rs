@@ -110,7 +110,7 @@ pub use clarify::needs_clarification;
 pub use cli::{
     ResearchCliCommand, render_deck_event_json, render_list_output, render_list_output_json,
     render_search_output, render_search_output_json, render_session_event_json, render_show_output,
-    render_show_output_json, session_event_json,
+    render_show_output_json, session_event_json, show_source_rows,
 };
 pub use cluster::{
     CONCEPT_COUNT_INSTRUCTION_PLACEHOLDER, CONCEPT_EXTRACTION_PROMPT_TEMPLATE, ClusterPayload,

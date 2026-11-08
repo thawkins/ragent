@@ -1891,7 +1891,7 @@ async fn research_delete_without_yes_is_refused() {
     let mut app = app_with_session("sess-1");
     app.execute_slash_command("/research delete topic-a").await;
     let text = joined_text(&app);
-    assert!(text.contains("Refusing to delete"), "got: {text}");
+    assert!(text.contains("Not deleted"), "got: {text}");
 }
 
 #[tokio::test]

@@ -458,6 +458,8 @@ mod test_research_progress_config;
 mod test_research_progress_extra;
 #[path = "test_research_progress_sanitize.rs"]
 mod test_research_progress_sanitize;
+#[path = "test_research_run_lifecycle.rs"]
+mod test_research_run_lifecycle;
 #[path = "test_research_swarm_deep.rs"]
 mod test_research_swarm_deep;
 #[path = "test_research_viewer.rs"]

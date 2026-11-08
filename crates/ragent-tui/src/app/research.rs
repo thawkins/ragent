@@ -120,6 +120,110 @@ fn clarification_answered(answer: &str) -> bool {
     !answer.trim().is_empty() && answer.trim() != QUESTION_DISMISSED_MARKER
 }
 
+/// Publish the terminal failure report for research run `name`.
+///
+/// The TUI's progress handler treats a finalize-phase error as the end of the
+/// run: it marks the run's tracker finished and replaces the `[wait]` status
+/// with a `[warn]` one. Without this, a failed run (including a cancelled
+/// clarification) leaves the status bar on `[wait]` indefinitely, because
+/// `[wait]` is never auto-expired.
+fn publish_run_failed(event_bus: &EventBus, session_id: &str, name: &str, error: &str) {
+    use crate::research_progress::{SessionPhase, encode_cluster_progress_event};
+    event_bus.publish(Event::AgentNotice {
+        session_id: session_id.to_string(),
+        message: encode_cluster_progress_event(
+            name,
+            name,
+            SessionPhase::Finalize,
+            "error",
+            &format!("{name} failed: {error}"),
+        ),
+    });
+}
+
+/// Maximum number of hits `/research search` returns, matching
+/// `ragent research search`.
+const SEARCH_RESULT_LIMIT: usize = 25;
+
+/// Wrap `body` in a fenced code block tagged `lang` (empty for none).
+fn code_block(lang: &str, body: &str) -> String {
+    format!("```{lang}\n{}\n```", body.trim_end())
+}
+
+/// Holds a `/research` run's name in [`App::research_live_runs`] for as long
+/// as the run's task lives, and frees it on drop - on success, failure or
+/// panic alike.
+struct LiveRunGuard {
+    runs: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    name: String,
+}
+
+impl Drop for LiveRunGuard {
+    fn drop(&mut self) {
+        crate::app::session_ops::recover_poisoned(self.runs.lock(), "research_live_runs")
+            .remove(&self.name);
+    }
+}
+
+/// Everything a spawned `/research` run needs from the [`App`], captured
+/// before the spawn so the task never borrows `self`.
+///
+/// Shared by `create`, `update` and `continue` so the session wiring lives in
+/// one place.
+#[derive(Clone)]
+struct ResearchRunContext {
+    tool_registry: Arc<ragent_agent::tool::ToolRegistry>,
+    manager: ragent_research::ResearchManager,
+    session_id: String,
+    cwd: std::path::PathBuf,
+    event_bus: Arc<EventBus>,
+    storage: Arc<Storage>,
+    config: Option<Arc<ragent_agent::Config>>,
+    provider_registry: Arc<ProviderRegistry>,
+    active_model: Option<ModelRef>,
+}
+
+impl ResearchRunContext {
+    /// Build the research session for run `name` with `config`.
+    fn build_session(
+        &self,
+        name: &str,
+        config: &ragent_research::SessionConfig,
+    ) -> ragent_research::ResearchSession {
+        crate::research_adapter::build_research_session(
+            &self.tool_registry,
+            self.manager.clone(),
+            self.session_id.clone(),
+            self.cwd.clone(),
+            self.event_bus.clone(),
+            Some(self.storage.clone()),
+            self.config.clone(),
+            Some(self.provider_registry.clone()),
+            self.active_model.clone(),
+            Some(name),
+            config.web.max_queries,
+        )
+    }
+
+    /// The progress observer for run `name` researching `topic`.
+    fn observer(&self, name: &str, topic: &str) -> Arc<dyn ragent_research::SessionObserver> {
+        Arc::new(TuiResearchObserver {
+            app_event_bus: self.event_bus.clone(),
+            session_id: self.session_id.clone(),
+            name: name.to_string(),
+            topic: topic.to_string(),
+        })
+    }
+
+    /// Publish a `From: /research <verb>` result block to the message window.
+    fn publish_text(&self, text: String) {
+        self.event_bus.publish(Event::TextDelta {
+            session_id: self.session_id.clone(),
+            text,
+        });
+    }
+}
+
 /// Format a `provider_tool_calls` list as a human-readable suffix like
 /// `", 12 search request(s) (web_search: 8, mf_search: 4)"`.
 ///
@@ -329,7 +433,9 @@ impl App {
     /// Render `/research` help and update the status message. Used by both the
     /// Help early-return and the defensive fallback in the dispatch match.
     fn show_research_help(&mut self) {
-        self.append_assistant_text(&ragent_research::cli::ResearchCliCommand::build_help_message());
+        self.append_assistant_text(
+            &ragent_research::cli::ResearchCliCommand::build_help_message_for("/research"),
+        );
         self.status = "research: help".to_string();
     }
 
@@ -338,7 +444,6 @@ impl App {
         use ragent_research::{
             OutputFormat, ResearchIo, ResearchManager, ResearchMode, ResearchName,
         };
-        use std::sync::Arc;
 
         let cmd = ResearchCliCommand::parse(args);
         // Record the verbatim slash command for frontmatter replay.
@@ -365,13 +470,6 @@ impl App {
         }
         // Session id: ensure_session() guarantees this is Some.
         let session_id = self.session_id.clone().unwrap_or_default();
-        let config_arc = ragent_agent::Config::load().ok().map(Arc::new);
-        let observer = Arc::new(TuiResearchObserver {
-            app_event_bus: self.event_bus.clone(),
-            session_id: session_id.clone(),
-            name: String::new(),
-            topic: String::new(),
-        });
 
         match cmd {
             // FUNC-043: `Help` is handled above; a no-op here avoids the
@@ -423,12 +521,24 @@ impl App {
                 url_cloak,
                 max_age,
             } => {
+                // Reject an unusable name before announcing the run or seeding
+                // its progress tracker.
+                if let Err(e) = ResearchName::try_new(&name) {
+                    self.status = "research: create invalid name".to_string();
+                    self.append_assistant_text(&format!(
+                        "From: /research create\n\n**Error:** invalid research name `{name}`: {e}"
+                    ));
+                    return;
+                }
                 // Use the `[wait]` prefix so the status is treated as
                 // async-in-progress and NOT auto-expired to "ready" by
                 // [`App::arm_status_expiry`] while the background research
                 // session is still running. The live progress events update
                 // this status per-phase (see the AgentNotice handler), and
                 // the completion notice sets a terminal status.
+                let Some(live) = self.claim_research_run("create", &name) else {
+                    return;
+                };
                 self.status = format!("[wait] research: {name}...");
                 self.push_log_no_agent(
                     LogLevel::Info,
@@ -444,11 +554,9 @@ impl App {
                 // Seed the live progress tracker so the message window shows
                 // a log list of each phase as it runs. Each `/research
                 // create` gets its own tracker so older runs stay visible.
-                self.research_progress
-                    .push(crate::research_progress::ResearchProgress::new(
-                        &name, &topic,
-                    ));
-                self.refresh_research_progress_message(&name);
+                self.begin_research_progress(crate::research_progress::ResearchProgress::new(
+                    &name, &topic,
+                ));
                 // Use the shared `derive_title` so the TUI produces the same
                 // full-topic title as the CLI and HTTP server (not just the
                 // first word). The session derives the real topic from the
@@ -504,61 +612,41 @@ impl App {
                     max_age,
                     invocation: Some(invocation.clone()),
                 };
-                let config = ragent_research::build_session_config(&req, config_arc.as_deref());
-                let session = crate::research_adapter::build_research_session(
-                    &self.session_processor.tool_registry,
-                    manager.clone(),
-                    self.session_id.clone().unwrap_or_default(),
-                    self.cwd_path.clone(),
-                    self.event_bus.clone(),
-                    Some(self.storage.clone()),
-                    config_arc,
-                    Some(self.provider_registry.clone()),
-                    self.agent_info.model.clone(),
-                    Some(name.as_str()),
-                    config.web.max_queries,
-                );
-                let observer_clone = Arc::new(TuiResearchObserver {
-                    app_event_bus: observer.app_event_bus.clone(),
-                    session_id: observer.session_id.clone(),
-                    name: name.clone(),
-                    topic: topic.clone(),
-                });
+                let ctx = self.research_run_context(&manager, &session_id);
+                let config = ragent_research::build_session_config(&req, ctx.config.as_deref());
+                let session = ctx.build_session(&name, &config);
+                let observer = ctx.observer(&name, &topic);
                 let name_for_spawn = name.clone();
                 let topic_for_assistant = topic.clone();
                 let from_urls_for_msg = config.input.from_urls.clone();
                 let from_files_for_msg = config.input.from_files.clone();
                 let mode_override = config.engine.mode;
-                let event_bus_for_spawn = self.event_bus.clone();
-                let session_id_for_spawn = self.session_id.clone().unwrap_or_default();
                 tokio::spawn(async move {
+                    let _live = live;
+                    let name = name_for_spawn;
                     let outcome = run_with_clarification(
                         &session,
-                        &name_for_spawn,
+                        &name,
                         &title,
                         &config,
-                        observer_clone,
-                        &event_bus_for_spawn,
-                        &session_id_for_spawn,
+                        observer,
+                        &ctx.event_bus,
+                        &ctx.session_id,
                     )
                     .await;
                     match outcome {
-                        Ok(o) => {
-                            let provider_calls = format_provider_calls(&o.provider_tool_calls);
-                            event_bus_for_spawn.publish(Event::AgentNotice {
-                                session_id: session_id_for_spawn.clone(),
-                                message: format!(
-                                    "research: created research/{} with {} sources{}",
-                                    o.research_name,
-                                    o.sources.len(),
-                                    provider_calls
-                                ),
-                            })
+                        Ok(o) => ctx.publish_text(format!(
+                            "From: /research create\n\n\
+                             [ok] **Created `research/{name}`** with {} sources.{}\n\n\
+                             Tip: run `/research open {name}` to view the report.",
+                            o.sources.len(),
+                            format_provider_calls(&o.provider_tool_calls),
+                            name = o.research_name,
+                        )),
+                        Err(e) => {
+                            publish_run_failed(&ctx.event_bus, &ctx.session_id, &name, &e);
+                            ctx.publish_text(format!("From: /research create\n\n**Error:** {e}"));
                         }
-                        Err(e) => event_bus_for_spawn.publish(Event::AgentNotice {
-                            session_id: session_id_for_spawn.clone(),
-                            message: format!("research: error: {e}"),
-                        }),
                     }
                 });
                 let resolved_format = format
@@ -581,7 +669,7 @@ impl App {
                             .collect();
                         format!("File(s): {}", paths.join(", "))
                     } else {
-                        "URL: ".to_string()
+                        "Topic: (none given)".to_string()
                     }
                 } else {
                     format!("Topic: {topic_for_assistant}")
@@ -603,284 +691,227 @@ impl App {
                 );
                 self.append_assistant_text(&rendered);
             }
-            ResearchCliCommand::List { all, .. } => {
+            ResearchCliCommand::List { all, json } => {
                 self.status = format!(
                     "research: listing items{}...",
                     if all { " (including archived)" } else { "" }
                 );
                 let mgr = manager.clone();
-                let event_bus = self.event_bus.clone();
-                let session_id = self.session_id.clone().unwrap_or_default();
-                tokio::spawn(async move {
-                    match mgr.list(all).await {
-                        Ok(items) => {
-                            let rows: Vec<(String, String, String, String, String, String)> = items
-                                .into_iter()
-                                .map(|i| {
-                                    (
-                                        i.name.to_string(),
-                                        i.title,
-                                        i.topic,
-                                        i.status.as_str().to_string(),
-                                        i.created_at.to_rfc3339(),
-                                        i.modified_at.to_rfc3339(),
-                                    )
-                                })
-                                .collect();
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!(
-                                    "From: /research list\n\n```\n{}\n```",
-                                    ragent_research::render_list_output(&rows)
-                                ),
-                            });
-                        }
-                        Err(e) => {
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!("From: /research list\n\n**Error:** {e}"),
-                            });
-                        }
-                    }
+                self.spawn_research_query(&session_id, "list", async move {
+                    // Refresh first, as `ragent research list` does, so items
+                    // moved or removed outside the manager are reflected.
+                    mgr.refresh_index().await.map_err(|e| e.to_string())?;
+                    let items = mgr.list(all).await.map_err(|e| e.to_string())?;
+                    let rows: Vec<(String, String, String, String, String, String)> = items
+                        .into_iter()
+                        .map(|i| {
+                            (
+                                i.name.to_string(),
+                                i.title,
+                                i.topic,
+                                i.status.as_str().to_string(),
+                                i.created_at.to_rfc3339(),
+                                i.modified_at.to_rfc3339(),
+                            )
+                        })
+                        .collect();
+                    Ok(Some(if json {
+                        code_block("json", &ragent_research::render_list_output_json(&rows))
+                    } else {
+                        code_block("", &ragent_research::render_list_output(&rows))
+                    }))
                 });
             }
             ResearchCliCommand::Open { name } => {
                 self.status = format!("research: opening '{name}'...");
                 let mgr = manager.clone();
                 let event_bus = self.event_bus.clone();
-                let app_event_bus = self.event_bus.clone();
-                let session_id = self.session_id.clone().unwrap_or_default();
-                tokio::spawn(async move {
-                    match mgr.show(&name).await {
-                        Ok(item) => {
-                            let root = mgr.root().to_path_buf();
-                            // The report may be dated (`RESEARCH-YYYY-MM-DD.md`)
-                            // or the legacy undated `RESEARCH.md`; resolve the
-                            // one that actually exists.
-                            let path = match ragent_research::ResearchIo::resolve_research_md(
-                                &root,
-                                &item.name,
-                                item.created_at,
-                            )
-                            .await
-                            {
-                                Ok(path) => path,
-                                Err(e) => {
-                                    event_bus.publish(Event::TextDelta {
-                                        session_id,
-                                        text: format!(
-                                            "From: /research open\n\n**Error:** failed to locate the research report: {e}"
-                                        ),
-                                    });
-                                    return;
-                                }
-                            };
-                            match ragent_research::ResearchIo::read_file(&path).await {
-                                Ok(content) => {
-                                    let (_frontmatter, body) =
-                                        ragent_research::ResearchIo::split_frontmatter(&content);
-                                    app_event_bus.publish(
-                                        ragent_agent::event::Event::OpenResearchView {
-                                            name: item.name.to_string(),
-                                            path,
-                                            markdown: body,
-                                        },
-                                    );
-                                }
-                                Err(e) => {
-                                    event_bus.publish(Event::TextDelta {
-                                        session_id,
-                                        text: format!(
-                                            "From: /research open\n\n**Error:** failed to read the research report: {e}"
-                                        ),
-                                    });
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!("From: /research open\n\n**Error:** {e}"),
-                            });
-                        }
-                    }
+                self.spawn_research_query(&session_id, "open", async move {
+                    let item = mgr.show(&name).await.map_err(|e| e.to_string())?;
+                    // The report may be dated (`RESEARCH-YYYY-MM-DD.md`) or the
+                    // legacy undated `RESEARCH.md`; resolve the one that exists.
+                    let path = ragent_research::ResearchIo::resolve_research_md(
+                        mgr.root(),
+                        &item.name,
+                        item.created_at,
+                    )
+                    .await
+                    .map_err(|e| format!("failed to locate the research report: {e}"))?;
+                    let content = ragent_research::ResearchIo::read_file(&path)
+                        .await
+                        .map_err(|e| format!("failed to read the research report: {e}"))?;
+                    let (_frontmatter, body) =
+                        ragent_research::ResearchIo::split_frontmatter(&content);
+                    event_bus.publish(Event::OpenResearchView {
+                        name: item.name.to_string(),
+                        path,
+                        markdown: body,
+                    });
+                    Ok(None)
                 });
             }
-            ResearchCliCommand::Search { query, .. } => {
+            ResearchCliCommand::Search { query, json } => {
                 self.status = format!("research: searching for '{query}'...");
                 let mgr = manager.clone();
-                let event_bus = self.event_bus.clone();
-                let session_id = self.session_id.clone().unwrap_or_default();
-                tokio::spawn(async move {
-                    match mgr.search(&query, 25).await {
-                        Ok(hits) => {
-                            let rows: Vec<(String, String, String)> = hits
-                                .into_iter()
-                                .map(|h| (h.name, h.title, h.snippet))
-                                .collect();
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!(
-                                    "From: /research search\n\n```\n{}\n```",
-                                    ragent_research::render_search_output(&rows)
-                                ),
-                            });
-                        }
-                        Err(e) => {
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!("From: /research search\n\n**Error:** {e}"),
-                            });
-                        }
-                    }
+                self.spawn_research_query(&session_id, "search", async move {
+                    let hits = mgr
+                        .search(&query, SEARCH_RESULT_LIMIT)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    Ok(Some(if json {
+                        let rows: Vec<(String, String, String, String)> = hits
+                            .into_iter()
+                            .map(|h| (h.name, h.title, h.snippet, h.path.display().to_string()))
+                            .collect();
+                        code_block("json", &ragent_research::render_search_output_json(&rows))
+                    } else {
+                        let rows: Vec<(String, String, String)> = hits
+                            .into_iter()
+                            .map(|h| (h.name, h.title, h.snippet))
+                            .collect();
+                        code_block("", &ragent_research::render_search_output(&rows))
+                    }))
                 });
             }
-            ResearchCliCommand::Show { name, .. } => {
+            ResearchCliCommand::Show { name, json } => {
                 self.status = format!("research: showing '{name}'...");
                 let mgr = manager.clone();
-                let event_bus = self.event_bus.clone();
-                let session_id = self.session_id.clone().unwrap_or_default();
-                tokio::spawn(async move {
-                    match mgr.show(&name).await {
-                        Ok(item) => {
-                            let sources: Vec<(String, String, String, String, Option<String>)> =
-                                item.sources
-                                    .iter()
-                                    .map(|s| {
-                                        (
-                                            s.type_str().to_string(),
-                                            s.path_or_url().to_string(),
-                                            s.title().to_string(),
-                                            "web".to_string(),
-                                            s.oa_recovery_note(),
-                                        )
-                                    })
-                                    .collect();
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!(
-                                    "From: /research show\n\n```\n{}\n```",
-                                    ragent_research::render_show_output(
-                                        item.name.as_ref(),
-                                        &item.title,
-                                        &item.topic,
-                                        item.status.as_str(),
-                                        &item.created_at.to_rfc3339(),
-                                        &item.modified_at.to_rfc3339(),
-                                        &sources,
-                                    )
-                                ),
-                            });
-                        }
-                        Err(e) => {
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!("From: /research show\n\n**Error:** {e}"),
-                            });
-                        }
-                    }
+                self.spawn_research_query(&session_id, "show", async move {
+                    let item = mgr.show(&name).await.map_err(|e| e.to_string())?;
+                    let sources = ragent_research::show_source_rows(&item.sources);
+                    let render = if json {
+                        ragent_research::render_show_output_json
+                    } else {
+                        ragent_research::render_show_output
+                    };
+                    let body = render(
+                        item.name.as_ref(),
+                        &item.title,
+                        &item.topic,
+                        item.status.as_str(),
+                        &item.created_at.to_rfc3339(),
+                        &item.modified_at.to_rfc3339(),
+                        &sources,
+                    );
+                    Ok(Some(code_block(if json { "json" } else { "" }, &body)))
                 });
             }
-            ResearchCliCommand::Delete { name, yes, .. } => {
+            ResearchCliCommand::Delete { name, yes } => {
                 if !yes {
+                    // The TUI has no inline y/N prompt, so the flag is the
+                    // confirmation.
                     self.append_assistant_text(&format!(
-                        "From: /research delete\n\nRefusing to delete research/{name} without confirmation. Re-run with `--yes` to skip this prompt."
+                        "From: /research delete\n\nNot deleted. Deleting `research/{name}` \
+                         cannot be undone; confirm with `/research delete {name} --yes`."
                     ));
                     return;
                 }
                 self.status = format!("research: deleting '{name}'...");
                 let mgr = manager.clone();
-                let event_bus = self.event_bus.clone();
-                let session_id = self.session_id.clone().unwrap_or_default();
-                tokio::spawn(async move {
-                    let session_id_for_notice = session_id.clone();
-                    match mgr.delete(&name).await {
-                        Ok(()) => {
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!(
-                                    "From: /research delete\n\n[ok] Deleted research/{name}."
-                                ),
-                            });
-                            event_bus.publish(Event::AgentNotice {
-                                session_id: session_id_for_notice,
-                                message: format!("research: deleted research/{name}"),
-                            });
-                        }
-                        Err(e) => {
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!("From: /research delete\n\n**Error:** {e}"),
-                            });
-                        }
-                    }
+                self.spawn_research_query(&session_id, "delete", async move {
+                    mgr.delete(&name).await.map_err(|e| e.to_string())?;
+                    Ok(Some(format!("[ok] Deleted research/{name}.")))
                 });
             }
-            ResearchCliCommand::Archive { name, .. } => {
+            ResearchCliCommand::Archive { name } => {
                 self.status = format!("research: archiving '{name}'...");
                 let mgr = manager.clone();
-                let event_bus = self.event_bus.clone();
-                let session_id = self.session_id.clone().unwrap_or_default();
-                tokio::spawn(async move {
-                    match mgr.archive(&name).await {
-                        Ok(()) => {
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!(
-                                    "From: /research archive\n\n[ok] Archived research/{name}."
-                                ),
-                            });
-                        }
-                        Err(e) => {
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!("From: /research archive\n\n**Error:** {e}"),
-                            });
-                        }
-                    }
+                self.spawn_research_query(&session_id, "archive", async move {
+                    mgr.archive(&name).await.map_err(|e| e.to_string())?;
+                    Ok(Some(format!("[ok] Archived research/{name}.")))
                 });
             }
-            ResearchCliCommand::Continue { name, message, .. } => {
+            ResearchCliCommand::Continue { name, message } => {
+                // Add the follow-up to the item's plan (marking it in
+                // progress), then re-run the session on the plan's topic -
+                // the same flow as `ragent research continue`.
+                let Some(live) = self.claim_research_run("continue", &name) else {
+                    return;
+                };
+                self.status = format!("[wait] research: continue {name}...");
+                self.push_log_no_agent(LogLevel::Info, format!("research: continue '{name}'"));
+                self.begin_research_progress(crate::research_progress::ResearchProgress::new(
+                    &name, "continue",
+                ));
                 self.append_assistant_text(&format!(
-                    "From: /research continue\n\nResuming `{name}`{}",
+                    "From: /research continue\n\n[note] **Resuming `{name}`**{}...",
                     message
                         .as_ref()
                         .map(|m| format!(" with follow-up: {m}"))
                         .unwrap_or_default()
                 ));
+                let ctx = self.research_run_context(&manager, &session_id);
+                tokio::spawn(async move {
+                    let _live = live;
+                    let run_result: Result<_, String> = async {
+                        let state = ctx
+                            .manager
+                            .continue_item(&name, message.as_deref())
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let topic = state.plan.topic.clone();
+                        let title = match ctx.manager.show(&name).await {
+                            Ok(item) => item.title,
+                            Err(_) => name.clone(),
+                        };
+                        let req = ragent_research::ResearchRunRequest {
+                            name: name.clone(),
+                            topic: topic.clone(),
+                            title: Some(title.clone()),
+                            ..Default::default()
+                        };
+                        let config =
+                            ragent_research::build_session_config(&req, ctx.config.as_deref());
+                        let session = ctx.build_session(&name, &config);
+                        run_with_clarification(
+                            &session,
+                            &name,
+                            &title,
+                            &config,
+                            ctx.observer(&name, &topic),
+                            &ctx.event_bus,
+                            &ctx.session_id,
+                        )
+                        .await
+                    }
+                    .await;
+                    match run_result {
+                        Ok(o) => ctx.publish_text(format!(
+                            "From: /research continue\n\n\
+                             [ok] **Continued `research/{name}`** with {} sources.{}\n\n\
+                             Tip: run `/research open {name}` to view the report.",
+                            o.sources.len(),
+                            format_provider_calls(&o.provider_tool_calls),
+                            name = o.research_name,
+                        )),
+                        Err(e) => {
+                            publish_run_failed(&ctx.event_bus, &ctx.session_id, &name, &e);
+                            ctx.publish_text(format!("From: /research continue\n\n**Error:** {e}"));
+                        }
+                    }
+                });
             }
             ResearchCliCommand::Update { name } => {
                 // Replay the invocation recorded in the item's frontmatter and
                 // overwrite RESEARCH.md (and its supporting files) with a
                 // fresh run. The lookup is async, so all item work happens in
                 // the spawned task - mirroring the `create` spawn pattern.
+                let Some(live) = self.claim_research_run("update", &name) else {
+                    return;
+                };
                 self.status = format!("[wait] research: update {name}...");
                 self.push_log_no_agent(LogLevel::Info, format!("research: update '{name}'"));
-                self.research_progress
-                    .push(crate::research_progress::ResearchProgress::new(
-                        &name,
-                        "update (replay recorded invocation)",
-                    ));
-                self.refresh_research_progress_message(&name);
-                let manager_for_spawn = manager.clone();
-                let config_arc = ragent_agent::Config::load().ok().map(Arc::new);
-                let session_id = self.session_id.clone().unwrap_or_default();
-                let event_bus = self.event_bus.clone();
-                let storage = self.storage.clone();
-                let provider_registry = self.provider_registry.clone();
-                let active_model = self.agent_info.model.clone();
-                let cwd = self.cwd_path.clone();
-                let tool_registry = self.session_processor.tool_registry.clone();
-                let observer_for_spawn = Arc::new(TuiResearchObserver {
-                    app_event_bus: self.event_bus.clone(),
-                    session_id: self.session_id.clone().unwrap_or_default(),
-                    name: name.clone(),
-                    topic: String::new(),
-                });
+                self.begin_research_progress(crate::research_progress::ResearchProgress::new(
+                    &name,
+                    "update (replay recorded invocation)",
+                ));
+                let ctx = self.research_run_context(&manager, &session_id);
                 tokio::spawn(async move {
+                    let _live = live;
                     let mut replayed: Option<String> = None;
                     let run_result: Result<_, String> = async {
-                        let item = manager_for_spawn
+                        let item = ctx
+                            .manager
                             .show(&name)
                             .await
                             .map_err(|e| format!("research item `{name}` not found: {e}"))?;
@@ -900,79 +931,41 @@ impl App {
                         req.name = name.clone();
                         req.title = Some(item.title.clone());
                         let config =
-                            ragent_research::build_session_config(&req, config_arc.as_deref());
-                        let session = crate::research_adapter::build_research_session(
-                            &tool_registry,
-                            manager_for_spawn.clone(),
-                            session_id.clone(),
-                            cwd,
-                            event_bus.clone(),
-                            Some(storage),
-                            config_arc,
-                            Some(provider_registry),
-                            active_model,
-                            Some(name.as_str()),
-                            config.web.max_queries,
-                        );
-                        event_bus.publish(Event::AgentNotice {
-                            session_id: session_id.clone(),
-                            message: format!(
-                                "research: updating `{name}` - replaying `{recorded}`"
-                            ),
-                        });
+                            ragent_research::build_session_config(&req, ctx.config.as_deref());
+                        let session = ctx.build_session(&name, &config);
                         run_with_clarification(
                             &session,
                             &name,
                             &item.title,
                             &config,
-                            observer_for_spawn,
-                            &event_bus,
-                            &session_id,
+                            ctx.observer(&name, &req.topic),
+                            &ctx.event_bus,
+                            &ctx.session_id,
                         )
                         .await
                     }
                     .await;
+                    // Echo the replayed command line so the message window
+                    // shows what was executed.
+                    let echo = match replayed.as_deref() {
+                        Some(cmd) => format!("```\n{cmd}\n```\n\n"),
+                        None => String::new(),
+                    };
                     match run_result {
-                        Ok(o) => {
-                            let provider_calls = format_provider_calls(&o.provider_tool_calls);
-                            // Echo the replayed command line so the message
-                            // window shows what was executed, not just the
-                            // recorded-invocation notice.
-                            let echo = match replayed.as_deref() {
-                                Some(cmd) => format!("```\n{cmd}\n```\n\n"),
-                                None => String::new(),
-                            };
-                            event_bus.publish(Event::TextDelta {
-                                session_id: session_id.clone(),
-                                text: format!(
-                                    "From: /research update\n\n\
-                                     {echo}\
-                                     [ok] **Updated `research/{}`** with {} sources.{}\n\n\
-                                     Tip: run `/research open {}` to view the refreshed report.",
-                                    o.research_name,
-                                    o.sources.len(),
-                                    provider_calls,
-                                    o.research_name
-                                ),
-                            });
-                            event_bus.publish(Event::AgentNotice {
-                                session_id: session_id.clone(),
-                                message: format!(
-                                    "research: updated research/{} with {} sources",
-                                    o.research_name,
-                                    o.sources.len()
-                                ),
-                            });
-                        }
+                        Ok(o) => ctx.publish_text(format!(
+                            "From: /research update\n\n\
+                             {echo}\
+                             [ok] **Updated `research/{name}`** with {} sources.{}\n\n\
+                             Tip: run `/research open {name}` to view the refreshed report.",
+                            o.sources.len(),
+                            format_provider_calls(&o.provider_tool_calls),
+                            name = o.research_name,
+                        )),
                         Err(e) => {
-                            event_bus.publish(Event::TextDelta {
-                                session_id: session_id.clone(),
-                                text: format!("From: /research update\n\n**Error:** {e}"),
-                            });
-                            event_bus.publish(Event::AgentNotice {
-                                session_id: session_id.clone(),
-                                message: format!("research: error: {e}"),
-                            });
+                            publish_run_failed(&ctx.event_bus, &ctx.session_id, &name, &e);
+                            ctx.publish_text(format!(
+                                "From: /research update\n\n{echo}**Error:** {e}"
+                            ));
                         }
                     }
                 });
@@ -993,9 +986,19 @@ impl App {
                                 "From: /research cluster\n\n**Error:** `research/{name}/sources/` folder not found."
                             ));
                     } else {
+                        // Only the first entry is read: emptiness is all that
+                        // matters, and a large sources folder must not stall
+                        // the UI thread while it is counted.
                         let is_empty = match std::fs::read_dir(&sources_dir) {
-                            Ok(entries) => entries.count() == 0,
-                            Err(_) => true,
+                            Ok(mut entries) => entries.next().is_none(),
+                            Err(e) => {
+                                self.status = format!("research: cluster '{name}' unreadable");
+                                self.append_assistant_text(&format!(
+                                    "From: /research cluster\n\n**Error:** cannot read \
+                                     `research/{name}/sources/`: {e}"
+                                ));
+                                return;
+                            }
                         };
                         if is_empty {
                             self.status = format!("research: cluster '{name}' empty sources");
@@ -1034,25 +1037,31 @@ impl App {
                             .unwrap_or(ragent_research::DEFAULT_CONTEXT_WINDOW_TOKENS);
                         let model_label = self.selected_model.clone().unwrap_or_default();
 
+                        let Some(live) = self.claim_research_run("cluster", &name) else {
+                            return;
+                        };
+                        self.begin_research_progress(
+                            crate::research_progress::ResearchProgress::new(&name, &name),
+                        );
                         self.status =
                             format!("[wait] research: cluster '{name}' reading sources...");
                         self.append_assistant_text(&format!(
-                            "From: /research cluster\n\n[ok] Request accepted for `{name}` \
-                               (force={force}). Reading sources and preparing payload; \
-                               progress updates will appear below."
+                            "From: /research cluster\n\n[note] **Clustering `{name}`**{}... \
+                             Watch the progress log below.",
+                            if force {
+                                " (overwriting CONCEPTS.md)"
+                            } else {
+                                ""
+                            }
                         ));
 
                         let provider_registry = self.provider_registry.clone();
                         let storage = Some(self.storage.clone());
                         let event_bus = self.event_bus.clone();
-                        // Fail fast rather than publishing events with an empty
-                        // session id, which would not route to this session.
-                        let Some(session_id) = self.session_id.clone() else {
-                            self.status = "research: no active session".to_string();
-                            return;
-                        };
+                        let session_id = session_id.clone();
 
                         tokio::spawn(async move {
+                            let _live = live;
                             match run_cluster_extraction(
                                 &root,
                                 &valid_name,
@@ -1067,23 +1076,15 @@ impl App {
                             )
                             .await
                             {
-                                Ok(_) => {
-                                    event_bus.publish(Event::AgentNotice {
-                                        session_id,
-                                        message: format!(
-                                            "research: cluster '{name}' extraction complete"
-                                        ),
-                                    });
-                                }
+                                // Success already published its result block
+                                // and final progress step.
+                                Ok(_) => {}
                                 Err(e) => {
-                                    event_bus.publish(Event::AgentNotice {
-                                        session_id: session_id.clone(),
-                                        message: format!("research: cluster '{name}' failed: {e}"),
-                                    });
+                                    publish_run_failed(&event_bus, &session_id, &name, &e);
                                     event_bus.publish(Event::TextDelta {
                                         session_id,
                                         text: format!(
-                                            "From: /research cluster\n\n**Error:** {e} for `{name}`"
+                                            "From: /research cluster\n\n**Error:** `{name}`: {e}"
                                         ),
                                     });
                                 }
@@ -1099,7 +1100,14 @@ impl App {
                 }
             },
             ResearchCliCommand::Config => {
-                self.append_assistant_text("From: /research config\n\nEffective research defaults come from `ragent.json` and crate-level constants.");
+                let research = self.load_research_config().unwrap_or_default().research;
+                let body = serde_json::to_string_pretty(&research)
+                    .unwrap_or_else(|e| format!("failed to render the research settings: {e}"));
+                self.append_assistant_text(&format!(
+                    "From: /research config\n\nEffective `research` settings \
+                     (`ragent.json` over built-in defaults; per-run flags override these):\n\n{}",
+                    code_block("json", &body)
+                ));
             }
             ResearchCliCommand::Resume { name, .. } => {
                 self.append_assistant_text(&format!(
@@ -1154,18 +1162,94 @@ impl App {
         }
     }
 
-    /// Drive a `/research deck <name>` run (spec `diffdeck`, FR-001).
+    /// Claim `name` for a new `/research <verb>` run.
     ///
-    /// The whole seven-step orchestration lives in [`ResearchManager::deck`], so
-    /// this arm only resolves the session, spawns the future on the tokio
-    /// runtime, and reports the outcome: one [`Event::TextDelta`] carrying the
-    /// written path and the deck's own per-status counts on success (FR-010),
-    /// and one `TextDelta` plus an [`Event::AgentNotice`] on a refusal.
+    /// Returns the guard the run's task must hold, or `None` - after telling
+    /// the user - when a run for `name` is already live in this session.
+    fn claim_research_run(&mut self, verb: &str, name: &str) -> Option<LiveRunGuard> {
+        let claimed = crate::app::session_ops::recover_poisoned(
+            self.research_live_runs.lock(),
+            "research_live_runs",
+        )
+        .insert(name.to_string());
+        if !claimed {
+            self.status = format!("research: '{name}' is already running");
+            self.append_assistant_text(&format!(
+                "From: /research {verb}\n\n**Error:** a research run for `{name}` is already \
+                 in progress in this session. Wait for it to finish, then run the command again."
+            ));
+            return None;
+        }
+        Some(LiveRunGuard {
+            runs: self.research_live_runs.clone(),
+            name: name.to_string(),
+        })
+    }
+
+    /// Run `work` in the background and publish its result as one
+    /// `From: /research <verb>` block: the returned body on success (nothing
+    /// for `Ok(None)`), or an `**Error:**` line on failure.
     ///
-    /// A refusal is never silent: every branch of [`ResearchError`] - a missing
-    /// item (FR-018), an unusable report pair (FR-011/FR-012/FR-020), an
-    /// unparseable report (FR-019), a bad `--out` or an existing deck without
-    /// `--force` (FR-016/FR-017) - surfaces as an `[err]` line naming the reason.
+    /// Every short `/research` query (list, show, search, open, delete,
+    /// archive) reports through this, so they all present results and errors
+    /// the same way.
+    fn spawn_research_query<F>(&self, session_id: &str, verb: &'static str, work: F)
+    where
+        F: std::future::Future<Output = Result<Option<String>, String>> + Send + 'static,
+    {
+        let event_bus = self.event_bus.clone();
+        let session_id = session_id.to_string();
+        tokio::spawn(async move {
+            let text = match work.await {
+                Ok(Some(body)) => format!("From: /research {verb}\n\n{body}"),
+                Ok(None) => return,
+                Err(e) => format!("From: /research {verb}\n\n**Error:** {e}"),
+            };
+            event_bus.publish(Event::TextDelta { session_id, text });
+        });
+    }
+
+    /// Load `ragent.json` for a research run, reporting a load failure.
+    ///
+    /// A broken config is not fatal - the run falls back to the built-in
+    /// defaults - but the user is told, so research settings that silently
+    /// stopped applying do not go unnoticed.
+    fn load_research_config(&mut self) -> Option<ragent_agent::Config> {
+        match ragent_agent::Config::load() {
+            Ok(config) => Some(config),
+            Err(error) => {
+                self.push_log_no_agent(
+                    LogLevel::Warn,
+                    format!("research: failed to load ragent.json: {error}"),
+                );
+                self.append_assistant_text(&format!(
+                    "From: /research\n\n[warn] Could not load `ragent.json` ({error}); \
+                     using built-in research defaults."
+                ));
+                None
+            }
+        }
+    }
+
+    /// Capture the state a spawned research run needs.
+    fn research_run_context(
+        &mut self,
+        manager: &ragent_research::ResearchManager,
+        session_id: &str,
+    ) -> ResearchRunContext {
+        ResearchRunContext {
+            tool_registry: self.session_processor.tool_registry.clone(),
+            manager: manager.clone(),
+            session_id: session_id.to_string(),
+            cwd: self.cwd_path.clone(),
+            event_bus: self.event_bus.clone(),
+            storage: self.storage.clone(),
+            config: self.load_research_config().map(Arc::new),
+            provider_registry: self.provider_registry.clone(),
+            active_model: self.agent_info.model.clone(),
+        }
+    }
+
     /// The model the deck enrichment stage may consult, if one is selected.
     ///
     /// It reuses the session's provider/model wiring exactly as the research
@@ -1173,13 +1257,13 @@ impl App {
     /// the deck without a second configuration surface. `None` means "no model
     /// selected" and is not an error: the deck then falls back to the
     /// deterministic enrichment.
-    fn deck_model(&self) -> Option<Arc<dyn ragent_research::deck_enrich::DeckModel>> {
+    fn deck_model(&mut self) -> Option<Arc<dyn ragent_research::deck_enrich::DeckModel>> {
         let (provider_id, model_id) = self.selected_model.as_deref()?.split_once('/')?;
         let registry = self.provider_registry.clone();
         let provider_id = provider_id.to_string();
         let model_id = model_id.to_string();
         let storage = self.storage.clone();
-        let config = ragent_agent::Config::load().ok();
+        let config = self.load_research_config();
         let api_key = resolve_provider_api_key(&provider_id, &storage);
         let base_url = resolve_provider_base_url(&provider_id, &storage, config.as_ref());
         Some(
@@ -1191,6 +1275,19 @@ impl App {
         )
     }
 
+    /// Drive a `/research deck <name>` run (spec `diffdeck`, FR-001).
+    ///
+    /// The whole seven-step orchestration lives in [`ResearchManager::deck`], so
+    /// this arm only resolves the session, spawns the future on the tokio
+    /// runtime, and reports the outcome: one [`Event::TextDelta`] carrying the
+    /// written path and the deck's own per-status counts on success (FR-010),
+    /// and on a refusal one `TextDelta` plus the terminal failure report that
+    /// ends the run's progress tracker and `[wait]` status.
+    ///
+    /// A refusal is never silent: every branch of [`ResearchError`] - a missing
+    /// item (FR-018), an unusable report pair (FR-011/FR-012/FR-020), an
+    /// unparseable report (FR-019), a bad `--out` or an existing deck without
+    /// `--force` (FR-016/FR-017) - surfaces as an `[err]` line naming the reason.
     pub(crate) fn handle_research_deck(
         &mut self,
         manager: &ragent_research::ResearchManager,
@@ -1223,6 +1320,9 @@ impl App {
         // one in-place `Research Progress` message for this run, the same
         // presentation `/research create` uses, so the window shows a run that is
         // working rather than one that went quiet.
+        let Some(live) = self.claim_research_run("deck", &name) else {
+            return;
+        };
         self.status = format!("[wait] research: deck '{name}'...");
         let progress = crate::deck_progress::DeckProgressAdapter::new(
             self.event_bus.clone(),
@@ -1237,18 +1337,13 @@ impl App {
             ragent_research::deck_progress::DeckStage::Select,
             format!("starting a deck run for '{name}'"),
         ));
-        match self.research_progress.iter_mut().find(|p| p.name == name) {
-            Some(existing) => existing.deck = Some(tracker),
-            None => {
-                let mut seeded =
-                    crate::research_progress::ResearchProgress::new(name.clone(), name.clone());
-                seeded.deck = Some(tracker);
-                self.research_progress.push(seeded);
-            }
-        }
-        self.refresh_research_progress_message(&name);
+        let mut seeded =
+            crate::research_progress::ResearchProgress::new(name.clone(), name.clone());
+        seeded.deck = Some(tracker);
+        self.begin_research_progress(seeded);
 
         tokio::spawn(async move {
+            let _live = live;
             // The model is borrowed for the run rather than cloned into it:
             // the trait object is behind an `Arc`, so the call keeps it alive
             // across the await without duplicating provider state.
@@ -1270,7 +1365,7 @@ impl App {
                         ),
                     );
                     event_bus.publish(Event::TextDelta {
-                        session_id: session_id.clone(),
+                        session_id,
                         text: format_deck_success_line(
                             &name,
                             &outcome.path,
@@ -1278,26 +1373,12 @@ impl App {
                             &outcome,
                         ),
                     });
-                    event_bus.publish(Event::AgentNotice {
-                        session_id,
-                        message: if outcome.no_changes {
-                            format!("research: deck '{name}' written (no changes)")
-                        } else {
-                            format!(
-                                "research: deck '{name}' written ({} change(s))",
-                                outcome.change_count()
-                            )
-                        },
-                    });
                 }
                 Err(e) => {
+                    publish_run_failed(&event_bus, &session_id, &name, &e.to_string());
                     event_bus.publish(Event::TextDelta {
-                        session_id: session_id.clone(),
-                        text: format!("From: /research deck\n\n**Error:** {e}"),
-                    });
-                    event_bus.publish(Event::AgentNotice {
                         session_id,
-                        message: format!("research: deck '{name}' failed: {e}"),
+                        text: format!("From: /research deck\n\n**Error:** {e}"),
                     });
                 }
             }

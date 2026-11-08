@@ -128,16 +128,22 @@ fn install_capture() {
 
 /// Run `f` with the capture sink emptied, then return what it recorded.
 ///
-/// The sink is process-wide and every test in this file has its own process
-/// under `cargo nextest`, so no cross-test lock is needed. The crate's global
-/// lock is deliberately NOT taken: `capture` is called from inside these very
-/// tests and `std::sync::Mutex` is not reentrant, so a nested acquisition would
-/// deadlock the test.
+/// The sink is process-wide. Under `cargo nextest` every test has its own
+/// process, but under `cargo test` these tests share one, and without a lock
+/// one test's clear could empty the sink between another test's emit and its
+/// read. `CAPTURE_LOCK` serialises the clear/emit/read sequence; it is private
+/// to `capture`, which is never nested, so it cannot self-deadlock. The crate's
+/// global lock is deliberately NOT taken: callers of `capture` may already hold
+/// it, and `std::sync::Mutex` is not reentrant.
 ///
 /// The clear/read pair is not an emptiness assertion: a test asserts on the
 /// records it recognises by message, because the log-window export is bounded by
 /// a process-wide burst limit that a test's own traffic can exhaust.
 fn capture<F: FnOnce()>(f: F) -> Vec<Captured> {
+    static CAPTURE_LOCK: Mutex<()> = Mutex::new(());
+    let _serial = CAPTURE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     install_capture();
     if let Ok(mut guard) = sink().lock() {
         guard.clear();

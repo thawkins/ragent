@@ -2,6 +2,54 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `/research continue` now resumes the item (adds the follow-up to its plan and
+  re-runs the session) instead of printing "Resuming" and doing nothing. Words
+  after the name are now the follow-up (`/research continue <name> <message>`),
+  as SPEC and the CLI document; before, only `--message` was read.
+- `research show` (TUI and CLI) labelled every source `[web]` and printed the
+  source type where the id belongs. Sources now show their own kind and a
+  1-based id, built by one shared `show_source_rows` helper.
+- A second `/research` run under a name already tracked in the session
+  (`update` after `create`, `deck` or `cluster` after either) no longer extends
+  the earlier run's progress tracker and overwrites its message. The earlier
+  message is kept and marked "(earlier run)".
+- A failed `/research create`, `update`, `continue`, `cluster` or `deck` run
+  (including a cancelled clarification) no longer leaves the status bar on
+  `[wait]` indefinitely: the run's tracker ends and the status shows the error.
+  A failed deck renders `[err] Failed: ...` instead of `[ok] Complete`.
+- `/research create` rejects an unknown `--flag` or a value flag given no value
+  instead of folding it into the item name or topic. Replaying a recorded
+  invocation (`/research update`) still tolerates unknown flags.
+- A missing item name, query or path is reported as "`<verb>` requires ..."
+  rather than "unknown subcommand `create`" or an empty name passed on.
+  Bare `/research` shows the help.
+- A second `/research` run (create, update, continue, cluster, deck) for an
+  item whose run is still in progress in this session is refused instead of
+  mixing both runs' progress into one tracker. The name is freed when the
+  run's task ends, independent of progress events.
+- Text that follows a research progress message is no longer appended into
+  it and erased by the next refresh.
+- "invalid value for ..." errors now quote the flag with balanced backticks.
+- `ragent.json` load failures during a research run are reported instead of
+  silently falling back to defaults.
+
+### Changed
+
+- `/research list|show|search --json` now emit JSON in the TUI; the CLI gains
+  `research show --json` and `research search --json`.
+- `research config` prints the effective `research` settings as JSON.
+- `/research help` uses the `/research` spelling, aligns its columns and marks
+  `resume`, `export` and `import` as not yet implemented.
+- `/research delete` without `--yes` explains how to confirm instead of
+  referring to a prompt that does not exist.
+- Each `/research` sub-command now reports one result block; the duplicate
+  "Agent Notice" bubbles after create/update/delete/cluster/deck are gone.
+- `/research list` refreshes the index first, as the CLI does; `search` keeps
+  query words that start with `-`; an unterminated `"` is rejected; `create`
+  validates the item name before announcing the run.
+
 ## [1.0.165] - 2026-11-07
 
 Security-hardening release: four credential- or sandbox-relevant defects closed

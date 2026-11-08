@@ -899,14 +899,12 @@ async fn research_create_from_files_uses_file_subject() {
 }
 
 #[tokio::test]
-async fn research_create_no_topic_no_sources_uses_url_placeholder() {
+async fn research_create_no_topic_no_sources_says_none_given() {
     let mut app = app_with_session("s1");
     app.execute_slash_command("/research create bare").await;
     let text = joined_text(&app);
-    assert!(
-        text.contains("URL: \n") || text.contains("URL:"),
-        "got: {text}"
-    );
+    assert!(text.contains("Topic: (none given)"), "got: {text}");
+    assert!(!text.contains("URL:"), "no empty URL placeholder: {text}");
 }
 
 #[tokio::test]

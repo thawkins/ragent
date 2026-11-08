@@ -245,6 +245,15 @@ impl ResearchProgress {
         self.web_phase_deadline = None;
     }
 
+    /// Mark the run as ended by a failure.
+    ///
+    /// A failed run never emits the final source-count event, so without
+    /// this it would stay "running" and keep any web-phase countdown alive.
+    pub fn fail(&mut self) {
+        self.done = true;
+        self.web_phase_deadline = None;
+    }
+
     /// Render the tracker as a markdown log list for the message window.
     pub fn render(&self) -> String {
         let mut out = String::new();

@@ -292,6 +292,9 @@ pub enum ResearchCommands {
     },
     /// Full-text search across all RESEARCH.md files
     Search {
+        /// Emit JSON instead of a table (give it before the query)
+        #[arg(long)]
+        json: bool,
         /// Search query
         #[arg(value_name = "QUERY", trailing_var_arg = true)]
         query: Vec<String>,
@@ -300,6 +303,9 @@ pub enum ResearchCommands {
     Show {
         /// Research name
         name: String,
+        /// Emit JSON instead of a human-readable summary
+        #[arg(long)]
+        json: bool,
     },
     /// Delete a research item
     Delete {
@@ -684,11 +690,11 @@ pub async fn handle_research_command_with_model(
         }
         ResearchCommands::List { all, json } => ResearchCliCommand::List { all, json },
         ResearchCommands::Open { name } => ResearchCliCommand::Open { name },
-        ResearchCommands::Search { query } => ResearchCliCommand::Search {
+        ResearchCommands::Search { json, query } => ResearchCliCommand::Search {
             query: query.join(" "),
-            json: false,
+            json,
         },
-        ResearchCommands::Show { name } => ResearchCliCommand::Show { name, json: false },
+        ResearchCommands::Show { name, json } => ResearchCliCommand::Show { name, json },
         ResearchCommands::Delete { name, yes } => ResearchCliCommand::Delete { name, yes },
         ResearchCommands::Archive { name } => ResearchCliCommand::Archive { name },
         ResearchCommands::Continue { name, message } => ResearchCliCommand::Continue {
@@ -776,24 +782,17 @@ pub async fn handle_research_command_with_model(
                 cliprint!("{}", ragent_research::render_search_output(&rows));
             }
         }
-        ResearchCliCommand::Show { name, .. } => {
+        ResearchCliCommand::Show { name, json } => {
             let item = manager.show(&name).await?;
-            let sources: Vec<(String, String, String, String, Option<String>)> = item
-                .sources
-                .iter()
-                .map(|s| {
-                    (
-                        s.type_str().to_string(),
-                        s.path_or_url().to_string(),
-                        s.title().to_string(),
-                        "web".to_string(),
-                        s.oa_recovery_note(),
-                    )
-                })
-                .collect();
-            cliprint!(
+            let sources = ragent_research::show_source_rows(&item.sources);
+            let render = if json {
+                ragent_research::render_show_output_json
+            } else {
+                ragent_research::render_show_output
+            };
+            cliprintln!(
                 "{}",
-                ragent_research::render_show_output(
+                render(
                     item.name.as_ref(),
                     &item.title,
                     &item.topic,
@@ -802,6 +801,7 @@ pub async fn handle_research_command_with_model(
                     &item.modified_at.to_rfc3339(),
                     &sources,
                 )
+                .trim_end()
             );
         }
         ResearchCliCommand::Delete { name, yes } => {
@@ -1302,7 +1302,8 @@ pub async fn handle_research_command_with_model(
             );
         }
         ResearchCliCommand::Config => {
-            cliprintln!("ragent-research: effective defaults are loaded from ragent.json.");
+            let research = ragent_config::Config::load()?.research;
+            cliprintln!("{}", serde_json::to_string_pretty(&research)?);
         }
         ResearchCliCommand::Resume { name } => {
             cliprintln!("ragent-research: resume '{name}' is not implemented in the CLI.");
