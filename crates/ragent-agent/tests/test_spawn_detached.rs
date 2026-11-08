@@ -44,7 +44,7 @@ fn test_processor() -> Arc<SessionProcessor> {
         permission_checker: Arc::new(RwLock::new(PermissionChecker::new(vec![]))),
         event_bus,
         agent_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
+        team_manager: Default::default(),
         mcp_client: std::sync::OnceLock::new(),
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),

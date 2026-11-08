@@ -6457,7 +6457,7 @@ than assumed.
                                                                 &session_processor.provider_registry,
                                                             )),
                                                             team_context: None,
-                                                            team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_agent::tool::TeamManagerInterface>),
+                                                            team_manager: session_processor.team_manager.get().map(|tm| tm as Arc<dyn ragent_agent::tool::TeamManagerInterface>),
                                                             code_index: None,
                                                             bg_service: None,
                                                             spec_manager: session_processor.spec_manager.get().cloned(),
@@ -7118,8 +7118,7 @@ than assumed.
                                     // agent/poll loop is aborted so it cannot recreate
                                     // the tree after removal, and the member is marked
                                     // Stopped on disk.
-                                    let manager =
-                                        self.session_processor.team_manager.get().cloned();
+                                    let manager = self.session_processor.team_manager.get();
                                     let mut deactivated: Vec<String> = Vec::new();
                                     for m in &mut store.config.members {
                                         if m.status != MemberStatus::Stopped {
@@ -12447,12 +12446,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             .as_ref()
             .map(|t| t.name.clone())
             .ok_or_else(|| anyhow::anyhow!("no active team"))?;
-        let manager = self
-            .session_processor
-            .team_manager
-            .get()
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("team manager for '{team_name}' is not initialised"))?;
+        let manager =
+            self.session_processor.team_manager.get().ok_or_else(|| {
+                anyhow::anyhow!("team manager for '{team_name}' is not initialised")
+            })?;
 
         // FR-008: the status move goes through the manager's single status
         // writer, so an approval leaves `PlanPending` for `Working` with the

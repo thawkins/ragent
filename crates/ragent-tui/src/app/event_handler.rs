@@ -1688,8 +1688,18 @@ impl App {
                 // created a `TeamManager`, so the progress recording in the
                 // status handlers below is not a silent no-op for the whole
                 // run. `reconcile = false`: the spawning owner manages its own
-                // members; this only attaches observation.
-                self.ensure_team_manager_for_team_inner(team_name, known_team_dir, false);
+                // members; this only attaches observation. Observation never
+                // displaces a live runtime bound to another team (events from
+                // two teams would otherwise flip the binding back and forth).
+                let bound_elsewhere = self
+                    .session_processor
+                    .team_manager
+                    .get()
+                    .is_some_and(|bound| bound.team_name != *team_name)
+                    && self.session_processor.team_manager.stale().is_none();
+                if !bound_elsewhere {
+                    self.ensure_team_manager_for_team_inner(team_name, known_team_dir, false);
+                }
                 self.show_teams = true;
                 self.push_log_for(
                     LogLevel::Info,
@@ -2537,7 +2547,7 @@ impl App {
     pub fn dispatch_suspend_teammate(&mut self, agent_id: &str) {
         self.log_teammate_action(agent_id, "[pause]", "suspend");
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let tm = self.session_processor.team_manager.get().cloned();
+            let tm = self.session_processor.team_manager.get();
             let id = agent_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
@@ -2555,7 +2565,7 @@ impl App {
     pub fn dispatch_shutdown_teammate(&mut self, agent_id: &str) {
         self.log_teammate_action(agent_id, "[stop]", "shutdown");
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let tm = self.session_processor.team_manager.get().cloned();
+            let tm = self.session_processor.team_manager.get();
             let id = agent_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
@@ -2576,7 +2586,7 @@ impl App {
     pub fn dispatch_resume_teammate(&mut self, agent_id: &str) {
         self.log_teammate_action(agent_id, "[play]", "resume");
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let tm = self.session_processor.team_manager.get().cloned();
+            let tm = self.session_processor.team_manager.get();
             let id = agent_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {

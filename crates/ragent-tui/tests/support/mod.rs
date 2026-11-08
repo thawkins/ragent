@@ -43,7 +43,7 @@ pub fn make_app() -> App {
         event_bus: event_bus.clone(),
         agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
+        team_manager: Default::default(),
         mcp_client: std::sync::OnceLock::new(),
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),

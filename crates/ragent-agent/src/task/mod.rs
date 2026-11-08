@@ -515,6 +515,16 @@ impl AgentManager {
         }
     }
 
+    /// The session processor this manager runs sub-agents on.
+    ///
+    /// The processor holds this manager in a `OnceLock`, so this is how the
+    /// processor reaches an owning `Arc` of itself (for example to bind a
+    /// `TeamManager`, which needs one).
+    #[must_use]
+    pub fn processor(&self) -> &Arc<SessionProcessor> {
+        &self.processor
+    }
+
     /// Spawns a sub-agent task synchronously (blocks until completion).
     ///
     /// Creates an isolated session, resolves the agent, runs the agent loop,

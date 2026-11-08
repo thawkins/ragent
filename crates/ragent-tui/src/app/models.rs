@@ -1063,7 +1063,24 @@ impl App {
         known_team_dir: Option<std::path::PathBuf>,
         reconcile: bool,
     ) {
-        if self.session_processor.team_manager.get().is_some() {
+        // A manager whose team is gone (closed, deleted, cleaned up) is
+        // unbound so this team gets its own runtime instead of the old one.
+        if let Some(stale) = self.session_processor.team_manager.stale() {
+            self.push_log_no_agent(
+                LogLevel::Info,
+                format!(
+                    "TeamManager for team '{}' unbound: the team is gone",
+                    stale.team_name
+                ),
+            );
+            self.session_processor.team_manager.clear_if(&stale);
+        }
+        if self
+            .session_processor
+            .team_manager
+            .get()
+            .is_some_and(|bound| bound.team_name == team_name)
+        {
             return;
         }
         let Some(lead_session_id) = self.session_id.clone() else {
@@ -1108,25 +1125,27 @@ impl App {
         // itself, so it needs the `Arc` this manager lives in.
         let manager = manager.into_arc();
 
-        if self
-            .session_processor
-            .team_manager
-            .set(manager.clone())
-            .is_ok()
-        {
-            self.push_log_no_agent(
-                LogLevel::Info,
-                format!("TeamManager initialised for team '{team_name}'"),
-            );
-            // Only reconcile when explicitly requested (i.e. when the team was seeded
-            // via the LLM tool path and members may be queued in Spawning state).
-            if reconcile {
-                manager.clone().reconcile_spawning_members();
-            }
-            // M6-T1: start the teammate watchdog so hung teammates are
-            // detected and marked Failed without waiting for team_wait.
-            manager.clone().start_watchdog();
+        // A manager bound to another team is replaced; it stays alive for as
+        // long as its own teammate tasks hold it.
+        let previous = self.session_processor.team_manager.replace(manager.clone());
+        self.push_log_no_agent(
+            LogLevel::Info,
+            match previous {
+                Some(old) => format!(
+                    "TeamManager rebound from team '{}' to team '{team_name}'",
+                    old.team_name
+                ),
+                None => format!("TeamManager initialised for team '{team_name}'"),
+            },
+        );
+        // Only reconcile when explicitly requested (i.e. when the team was seeded
+        // via the LLM tool path and members may be queued in Spawning state).
+        if reconcile {
+            manager.clone().reconcile_spawning_members();
         }
+        // M6-T1: start the teammate watchdog so hung teammates are
+        // detected and marked Failed without waiting for team_wait.
+        manager.clone().start_watchdog();
     }
 
     pub(crate) fn overlay_model_config(

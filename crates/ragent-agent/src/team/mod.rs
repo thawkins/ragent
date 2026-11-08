@@ -59,9 +59,9 @@ pub use mailbox::{
 };
 pub use manager::watchdog_check_interval;
 pub use manager::{
-    HookOutcome, MAX_HOOK_FEEDBACK_BYTES, StatusTransition, TeamManager, TeammateNextTurn,
-    build_team_prompt_addition, poll_mailbox_once, run_hook, run_team_hook, teammate_retry_backoff,
-    validate_hook_command,
+    HookOutcome, MAX_HOOK_FEEDBACK_BYTES, StatusTransition, TeamManager, TeamManagerSlot,
+    TeammateNextTurn, build_team_prompt_addition, poll_mailbox_once, run_hook, run_team_hook,
+    teammate_retry_backoff, validate_hook_command,
 };
 pub use status_history::{
     MAX_HISTORY_BYTES, STATUS_HISTORY_FILE, STATUS_HISTORY_LIMIT, STATUS_HISTORY_ROTATED_FILE,

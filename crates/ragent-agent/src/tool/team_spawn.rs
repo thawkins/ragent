@@ -224,28 +224,22 @@ impl Tool for TeamSpawnTool {
             _ => crate::team::MemoryScope::None,
         };
 
-        // TeamManager is wired in M3. Until then, return a clear pending message.
+        // The session processor binds the team runtime before tool dispatch
+        // once this session's lead role in the team is resolved, which is the
+        // step after `team_create`. A spawn that runs before then is refused
+        // rather than reported as queued: nothing would ever spawn it.
         if ctx.team_manager.is_none() {
             tracing::warn!(
                 team = %team_name,
                 teammate = %teammate_name,
                 session = %ctx.session_id,
-                "TeamManager missing when attempting to spawn teammate; returning pending_manager"
+                "TeamManager missing when attempting to spawn teammate"
             );
-            return Ok(ToolOutput {
-                content: format!(
-                    "Teammate '{teammate_name}' queued for team '{team_name}' \
-                     (agent_type: {agent_type}).\n\
-                     Note: TeamManager not yet initialised - teammate will be spawned \
-                     when the session processor is upgraded to M3."
-                ),
-                metadata: Some(json!({
-                    "team_name": team_name,
-                    "teammate_name": teammate_name,
-                    "agent_type": agent_type,
-                    "status": "pending_manager"
-                })),
-            });
+            anyhow::bail!(
+                "teammate '{teammate_name}' was not spawned: team '{team_name}' has no running \
+                 team runtime in this session yet. It is started at the beginning of the next \
+                 step for the team this session leads - call team_spawn again"
+            );
         }
 
         let Some(manager) = ctx.team_manager.as_ref() else {

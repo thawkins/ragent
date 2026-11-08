@@ -3743,6 +3743,18 @@ Suspended, blocked and plan-pending members are not woken
 **Roster writes.** Every read-modify-write of a team's `config.json` goes
 through `TeamStore::update`, which holds the exclusive lock from read to write.
 
+**Team runtime.** Before tool dispatch, the session processor binds a
+`TeamManager` for the team its session leads, in every entry point (TUI,
+`run`, `serve`, ACP). See `SessionProcessor::ensure_team_manager`. It reconciles
+members queued in `Spawning` and starts the watchdog. A `team_spawn` that runs
+before the runtime is bound is refused with an instruction to retry. The
+processor holds the runtime in a rebindable `TeamManagerSlot`. A manager whose
+team is gone is unbound, atomically. The processor keeps a live manager of
+another team rather than replacing it, so concurrent sessions do not fight over
+the slot. The TUI rebinds when its active team changes. A manager refuses to spawn into a team it does not drive.
+`team_shutdown_teammate` and `team_task_cancel` fall back to acting on disk when
+the bound manager drives another team.
+
 ### 14.4 Team Slash Commands
 
 | Command | Purpose |

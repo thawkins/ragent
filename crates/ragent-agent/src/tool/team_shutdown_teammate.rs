@@ -101,7 +101,13 @@ impl Tool for TeamShutdownTeammateTool {
         // helper so the tool and the manager share a single shutdown path.
         // M5-T4: the helper stamps a correlation id on the `ShutdownRequest`
         // and records it on the member so `team_shutdown_ack` can copy it.
-        if let Some(manager) = ctx.team_manager.as_ref() {
+        // A runtime bound to another team would shut down *its* member with
+        // this agent id, so only a runtime that drives this team is used.
+        if let Some(manager) = ctx
+            .team_manager
+            .as_ref()
+            .filter(|manager| manager.manages(&team_dir))
+        {
             manager.shutdown_teammate(&agent_id, !immediate).await?;
         } else {
             // Fallback: no TeamManager is wired in (e.g. the lead session has
@@ -120,13 +126,18 @@ impl Tool for TeamShutdownTeammateTool {
                 "Graceful shutdown requested by lead; call team_shutdown_ack to terminate."
             };
             if let Ok(mailbox) = Mailbox::open(&team_dir, &agent_id) {
-                if let Err(e) = mailbox.push(MailboxMessage::new_correlated(
-                    "lead".to_string(),
-                    agent_id.clone(),
-                    MessageType::ShutdownRequest,
-                    content,
-                    &correlation_id,
-                )) {
+                // SEC-ragent-team-003: a lead-authored message must carry the
+                // sender session, or the mailbox write boundary rejects it.
+                if let Err(e) = mailbox.push(
+                    MailboxMessage::new_correlated(
+                        "lead".to_string(),
+                        agent_id.clone(),
+                        MessageType::ShutdownRequest,
+                        content,
+                        &correlation_id,
+                    )
+                    .with_sender_session(&ctx.session_id),
+                ) {
                     tracing::warn!(error = %e, "disk-only shutdown: cannot push ShutdownRequest");
                 }
             }
