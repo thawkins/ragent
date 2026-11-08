@@ -18,6 +18,22 @@
 
 ### Fixed
 
+- Teams: the team runtime is no longer stuck on the first team for the life of
+  the process. The session processor held its `TeamManager` in a `OnceLock`.
+  After the first team was cleaned up, a second `team_create` or a `/swarm` was
+  still driven by the old team's manager, and `team_spawn` wrote into the old
+  roster while reporting the new team. The new `TeamManagerSlot` is
+  rebindable:
+  - a manager whose team is gone is unbound;
+  - a lead moving to another team gets a new manager. Teammates already running
+    keep the old manager alive until they finish;
+  - `spawn_teammate` refuses a `team_name` its manager does not drive;
+  - `team_shutdown_teammate` and `team_task_cancel` use the bound manager only
+    when it drives the named team. Otherwise they fall back to acting on disk.
+
+  The disk-only shutdown request now carries the lead's sender session, so the
+  mailbox no longer rejects it.
+
 - Teams now work outside the TUI. Only the TUI ever created a `TeamManager`,
   so in `ragent run`, `ragent serve` and ACP mode `team_spawn` reported a
   teammate as "queued" but never started it. The session processor now binds

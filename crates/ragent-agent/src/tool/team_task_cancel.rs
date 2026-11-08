@@ -93,7 +93,13 @@ impl Tool for TeamTaskCancelTool {
         // to the store's `cancel` - the same in-list implementation behind it -
         // which cannot send the notice because a store holds no mailbox session
         // identity.
-        let (from_status, owner, notified, title) = match ctx.team_manager.as_ref() {
+        // A runtime bound to another team would cancel in *its* task list, so
+        // only a runtime that drives this team is used.
+        let (from_status, owner, notified, title) = match ctx
+            .team_manager
+            .as_ref()
+            .filter(|manager| manager.manages(&team_dir))
+        {
             Some(manager) => {
                 let (from, owner, notified) =
                     manager.cancel_task(task_id, &agent_id, reason).await?;

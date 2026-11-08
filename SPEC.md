@@ -3747,7 +3747,12 @@ through `TeamStore::update`, which holds the exclusive lock from read to write.
 `TeamManager` for the team its session leads, in every entry point (TUI,
 `run`, `serve`, ACP). See `SessionProcessor::ensure_team_manager`. It reconciles
 members queued in `Spawning` and starts the watchdog. A `team_spawn` that runs
-before the runtime is bound is refused with an instruction to retry.
+before the runtime is bound is refused with an instruction to retry. The
+processor holds the runtime in a rebindable `TeamManagerSlot`. A manager whose
+team is gone is unbound, and one bound to a different team than the lead's is
+replaced. A manager refuses to spawn into a team it does not drive.
+`team_shutdown_teammate` and `team_task_cancel` fall back to acting on disk when
+the bound manager drives another team.
 
 ### 14.4 Team Slash Commands
 

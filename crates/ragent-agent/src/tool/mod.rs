@@ -190,6 +190,16 @@ pub trait TeamManagerInterface: Send + Sync {
     /// registered as a live handle (the on-disk status is still updated).
     async fn shutdown_teammate(&self, agent_id: &str, graceful: bool) -> anyhow::Result<()>;
 
+    /// Whether this runtime drives the team stored at `team_dir`.
+    ///
+    /// Methods that take only an agent id or task id (`shutdown_teammate`,
+    /// `cancel_task`) act on the manager's own team, so a tool resolving a
+    /// different team from its `team_name` must check this first. The default
+    /// is `true` for implementations that drive a single fixed team.
+    fn manages(&self, _team_dir: &std::path::Path) -> bool {
+        true
+    }
+
     /// Returns the lead session id for this team, if known.
     ///
     /// PERF-017 / PERF-018: tools that previously loaded `TeamStore` from

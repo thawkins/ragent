@@ -458,9 +458,10 @@ pub struct SessionProcessor {
     /// Optional agent manager for sub-agent spawning (F13/F14).
     /// Uses `OnceLock` to break the circular dependency with `AgentManager`.
     pub agent_manager: std::sync::OnceLock<Arc<crate::task::AgentManager>>,
-    /// Optional team manager for spawning and coordinating teammate sessions.
-    /// Uses `OnceLock` to break the circular dependency with `TeamManager`.
-    pub team_manager: std::sync::OnceLock<Arc<crate::team::TeamManager>>,
+    /// The team runtime this session processor is bound to, if any. A
+    /// rebindable slot (not a `OnceLock`) so a later team gets its own
+    /// manager once the bound team is gone.
+    pub team_manager: crate::team::TeamManagerSlot,
     /// M8-T1: cache for `resolve_team_context_for_session`. Maps session id
     /// -> `(TeamContext, Instant)` with a 5-second TTL. Invalidated on team
     /// create/join/leave. Avoids scanning every team directory on every
@@ -721,8 +722,10 @@ impl SessionProcessor {
     ///
     /// The TUI binds one when it sees a team created; the other entry points
     /// (`run`, `serve`, ACP) had nothing that did, so `team_spawn` there could
-    /// never start a teammate. This runs before tool dispatch and is a no-op
-    /// when a manager is already bound, when the session leads no team, or when
+    /// never start a teammate. This runs before tool dispatch. A manager whose
+    /// team is gone is unbound, and one bound to a different team than the one
+    /// this session leads is replaced. It is a no-op when the manager already
+    /// drives this session's team, when the session leads no team, or when
     /// no [`AgentManager`](crate::task::AgentManager) is wired (it supplies the
     /// owning `Arc` of this processor that a `TeamManager` needs). Members left
     /// in `Spawning` (queued by blueprint seeding before the runtime existed)
@@ -738,12 +741,25 @@ impl SessionProcessor {
         working_dir: &std::path::Path,
         model: &crate::agent::ModelRef,
     ) {
-        if self.team_manager.get().is_some() {
-            return;
+        // A manager whose team was closed, deleted or cleaned up is unbound,
+        // so the next team this session leads gets its own runtime.
+        if let Some(stale) = self.team_manager.stale() {
+            tracing::info!(team = %stale.team_name, "unbinding the TeamManager of a team that is gone");
+            self.team_manager.clear();
         }
         let Some(tc) = team_context.filter(|tc| tc.is_lead) else {
             return;
         };
+        // Already bound to this team: nothing to do. Bound to another team:
+        // rebind below. The replaced manager stays alive for as long as its
+        // own teammate tasks hold it, so running teammates are not killed.
+        if self
+            .team_manager
+            .get()
+            .is_some_and(|bound| bound.team_name == tc.team_name)
+        {
+            return;
+        }
         let Some(agent_manager) = self.agent_manager.get() else {
             return;
         };
@@ -759,11 +775,13 @@ impl SessionProcessor {
         );
         manager.active_model = Some(model.clone());
         let manager = manager.into_arc();
-        if self.team_manager.set(Arc::clone(&manager)).is_ok() {
+        if let Some(previous) = self.team_manager.replace(Arc::clone(&manager)) {
+            tracing::info!(from = %previous.team_name, to = %tc.team_name, "TeamManager rebound");
+        } else {
             tracing::info!(team = %tc.team_name, "TeamManager bound for the lead session");
-            Arc::clone(&manager).reconcile_spawning_members();
-            manager.start_watchdog();
         }
+        Arc::clone(&manager).reconcile_spawning_members();
+        manager.start_watchdog();
     }
 
     /// Set the activity-log store.
@@ -3105,7 +3123,6 @@ impl SessionProcessor {
                     team_manager: self
                         .team_manager
                         .get()
-                        .cloned()
                         .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
                     code_index: self.code_index.get().cloned(),
                     bg_service: self.bg_service.get().cloned(),

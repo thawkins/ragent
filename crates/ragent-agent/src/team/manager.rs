@@ -601,6 +601,67 @@ struct TeammateHandle {
     poll_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
+/// The session processor's slot for the team runtime it is bound to.
+///
+/// It replaces a `OnceLock<Arc<TeamManager>>`. A `OnceLock` could be set once
+/// per process, so after the bound team was closed, deleted or cleaned up,
+/// every later team in the same process (a second `team_create`, a `/swarm`)
+/// was still driven by the first team's manager. This slot keeps the
+/// `OnceLock` reading API ([`Self::get`], [`Self::set`]) and adds
+/// [`Self::replace`] and [`Self::clear`] for rebinding.
+#[derive(Default)]
+pub struct TeamManagerSlot(parking_lot::RwLock<Option<Arc<TeamManager>>>);
+
+impl std::fmt::Debug for TeamManagerSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let team = self.0.read().as_ref().map(|m| m.team_name.clone());
+        f.debug_tuple("TeamManagerSlot").field(&team).finish()
+    }
+}
+
+impl TeamManagerSlot {
+    /// The bound manager, if any.
+    #[must_use]
+    pub fn get(&self) -> Option<Arc<TeamManager>> {
+        self.0.read().clone()
+    }
+
+    /// Bind `manager` if the slot is empty.
+    ///
+    /// # Errors
+    /// Returns `manager` back when a manager is already bound, as
+    /// `OnceLock::set` does.
+    pub fn set(&self, manager: Arc<TeamManager>) -> Result<(), Arc<TeamManager>> {
+        let mut slot = self.0.write();
+        if slot.is_some() {
+            return Err(manager);
+        }
+        *slot = Some(manager);
+        Ok(())
+    }
+
+    /// Bind `manager`, returning the manager it replaced.
+    pub fn replace(&self, manager: Arc<TeamManager>) -> Option<Arc<TeamManager>> {
+        self.0.write().replace(manager)
+    }
+
+    /// Unbind the current manager, returning it.
+    pub fn clear(&self) -> Option<Arc<TeamManager>> {
+        self.0.write().take()
+    }
+
+    /// The bound manager when its team is no longer usable (its directory or
+    /// `config.json` is gone, or the team is not `Active`), so a caller can
+    /// replace it. `None` when nothing is bound or the bound team is live.
+    #[must_use]
+    pub fn stale(&self) -> Option<Arc<TeamManager>> {
+        let manager = self.get()?;
+        let live = TeamStore::load(&manager.team_dir)
+            .is_ok_and(|store| store.config.status == crate::team::TeamStatus::Active);
+        (!live).then_some(manager)
+    }
+}
+
 /// Manages the runtime lifecycle of all teammates in one team.
 ///
 /// Created by the lead's session processor and shared as
@@ -3773,7 +3834,7 @@ impl TeamManager {
 impl TeamManagerInterface for TeamManager {
     async fn spawn_teammate(
         &self,
-        _team_name: &str,
+        team_name: &str,
         teammate_name: &str,
         agent_type: &str,
         prompt: &str,
@@ -3781,6 +3842,15 @@ impl TeamManagerInterface for TeamManager {
         lead_model: Option<&crate::agent::ModelRef>,
         working_dir: &Path,
     ) -> Result<String> {
+        // A manager drives exactly one team; a spawn for another team would
+        // be written into this team's roster while reported as the other's.
+        if team_name != self.team_name {
+            anyhow::bail!(
+                "cannot spawn teammate '{teammate_name}' in team '{team_name}': this session's \
+                 team runtime is bound to team '{}'",
+                self.team_name
+            );
+        }
         // The spawn loop writes status through the single writer, so it needs a
         // strong handle on the manager; the trait gives only `&self`.
         let manager = self.self_handle()?;
@@ -3799,6 +3869,10 @@ impl TeamManagerInterface for TeamManager {
     async fn shutdown_teammate(&self, agent_id: &str, graceful: bool) -> Result<()> {
         // Delegate to the unified in-crate helper.
         Self::shutdown_teammate(self, agent_id, graceful).await
+    }
+
+    fn manages(&self, team_dir: &Path) -> bool {
+        team_dir == self.team_dir
     }
 
     /// PERF-017 / PERF-018: expose the in-memory lead session id so team

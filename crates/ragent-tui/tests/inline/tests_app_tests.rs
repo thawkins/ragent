@@ -26,7 +26,7 @@ pub(crate) fn test_app() -> App {
         event_bus: event_bus.clone(),
         agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
+        team_manager: Default::default(),
         // M8-T1: team-context cache (unused in tests, but required by the
         // struct literal). Mirrors the wiring in `src/main.rs`.
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(

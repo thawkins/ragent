@@ -254,7 +254,7 @@ fn make_processor(
         permission_checker: Arc::new(parking_lot::RwLock::new(PermissionChecker::new(rules))),
         event_bus,
         agent_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
+        team_manager: Default::default(),
         team_context_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
         tool_repeat_guard: Arc::new(parking_lot::Mutex::new(HashMap::new())),
         mcp_client: std::sync::OnceLock::new(),

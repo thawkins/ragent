@@ -871,7 +871,7 @@ fn create_test_processor() -> ragent_agent::session::processor::SessionProcessor
         permission_checker,
         event_bus,
         agent_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
+        team_manager: Default::default(),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
         )),
