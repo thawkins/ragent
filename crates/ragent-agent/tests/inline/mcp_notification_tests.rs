@@ -14,7 +14,7 @@ fn make_adapter() -> (
 ) {
     // Use a non-zero dedup window so dedup tests work.
     let runtime = TriggerRuntime::new(TriggerRuntimeConfig {
-        dedup_window: Duration::from_secs(60),
+        dedup_window: Duration::from_mins(1),
         max_cycles: 100,
     });
     let injector = Arc::new(RecordingNotificationInjector::new());

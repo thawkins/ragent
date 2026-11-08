@@ -62,7 +62,8 @@ fn router_regex_count_is_thread_local_cached() {
         "classification must be stable across calls (thread-local regex cache)"
     );
     assert_eq!(
-        first.composite_score, second.composite_score,
+        first.composite_score.to_bits(),
+        second.composite_score.to_bits(),
         "the composite score must be identical across calls"
     );
 }

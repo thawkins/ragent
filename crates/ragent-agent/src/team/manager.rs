@@ -15,7 +15,8 @@
 //!   \- shutdown_teammate()-> writes shutdown_request mailbox message, marks Stopped
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -2404,6 +2405,10 @@ impl TeamManager {
         let poll_interval = self.poll_interval;
 
         tokio::spawn(async move {
+            // Message ids already announced on the event bus, so a message the
+            // teammate has not yet acknowledged is announced once, not on
+            // every tick.
+            let mut announced: HashSet<String> = HashSet::new();
             loop {
                 if cancel.load(Ordering::Relaxed) {
                     break;
@@ -2427,30 +2432,15 @@ impl TeamManager {
                     break;
                 }
 
-                // Drain unread messages.
-                let mailbox = match Mailbox::open(&team_dir, &agent_id) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        warn!(agent_id, error = %e, "Cannot open mailbox for polling");
-                        continue;
-                    }
-                };
-                let unread = match mailbox.drain_unread() {
-                    Ok(msgs) => msgs,
-                    Err(e) => {
-                        warn!(agent_id, error = %e, "Cannot drain mailbox");
-                        continue;
-                    }
-                };
-
-                for msg in unread {
-                    publish_message_event(
-                        &event_bus,
-                        &lead_session_id,
-                        &team_name,
-                        &agent_id,
-                        &msg,
-                    );
+                if let Err(e) = poll_mailbox_once(
+                    &team_dir,
+                    &agent_id,
+                    &mut announced,
+                    &event_bus,
+                    &lead_session_id,
+                    &team_name,
+                ) {
+                    warn!(agent_id, error = %e, "Cannot poll mailbox");
                 }
             }
             debug!(agent_id, "Mailbox polling loop stopped");
@@ -3898,6 +3888,47 @@ fn cancellation_notice(task: &Task, reason: Option<&str>) -> String {
 }
 
 /// Translate an inbound mailbox message into the appropriate `Event`.
+/// Run one tick of a teammate's mailbox poll loop.
+///
+/// Peeks the unread messages in `agent_id`'s mailbox and publishes an event
+/// for each one whose id is not already in `announced`. Messages are **not**
+/// marked read: acknowledging them is the job of the teammate's own
+/// `team_read_messages` call, so the poll loop must leave them unread or the
+/// teammate never sees them. `announced` is pruned to the ids still unread,
+/// which bounds it by the size of the unread backlog.
+///
+/// # Arguments
+/// * `team_dir` - the team directory holding the mailbox.
+/// * `agent_id` - the teammate whose mailbox is polled.
+/// * `announced` - ids already published; updated in place.
+/// * `event_bus`, `lead_session_id`, `team_name` - where and how to publish.
+///
+/// # Returns
+/// The number of messages newly announced on this tick.
+///
+/// # Errors
+/// Returns an error if the mailbox cannot be opened or read.
+#[doc(hidden)]
+pub fn poll_mailbox_once<S: BuildHasher>(
+    team_dir: &Path,
+    agent_id: &str,
+    announced: &mut HashSet<String, S>,
+    event_bus: &EventBus,
+    lead_session_id: &str,
+    team_name: &str,
+) -> Result<usize> {
+    let unread = Mailbox::open(team_dir, agent_id)?.peek_unread()?;
+    announced.retain(|id| unread.iter().any(|m| &m.message_id == id));
+    let mut published = 0;
+    for msg in &unread {
+        if announced.insert(msg.message_id.clone()) {
+            publish_message_event(event_bus, lead_session_id, team_name, agent_id, msg);
+            published += 1;
+        }
+    }
+    Ok(published)
+}
+
 fn publish_message_event(
     event_bus: &EventBus,
     lead_session_id: &str,

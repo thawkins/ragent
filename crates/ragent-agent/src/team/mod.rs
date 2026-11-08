@@ -60,7 +60,7 @@ pub use mailbox::{
 pub use manager::watchdog_check_interval;
 pub use manager::{
     HookOutcome, MAX_HOOK_FEEDBACK_BYTES, StatusTransition, TeamManager,
-    build_team_prompt_addition, run_hook, run_team_hook, teammate_retry_backoff,
+    build_team_prompt_addition, poll_mailbox_once, run_hook, run_team_hook, teammate_retry_backoff,
     validate_hook_command,
 };
 pub use status_history::{

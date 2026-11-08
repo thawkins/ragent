@@ -406,7 +406,7 @@ fn memory_candidate_serde_round_trip() {
     let json = serde_json::to_string(&candidate).expect("serialize");
     let back: ragent_agent::memory::MemoryCandidate =
         serde_json::from_str(&json).expect("deserialize");
-    assert_eq!(back.confidence, 0.42);
+    assert!((back.confidence - 0.42).abs() < f64::EPSILON);
     assert_eq!(back.tags, vec!["a".to_string()]);
 }
 
