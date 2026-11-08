@@ -2120,6 +2120,11 @@ fn status_bar_renders_the_compaction_and_compression_indicators() {
 #[test]
 fn status_bar_renders_the_web_phase_countdown() {
     let mut app = support::make_app();
+    // Pin the width-consuming segments so the real cwd, branch and configured
+    // model cannot push the countdown off a 140-column status bar.
+    app.cwd = "/home/dev/projects/ragent".to_string();
+    app.git_branch = Some("main".to_string());
+    app.selected_model = Some("anthropic/claude-sonnet-4".to_string());
     let mut progress = research_progress::ResearchProgress::new("run", "topic");
     progress.web_phase_deadline = Some(std::time::Instant::now() + Duration::from_secs(95));
     app.research_progress.push(progress);
@@ -2159,6 +2164,11 @@ fn status_bar_hides_the_service_row_in_non_verbose_modes() {
 #[test]
 fn status_bar_paints_the_status_history_and_error_status() {
     let mut app = support::make_app();
+    // Pin the width-consuming segments so the real cwd, branch and configured
+    // model cannot push the status text off a 140-column status bar.
+    app.cwd = "/home/dev/projects/ragent".to_string();
+    app.git_branch = Some("main".to_string());
+    app.selected_model = Some("anthropic/claude-sonnet-4".to_string());
     app.status = "error: model unavailable".to_string();
     let screen = painted(&render(&mut app, 140, 24));
     assert!(screen.contains("model unavailable"), "screen: {screen}");

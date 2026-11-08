@@ -129,7 +129,9 @@ fn scratch_config_path() -> std::path::PathBuf {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_gcf_help_renders_usage_without_state_change() {
-    let _guard = test_lock();
+    // Isolate the config so the app cannot inherit GCF from the developer's
+    // real global config.
+    let (_guard, _env, _temp) = enter_isolated_config_project();
     let mut app = support::make_app();
     app.execute_slash_command("/gcf help").await;
 
@@ -175,7 +177,9 @@ async fn test_gcf_help_aliases_bare_dashdash_and_h() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_gcf_unknown_subcommand_rejected_without_state_change() {
-    let _guard = test_lock();
+    // Isolate the config so `Config::load()` below cannot read the
+    // developer's real global config (which may legitimately enable GCF).
+    let (_guard, _env, _temp) = enter_isolated_config_project();
     let mut app = support::make_app();
     app.execute_slash_command("/gcf bogus").await;
     let text = last_message_text(&app);

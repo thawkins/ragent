@@ -656,7 +656,7 @@ fn is_help_args(args: &str) -> bool {
 /// `live` (the `Event::McpStatusChanged` map) when present, so the background
 /// startup connect loop's status is not lost; otherwise it starts `Disabled`
 /// until the connect path reports otherwise.
-pub(crate) fn mcp_display_servers<S, H>(
+pub fn mcp_display_servers<S, H>(
     previous: &[ragent_agent::mcp::McpServer],
     configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
     working_dir: &std::path::Path,
@@ -707,7 +707,7 @@ where
 /// and whether the location exists, followed by the individual servers found at
 /// each location. The table is markdown so each row lands on its own rendered
 /// line (TUI-019), matching the `/mcp` display convention.
-pub(crate) fn render_mcp_config(locations: &[ragent_agent::mcp::McpDiscoveryLocation]) -> String {
+pub fn render_mcp_config(locations: &[ragent_agent::mcp::McpDiscoveryLocation]) -> String {
     // Escape a markdown table cell (a raw `|` would split the row).
     let cell = |value: &str| value.replace('|', "\\|");
     let mut out = String::from("From: /mcp config\nWhere ragent looks for MCP servers:\n\n");
@@ -775,7 +775,7 @@ pub(crate) fn render_mcp_config(locations: &[ragent_agent::mcp::McpDiscoveryLoca
 ///
 /// Keyed by server id so the `/mcp` list can print a `Defined in:` block, which
 /// replaced a seventh table column that wrapped every header cell.
-pub(crate) fn mcp_declaration_files<S: std::hash::BuildHasher>(
+pub fn mcp_declaration_files<S: std::hash::BuildHasher>(
     configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
     working_dir: &std::path::Path,
 ) -> std::collections::HashMap<String, String> {
@@ -798,7 +798,7 @@ pub(crate) fn mcp_declaration_files<S: std::hash::BuildHasher>(
 ///
 /// A configured `ragent.json` entry is absent from the map: it is the user's own,
 /// not a plugin's or a connector's.
-pub(crate) fn mcp_bridged_owners<S: std::hash::BuildHasher>(
+pub fn mcp_bridged_owners<S: std::hash::BuildHasher>(
     configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
     working_dir: &std::path::Path,
 ) -> std::collections::HashMap<String, (&'static str, String)> {
@@ -823,7 +823,7 @@ pub(crate) fn mcp_bridged_owners<S: std::hash::BuildHasher>(
 /// Thin re-export of [`ragent_agent::tool::McpToolWrapper::ragent_name_for`]
 /// so the existing TUI call sites keep their short path.
 #[must_use]
-pub(crate) fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
+pub fn mcp_ragent_tool_name(server_id: &str, tool_name: &str) -> String {
     ragent_agent::tool::McpToolWrapper::ragent_name_for(server_id, tool_name)
 }
 
@@ -847,7 +847,7 @@ pub(super) fn server_is_enabled(
 /// Unknown strings map to `Disabled` so a malformed event cannot wedge the
 /// display list in a bogus state.
 #[must_use]
-pub(crate) fn mcp_status_from_event(status: &str) -> ragent_agent::mcp::McpStatus {
+pub fn mcp_status_from_event(status: &str) -> ragent_agent::mcp::McpStatus {
     match status {
         "connected" => ragent_agent::mcp::McpStatus::Connected,
         "needs_auth" => ragent_agent::mcp::McpStatus::NeedsAuth,
