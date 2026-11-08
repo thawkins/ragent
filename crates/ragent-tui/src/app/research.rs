@@ -150,6 +150,21 @@ fn code_block(lang: &str, body: &str) -> String {
     format!("```{lang}\n{}\n```", body.trim_end())
 }
 
+/// Holds a `/research` run's name in [`App::research_live_runs`] for as long
+/// as the run's task lives, and frees it on drop - on success, failure or
+/// panic alike.
+struct LiveRunGuard {
+    runs: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    name: String,
+}
+
+impl Drop for LiveRunGuard {
+    fn drop(&mut self) {
+        crate::app::session_ops::recover_poisoned(self.runs.lock(), "research_live_runs")
+            .remove(&self.name);
+    }
+}
+
 /// Everything a spawned `/research` run needs from the [`App`], captured
 /// before the spawn so the task never borrows `self`.
 ///
@@ -521,6 +536,9 @@ impl App {
                 // session is still running. The live progress events update
                 // this status per-phase (see the AgentNotice handler), and
                 // the completion notice sets a terminal status.
+                let Some(live) = self.claim_research_run("create", &name) else {
+                    return;
+                };
                 self.status = format!("[wait] research: {name}...");
                 self.push_log_no_agent(
                     LogLevel::Info,
@@ -604,6 +622,7 @@ impl App {
                 let from_files_for_msg = config.input.from_files.clone();
                 let mode_override = config.engine.mode;
                 tokio::spawn(async move {
+                    let _live = live;
                     let name = name_for_spawn;
                     let outcome = run_with_clarification(
                         &session,
@@ -806,6 +825,9 @@ impl App {
                 // Add the follow-up to the item's plan (marking it in
                 // progress), then re-run the session on the plan's topic -
                 // the same flow as `ragent research continue`.
+                let Some(live) = self.claim_research_run("continue", &name) else {
+                    return;
+                };
                 self.status = format!("[wait] research: continue {name}...");
                 self.push_log_no_agent(LogLevel::Info, format!("research: continue '{name}'"));
                 self.begin_research_progress(crate::research_progress::ResearchProgress::new(
@@ -820,6 +842,7 @@ impl App {
                 ));
                 let ctx = self.research_run_context(&manager, &session_id);
                 tokio::spawn(async move {
+                    let _live = live;
                     let run_result: Result<_, String> = async {
                         let state = ctx
                             .manager
@@ -873,6 +896,9 @@ impl App {
                 // overwrite RESEARCH.md (and its supporting files) with a
                 // fresh run. The lookup is async, so all item work happens in
                 // the spawned task - mirroring the `create` spawn pattern.
+                let Some(live) = self.claim_research_run("update", &name) else {
+                    return;
+                };
                 self.status = format!("[wait] research: update {name}...");
                 self.push_log_no_agent(LogLevel::Info, format!("research: update '{name}'"));
                 self.begin_research_progress(crate::research_progress::ResearchProgress::new(
@@ -881,6 +907,7 @@ impl App {
                 ));
                 let ctx = self.research_run_context(&manager, &session_id);
                 tokio::spawn(async move {
+                    let _live = live;
                     let mut replayed: Option<String> = None;
                     let run_result: Result<_, String> = async {
                         let item = ctx
@@ -1010,6 +1037,9 @@ impl App {
                             .unwrap_or(ragent_research::DEFAULT_CONTEXT_WINDOW_TOKENS);
                         let model_label = self.selected_model.clone().unwrap_or_default();
 
+                        let Some(live) = self.claim_research_run("cluster", &name) else {
+                            return;
+                        };
                         self.begin_research_progress(
                             crate::research_progress::ResearchProgress::new(&name, &name),
                         );
@@ -1031,6 +1061,7 @@ impl App {
                         let session_id = session_id.clone();
 
                         tokio::spawn(async move {
+                            let _live = live;
                             match run_cluster_extraction(
                                 &root,
                                 &valid_name,
@@ -1129,6 +1160,30 @@ impl App {
                 ));
             }
         }
+    }
+
+    /// Claim `name` for a new `/research <verb>` run.
+    ///
+    /// Returns the guard the run's task must hold, or `None` - after telling
+    /// the user - when a run for `name` is already live in this session.
+    fn claim_research_run(&mut self, verb: &str, name: &str) -> Option<LiveRunGuard> {
+        let claimed = crate::app::session_ops::recover_poisoned(
+            self.research_live_runs.lock(),
+            "research_live_runs",
+        )
+        .insert(name.to_string());
+        if !claimed {
+            self.status = format!("research: '{name}' is already running");
+            self.append_assistant_text(&format!(
+                "From: /research {verb}\n\n**Error:** a research run for `{name}` is already \
+                 in progress in this session. Wait for it to finish, then run the command again."
+            ));
+            return None;
+        }
+        Some(LiveRunGuard {
+            runs: self.research_live_runs.clone(),
+            name: name.to_string(),
+        })
     }
 
     /// Run `work` in the background and publish its result as one
@@ -1265,6 +1320,9 @@ impl App {
         // one in-place `Research Progress` message for this run, the same
         // presentation `/research create` uses, so the window shows a run that is
         // working rather than one that went quiet.
+        let Some(live) = self.claim_research_run("deck", &name) else {
+            return;
+        };
         self.status = format!("[wait] research: deck '{name}'...");
         let progress = crate::deck_progress::DeckProgressAdapter::new(
             self.event_bus.clone(),
@@ -1285,6 +1343,7 @@ impl App {
         self.begin_research_progress(seeded);
 
         tokio::spawn(async move {
+            let _live = live;
             // The model is borrowed for the run rather than cloned into it:
             // the trait object is behind an `Arc`, so the call keeps it alive
             // across the await without duplicating provider state.

@@ -169,3 +169,58 @@ fn test_text_after_a_progress_message_starts_its_own_message() {
         "the result is not inside the progress message: {texts:?}"
     );
 }
+
+#[tokio::test]
+async fn test_second_run_for_a_live_name_is_refused() {
+    let mut app = app_with_session();
+    app.research_live_runs
+        .lock()
+        .expect("lock")
+        .insert("busy".to_string());
+
+    app.execute_slash_command("/research update busy").await;
+
+    let texts = assistant_texts(&app);
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.contains("a research run for `busy` is already in progress")),
+        "{texts:?}"
+    );
+    assert!(
+        !app.research_progress.iter().any(|p| p.name == "busy"),
+        "the refused command must not seed or replace a tracker"
+    );
+    assert!(!app.status.starts_with("[wait]"), "{}", app.status);
+}
+
+#[tokio::test]
+async fn test_finished_run_frees_its_name() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut app = app_with_session();
+    app.cwd_path = dir.path().to_path_buf();
+
+    app.execute_slash_command("/research continue ghost").await;
+    assert!(
+        app.research_live_runs
+            .lock()
+            .expect("lock")
+            .contains("ghost"),
+        "the run holds its name while it runs"
+    );
+    // The item does not exist, so the run fails quickly and its task ends.
+    let mut freed = false;
+    for _ in 0..100 {
+        if !app
+            .research_live_runs
+            .lock()
+            .expect("lock")
+            .contains("ghost")
+        {
+            freed = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(freed, "the name is released when the run's task ends");
+}

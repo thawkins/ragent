@@ -25,6 +25,12 @@
 - A missing item name, query or path is reported as "`<verb>` requires ..."
   rather than "unknown subcommand `create`" or an empty name passed on.
   Bare `/research` shows the help.
+- A second `/research` run (create, update, continue, cluster, deck) for an
+  item whose run is still in progress in this session is refused instead of
+  mixing both runs' progress into one tracker. The name is freed when the
+  run's task ends, independent of progress events.
+- Text that follows a research progress message is no longer appended into
+  it and erased by the next refresh.
 - "invalid value for ..." errors now quote the flag with balanced backticks.
 - `ragent.json` load failures during a research run are reported instead of
   silently falling back to defaults.

@@ -547,6 +547,7 @@ impl App {
             row_action_confirm_yes_area: Rect::default(),
             row_action_confirm_no_area: Rect::default(),
             research_progress: Vec::new(),
+            research_live_runs: std::sync::Arc::default(),
             skill_registry_cache: None,
             skill_dirs_cache: Vec::new(),
             skill_registry_last_refresh: std::time::Instant::now(),
