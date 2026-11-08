@@ -2340,6 +2340,20 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.167
+
+CI fix release. No production behaviour changes: one flaky test in the ACP
+transport suite is repaired.
+
+- **The ACP transport tests no longer race each other.** The four ACP tests in
+  `test_mcp_acp_more` all wrote their scripted subprocess to one scratch path
+  (`more_agent.py`), and the writer truncates before writing. Under
+  `cargo nextest` - one process per test - a sibling process could hand
+  `python3` a half-written script, so the interpreter died with a
+  `SyntaxError` and the transport reported `AcpErrorKind::Exited` where the
+  cancellation test asserts a `Protocol` cause. The script path is now
+  per-behaviour, so no two tests write the same file.
+
 ## Version 1.0.166
 
 Research, teams and agents release. The `/research` family is repaired end to

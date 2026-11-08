@@ -529,8 +529,15 @@ for line in sys.stdin:
 "#;
 
 /// An `AcpAgentConfig` running the scripted agent in `behavior` mode.
+///
+/// The script file is named after `behavior`, so two ACP tests running as
+/// separate nextest processes never write the same path. A shared path was a
+/// real race: `write_script` truncates before writing, so a sibling process
+/// could hand `python3` a half-written file, which exits with a `SyntaxError`
+/// and surfaces as [`AcpErrorKind::Exited`] (`acp_cancel_flag_aborts_a_stalled_turn`
+/// saw `Exited` where it asserts `Protocol`).
 fn acp_agent(behavior: &str) -> AcpAgentConfig {
-    let script = write_script("more_agent.py", ACP_AGENT);
+    let script = write_script(&format!("more_agent_{behavior}.py"), ACP_AGENT);
     AcpAgentConfig {
         id: "more".to_string(),
         name: None,

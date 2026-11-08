@@ -4,6 +4,16 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.167)
+
+- **A flaky ACP transport test is fixed.** The four ACP tests in
+  `test_mcp_acp_more` shared one scratch script path and each rewrote it, so a
+  parallel `cargo nextest` process could hand `python3` a half-written script
+  and the cancellation case saw `Exited` where it asserts `Protocol`. Nothing
+  user-facing changes in this release - the TUI behaves exactly as it does in
+  1.0.166.
+  See [Highlights (v1.0.166)](#highlights-v10166) for the current feature set.
+
 ## Highlights (v1.0.166)
 
 - **`wait_agents` waits on running background tasks again** - with `task_ids`

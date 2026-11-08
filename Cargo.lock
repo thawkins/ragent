@@ -4901,7 +4901,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "ragent"
-version = "1.0.166"
+version = "1.0.167"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4934,7 +4934,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.166"
+version = "1.0.167"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4995,7 +4995,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.166"
+version = "1.0.167"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5020,7 +5020,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.166"
+version = "1.0.167"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5096,7 +5096,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-hyperresearch"
-version = "1.0.166"
+version = "1.0.167"
 dependencies = [
  "anyhow",
  "clap",
@@ -5159,7 +5159,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.166"
+version = "1.0.167"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5189,7 +5189,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.166"
+version = "1.0.167"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5373,7 +5373,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.166"
+version = "1.0.167"
 dependencies = [
  "anyhow",
  "arboard",

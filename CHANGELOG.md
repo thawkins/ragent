@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [1.0.167] - 2026-11-08
+
+CI fix release. One flaky test in the ACP transport suite is repaired; no
+production code changes.
+
+### Tests
+
+- `test_mcp_acp_more::acp_cancel_flag_aborts_a_stalled_turn` no longer fails
+  intermittently with `left: Exited, right: Protocol`. The four ACP tests in
+  that file shared one scratch script path (`more_agent.py`), and
+  `write_script` truncates before writing, so under `cargo nextest` - one
+  process per test - a sibling could hand `python3` a half-written script. The
+  interpreter then exited with a `SyntaxError`, which the transport reports as
+  `AcpErrorKind::Exited` instead of the `Protocol` cause the test asserts. The
+  script path is now per-behaviour (`more_agent_<behavior>.py`), so no two tests
+  write the same file.
+
 ## [1.0.166] - 2026-11-08
 
 Research, teams and agents release. The `/research` command family is repaired
