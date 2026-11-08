@@ -18,6 +18,28 @@
 
 ### Fixed
 
+- Sub-agents: `wait_agents` with `task_ids` omitted waits for running
+  background tasks again. Since 1.0.153 it only collected tasks that had
+  already finished and reported "No running background tasks" while agents
+  were still working. Suspended tasks are still skipped.
+- Sub-agents: a suspended or terminating background task is no longer treated
+  as finished. `drain_completed` injected it as an empty completion and then
+  removed it from the registry, so a later resume failed with "not found" and
+  the real result was lost. One predicate, `TaskStatus::is_terminal()`, now
+  decides "finished" for reaping, injection, kill refusal, the wait tools and
+  the Agents panel.
+- Sub-agents: `kill_task` refuses a `timed_out` task; `suspend_task` and
+  `resume_task` can no longer overwrite a task that finished at the same
+  moment; `cancel_all` also cancels suspended tasks; finished foreground
+  (`spawn_sync`) entries are reaped instead of kept for the process lifetime;
+  `new_agent` foreground metadata reports the real status instead of always
+  `completed`.
+- Agents panel: history shows failed and timed-out runs with their real status
+  and the durable report path, instead of `completed` and "in-memory only". A
+  kill keeps the row as `terminating` until the run settles, a force-kill
+  records a `failed` history row, and the active-agents gauge no longer leaks.
+  The registry reconciliation retires finished rows (including `timed_out`)
+  into history. A failed run logs `[err] Task failed`.
 - Teams: the team runtime is no longer stuck on the first team for the life of
   the process. The session processor held its `TeamManager` in a `OnceLock`.
   After the first team was cleaned up, a second `team_create` or a `/swarm` was
