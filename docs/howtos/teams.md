@@ -326,6 +326,49 @@ visible in the tool result and the event stream:
   `hook-failures.jsonl` and its count surfaces in `team_status`, so an inert
   hook is never mistaken for one that ran and approved.
 
+### 6.6.2 Who is calling, and where the runtime lives
+
+**Every team tool except `team_create` resolves its caller first**
+(`tool::team_caller`). It uses the session's team context when that names the
+team; otherwise it falls back to the team's `config.json`, where the caller is
+the lead if the session is `lead_session_id` and a teammate if it is a member's
+`session_id`. A session that is neither is refused.
+
+Lead-only tools refuse a teammate: `team_spawn`, `team_task_create`,
+`team_assign_task`, `team_approve_plan`, `team_shutdown_teammate`,
+`team_cleanup` and `team_wait`. Before this check landed a teammate could
+approve its own plan or force-delete the whole team, and a session outside the
+team could read another team's mailbox. `team_wait` without `team_name` defaults
+to the caller's own team.
+
+**The team runtime is bound before tool dispatch, in every entry point.** Only
+the TUI ever created a `TeamManager`, so in `ragent run`, `ragent serve` and ACP
+mode `team_spawn` reported a teammate as "queued" but never started it. The
+session processor now binds the runtime for the team its session leads
+(`SessionProcessor::ensure_team_manager`), reconciles members queued in
+`Spawning`, and starts the watchdog. A `team_spawn` that runs before the runtime
+exists (the same step as `team_create`) returns an error telling you to call it
+again, instead of a false "queued".
+
+**The runtime is rebindable, not first-team-forever.** The processor holds it in
+a `TeamManagerSlot`:
+
+- a manager whose team is gone is unbound atomically (`clear_if`), so a manager
+  another session bound meanwhile is kept;
+- the processor keeps a live manager of another team rather than replacing it,
+  so concurrent `serve` sessions leading different teams do not flip the binding
+  on every step. The TUI, which has a single user, rebinds when its active team
+  changes; teammates already running keep the old manager alive until they
+  finish;
+- `spawn_teammate` refuses a `team_name` its manager does not drive;
+- `team_shutdown_teammate` and `team_task_cancel` use the bound manager only
+  when it drives the named team, and otherwise act on disk.
+
+**Roster writes are atomic.** Every read-modify-write of `config.json` goes
+through `TeamStore::update`, which holds the exclusive lock from read to write
+and skips the write when nothing changed. Two teammates changing status at once
+can no longer read the same snapshot and silently discard one change.
+
 ### 6.7 Plan approval (optional)
 
 When `settings.require_plan_approval` is `true` in the team config,

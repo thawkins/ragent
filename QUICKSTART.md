@@ -2340,6 +2340,48 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.165
+
+- **`wait_agents` waits on running background tasks again.** Since 1.0.153 the
+  call with `task_ids` omitted only collected tasks that had already finished, so
+  it reported `No running background tasks to wait for` while sub-agents were
+  still working. It now seeds its wait set from every running background task
+  again; suspended tasks are still skipped as unsettled.
+- **One `TaskStatus::is_terminal()` predicate decides "finished" everywhere.**
+  `completed`, `failed`, `cancelled` and `timed_out` are terminal; `running`,
+  `suspended` and `terminating` are not. The completion drain, result injection,
+  kill refusal, both wait tools and the Agents panel all consult it, so a
+  suspended task can no longer be injected as an empty completion and reaped -
+  which made a later resume fail with "not found" and lost the real result.
+- **A suspended or terminating sub-agent keeps its registry entry.** `kill_task`
+  refuses a `timed_out` task, `suspend_task`/`resume_task` check and set the
+  status under one guard, `cancel_all` also cancels suspended tasks, and a
+  finished foreground (`spawn_sync`) entry is reaped instead of living for the
+  process lifetime. `new_agent` foreground metadata reports the registry status
+  rather than a hard-coded `completed`.
+- **The Agents panel shows what actually happened.** History records failed and
+  timed-out runs with their real status and the durable `log/subagents/<id>.md`
+  path instead of `completed` and "in-memory only"; a plain kill keeps the row as
+  `terminating` until it settles, a force-kill records a `failed` row, and
+  `Event::SubagentComplete` carries the terminal `status` and `output_file` so
+  the panel no longer depends on the registry entry still existing.
+- **Teams work outside the TUI, and more than once.** Only the TUI ever created a
+  `TeamManager`, so in `ragent run`, `ragent serve` and ACP mode `team_spawn`
+  reported a teammate as "queued" but never started it. The session processor now
+  binds the team runtime before tool dispatch for the team its session leads, and
+  the runtime is rebindable (`TeamManagerSlot`) instead of pinned to the first
+  team the process ever created.
+- **Every team tool checks its caller.** Lead-only tools - `team_spawn`,
+  `team_task_create`, `team_assign_task`, `team_approve_plan`,
+  `team_shutdown_teammate`, `team_cleanup` and `team_wait` - refuse a teammate,
+  and every team tool refuses a session that is neither the lead nor a member of
+  the team named in the call. `team_wait` without `team_name` defaults to the
+  caller's own team.
+- **Concurrent `config.json` writes no longer lose data.** Every
+  read-modify-write goes through `TeamStore::update`, which holds the exclusive
+  lock from read to write, so two teammates changing status at once cannot
+  discard one change.
+
 ## Version 1.0.164
 
 - **An unattended sub-agent's write scope is now derived from a complete

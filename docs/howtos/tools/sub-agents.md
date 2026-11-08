@@ -219,6 +219,52 @@ A **suspended** task is still awaited: only a terminal status settles a wait, so
 a suspended task keeps the waiter blocked until it is resumed and finishes, or is
 cancelled.
 
+With `task_ids` omitted the wait is seeded from the registry's **running**
+background tasks, so it reports `No running background tasks to wait for` only
+when none are actually working. (Version 1.0.153 regressed this into a
+settled-only scan, which answered with that message while agents were still
+running; 1.0.165 restores the running-task seed.)
+
+---
+
+## One definition of "finished"
+
+`TaskStatus::is_terminal()` is the single classification the whole sub-agent
+lifecycle shares:
+
+| Status | Terminal? | Meaning |
+|--------|-----------|---------|
+| `completed` | yes | The run ended and produced a result |
+| `failed` | yes | The run ended in error |
+| `cancelled` | yes | The cancel request was observed and the run stopped |
+| `timed_out` | yes | The per-call wall-clock bound was hit |
+| `running` | no | Working right now |
+| `suspended` | no | Parked, resumable, still holds its slot |
+| `terminating` | no | A kill is in flight |
+
+Reaping (`drain_completed`), result injection, kill refusal, `wait_agents`,
+`team_wait` and the Agents panel all consult it, so a new status cannot be
+classified as finished on one path and live on another. Before 1.0.165 the drain
+treated anything that was not `running` as settled: it injected a *suspended* or
+*terminating* task as an empty completion and then removed it, so a later
+resume failed with "not found" and the real result was lost.
+
+The same predicate closes three adjacent holes:
+
+- `kill_task` refuses a `timed_out` task instead of re-killing an ended run;
+- `suspend_task` / `resume_task` check and set the status under one guard (and
+  store the park flag with it), so a task that finished in between is not
+  overwritten back to `suspended`;
+- `cancel_all` also cancels suspended tasks, and a finished foreground
+  (`spawn_sync`) entry is reaped by the next drain instead of living for the
+  process lifetime. `spawn_sync` returns the snapshot taken under the completion
+  guard, so a concurrent drain cannot reap the entry it just reported and turn a
+  successful run into "vanished after completion".
+
+`Event::SubagentComplete` carries the terminal `status` and `output_file`
+alongside `success`, so the Agents panel renders the outcome and the durable
+report path without a second registry lookup that could race the drain.
+
 ---
 
 ## Occupancy: a suspended task still holds its slot

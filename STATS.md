@@ -1,11 +1,12 @@
 # Project Statistics
 
-**Version:** 1.0.164
+**Version:** 1.0.165
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
 > Metrics below are measured against the current working tree at the
-> `1.0.164` state **plus the uncommitted code-audit remediation pass**. That
+> `1.0.165` state, which carries the sub-agent lifecycle and team-runtime release
+> on top of the code-audit remediation pass. That
 > pass closes rows 1-25 of `docs/reports/code-audit.md`: it redacts credentials
 > on five logging paths and two `Debug` impls, validates the `GITLAB_*` instance
 > URL through one shared rule (`ragent_types::url_validation`), fences the LLM
@@ -100,10 +101,10 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 768,862 (760,840 in `crates/` + 8,022 in root `src/`/`tests/`) |
-| Total Rust files | 2,010 (1,988 workspace crates + 22 root `src/`/`tests/`) |
-| Tests defined | 15,652 (`#[test]` / `#[tokio::test]` attributes, including `flavor = ...` variants, across `crates/`, `src/`, and root `tests/`) |
-| Test files | 1,211 under crate `tests/` trees (1,082 consolidated `test_*.rs` + 129 `tests/inline/*` modules, 19 `tests/all.rs` roots and 8 shared `support` helpers); the 19 `tests/all.rs` roots are the per-crate targets |
+| Total Rust lines | 811,431 (803,408 in `crates/` + 8,023 in root `src/`/`tests/`) |
+| Total Rust files | 3,270 (3,248 under `crates/` + 22 in root `src/`/`tests/`) |
+| Tests defined | 15,745 (`#[test]` / `#[tokio::test]` attributes, including `flavor = ...` variants, across `crates/`, `src/`, and root `tests/`) |
+| Test files | 1,252 under crate `tests/` trees (1,088 consolidated `test_*.rs` + 130 `tests/inline/*` modules, 19 `tests/all.rs` roots and 12 shared `support` helpers); the 19 `tests/all.rs` roots are the per-crate targets |
 | Test binaries | 38 (19 consolidated `[[test]] name = "all"` integration targets - one per crate, 18 crate lib targets and the 1 root bin) |
 | Tests executed | 15,240 passed / 0 failed / 16 ignored across **40 reporting targets** (`cargo test --workspace --all-targets`, see `BUILDSTATS.md`) |
 | Line coverage | 86.7% (146,001 of 168,392 instrumented lines) |
@@ -115,14 +116,22 @@
 | Research output formats | 6 (`report`, `executive-summary`, `comparison-table`, `source-bibliography`, `imrad`, `newsletter`) |
 | Documentation | 24 top-level how-tos (including the new `skills.md`), 23 files in `docs/howtos/tools/` (22 per-category tool how-tos + `INDEX.md`, + generated PDFs), 83 files in `docs/howtos/slashcommands/` (82 command pages + `INDEX.md`, + generated PDFs) |
 | Authors | 1 |
-| Version | 1.0.164 |
+| Version | 1.0.165 |
 
-The tool registry is unchanged this pass: the code-audit remediation adds a
-shared `no_parameters_schema()` helper and reroutes the eight parameterless tools
-through it without adding or removing a tool, so the count stays at 150 across 21
-families. The crate count moves 18 -> 19 because `ragent-hyperresearch` is now
-picked up by `crates/*` (it was already a member; earlier measurements excluded
-it). `ragent-research` (+11,871 lines) is the largest single mover across the
+The tool registry is unchanged this pass: the code-audit remediation added a
+shared `no_parameters_schema()` helper and rerouted the eight parameterless tools
+through it without adding or removing a tool, and the 1.0.165 sub-agent/team
+lifecycle pass changed tool *behaviour* (one `TaskStatus::is_terminal()` predicate
+behind reaping, injection, kill refusal and both wait tools) rather than the
+registry, so the count stays at 150 across 21 families. The crate count stays at
+19 - `ragent-hyperresearch` is a workspace member picked up by `crates/*`.
+
+The 1.0.165 pass moves `crates/` from 760,840 to 803,408 lines (+42,568) and the
+test tree from 1,211 to 1,252 files, most of it the `test_subagent_lifecycle_review`
+modules in `ragent-agent` (8 cases) and `ragent-tui` (5 cases), the
+`test_team_manager_binding` / `test_team_caller_roles` / `test_team_store_atomic_update`
+/ `test_team_teammate_wake` suites, and the per-crate `tests/all.rs` rewiring that
+moved every crate's test tree onto the consolidated target. `ragent-research` (+11,871 lines) is the largest single mover across the
 1.0.161 -> 1.0.164 span, carrying the research diff deck (`deck.rs`,
 `deck_enrich.rs`, `deck_pptx.rs`), its concept-grouped model stage and the
 `imrad`/`newsletter` assembly; `ragent-tui` (+1,641) and `ragent-agent` (+3,331)
@@ -403,7 +412,12 @@ most test-dominant crates by ratio are `ragent-tui` (82%), `ragent-tools-extende
 
 ---
 
-_Generated 2026-11-07 (v1.0.164 tree plus the code-audit remediation pass:
+_Generated 2026-11-07 (v1.0.165 tree: the sub-agent lifecycle and team-runtime
+release - one `TaskStatus::is_terminal()` predicate behind reaping, injection,
+kill refusal and both wait tools; `wait_agents` waiting on running tasks again;
+`SubagentComplete` carrying `status` and `output_file`; the team runtime bound in
+every entry point through a rebindable `TeamManagerSlot`; and per-tool caller
+checks inside teams, on top of the code-audit remediation pass:
 credential redaction on the remaining log and `Debug` paths, one shared
 `ragent_types::url_validation` rule for the GitLab instance URL, prompt fenced
 LLM security analyzer values, the `stdio` default for an MCP server entry that

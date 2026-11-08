@@ -102,14 +102,32 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   ownership (the task's assignee or the lead), and `team_status` reports each
   member's last five status transitions from the append-only
   `status-history.jsonl`, messages stranded in a terminated teammate's mailbox,
-  plans awaiting a verdict, and the hook-failure count
+  plans awaiting a verdict, and the hook-failure count.
+  Every team tool except `team_create` resolves who is calling
+  (`tool::team_caller`), so a teammate cannot run a lead-only action
+  (`team_spawn`, `team_task_create`, `team_assign_task`, `team_approve_plan`,
+  `team_shutdown_teammate`, `team_cleanup`, `team_wait`) and a session outside
+  the team cannot act on its mailbox or task list at all. Every read-modify-write
+  of a team's `config.json` goes through `TeamStore::update`, which holds the
+  exclusive lock from read to write, so two teammates changing status at once no
+  longer lose one change. The team runtime is bound before tool dispatch in every
+  entry point - TUI, `ragent run`, `ragent serve` and ACP - so `team_spawn` works
+  outside the TUI, and it is rebindable (`TeamManagerSlot`) rather than pinned to
+  the first team the process ever created: a manager whose team is gone is
+  unbound atomically, a manager refuses to spawn into a team it does not drive,
+  and a teammate's loop keeps running turns while it holds an auto-claimed task
+  or has unread mail
 - **Agent** (5) — new_agent, cancel_agent, list_agents, wait_agents and
   `team_wait` (a team's wait belongs to the agent family, because `team_wait`
   and `wait_agents` are the same await surface for two different task
   populations). Every tool in the family declares a closed parameter set and
   actually enforces it: a call carrying an undeclared property fails and names
   the offending key (`Unknown parameter(s): \`backgound\``) instead of silently
-  running with the default
+  running with the default. One `TaskStatus::is_terminal()` predicate decides
+  "finished" for the completion drain, result injection, kill refusal, both wait
+  tools and the Agents panel, so a suspended or terminating task is never reaped
+  as an empty completion and `wait_agents` with `task_ids` omitted waits on
+  running background tasks again
 - **Spec** (5) — spec_list, spec_read, spec_search, spec_task_update, spec_coverage
 - **Task** (4) — TaskCreate, TaskUpdate, TaskGet, TaskList
 - **Cron** (5) — cron_add, cron_remove, cron_list, cron_enable, cron_disable
@@ -879,7 +897,7 @@ Docs and examples:
 
 ## Architecture
 
-The project is a Cargo workspace built from 18 focused crates:
+The project is a Cargo workspace built from 19 focused crates:
 
 | Crate                     | Purpose                                                                  |
 | ------------------------- | ------------------------------------------------------------------------ |
@@ -888,6 +906,7 @@ The project is a Cargo workspace built from 18 focused crates:
 | `ragent-codeindex`      | Indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher   |
 | `ragent-config`         | Configuration types, defaults, and parsing                               |
 | `ragent-connectors`     | Connector catalogue, store, providers, MCP bridge, `/connectors`       |
+| `ragent-hyperresearch`  | Deep-research engine: decomposition, notes, citation graph, vault       |
 | `ragent-llm`            | Provider clients and model registry (14 providers + Model Router)        |
 | `ragent-plugins`        | Codex/Claude dialect plugins, sandboxed JS runtime, `/plugins`         |
 | `ragent-research`       | Web/local research gathering, synthesis, dated report output             |

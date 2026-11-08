@@ -4,6 +4,30 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.165)
+
+- **`wait_agents` waits on running background tasks again** - with `task_ids`
+  omitted it had been collecting only already-finished tasks since 1.0.153 and
+  answering `No running background tasks to wait for` while agents were still
+  working.
+- **A suspended sub-agent is no longer lost.** One `TaskStatus::is_terminal()`
+  predicate (`completed` / `failed` / `cancelled` / `timed_out` are terminal;
+  `running` / `suspended` / `terminating` are not) now governs reaping, result
+  injection, kill refusal, both wait tools and the Agents panel, so a suspended
+  or terminating task is never injected as an empty completion and reaped.
+- **The Agents window tells the truth about history.** Failed and timed-out runs
+  keep their real status and the durable `log/subagents/<id>.md` path instead of
+  `completed` and "in-memory only"; a kill leaves the row `terminating` until the
+  run settles, a force-kill records a `failed` row, and the active-agents gauge
+  no longer leaks.
+- **Teams now start outside the TUI and can be re-opened.** `team_spawn` works in
+  `ragent run`, `ragent serve` and ACP mode, and the team runtime is rebindable
+  rather than stuck on the first team the process created - so a second
+  `/team create` or `/swarm` is actually driven by the new team.
+- **A teammate can no longer act as the lead.** Lead-only team tools refuse a
+  teammate, and every team tool refuses a session outside the team it names, so
+  a teammate cannot approve its own plan or delete the team.
+
 ## Highlights (v1.0.164)
 
 - **An `explore` sub-agent can no longer be handed the YOLO write scope.**
