@@ -447,7 +447,7 @@ fn test_config_poll_interval() {
         poll_interval_secs: 60,
         max_rules: 32,
     };
-    assert_eq!(config.poll_interval(), Duration::from_secs(60));
+    assert_eq!(config.poll_interval(), Duration::from_mins(1));
 }
 
 #[test]

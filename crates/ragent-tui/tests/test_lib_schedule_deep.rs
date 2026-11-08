@@ -56,7 +56,7 @@ fn deadline_idles_at_the_redraw_interval() {
     let last_draw = Instant::now();
     let deadline = compute_next_deadline_test(&app, last_draw);
     assert!(
-        deadline_is_at_most(deadline, last_draw + Duration::from_millis(2000)),
+        deadline_is_at_most(deadline, last_draw + Duration::from_secs(2)),
         "idle deadline must be bounded by IDLE_REDRAW_INTERVAL_MS"
     );
     assert!(deadline > Instant::now(), "deadline must be in the future");

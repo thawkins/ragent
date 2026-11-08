@@ -139,7 +139,7 @@ fn open_waits_out_a_contended_wal_switch() {
     // waits the peer out and succeeds; with the old order the WAL switch burned
     // the 5 s default and failed regardless of how long the caller was willing
     // to wait.
-    const PEER_HOLD: Duration = Duration::from_millis(7_000);
+    const PEER_HOLD: Duration = Duration::from_secs(7);
     let releaser = std::thread::spawn(move || {
         std::thread::sleep(PEER_HOLD);
         peer.execute_batch("COMMIT;").expect("commit peer");
