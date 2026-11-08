@@ -4007,7 +4007,6 @@ fn cancellation_notice(task: &Task, reason: Option<&str>) -> String {
     )
 }
 
-/// Translate an inbound mailbox message into the appropriate `Event`.
 /// What a teammate's agent loop does after a turn
 /// ([`TeamManager::next_teammate_turn`]).
 #[doc(hidden)]
@@ -4063,6 +4062,7 @@ pub fn poll_mailbox_once<S: BuildHasher>(
     Ok(published)
 }
 
+/// Translate an inbound mailbox message into the appropriate `Event`.
 fn publish_message_event(
     event_bus: &EventBus,
     lead_session_id: &str,

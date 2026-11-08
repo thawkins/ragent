@@ -81,7 +81,7 @@ pub fn resolve_caller(ctx: &ToolContext, team_name: &str, team_dir: &Path) -> Re
         return Ok(TeamCaller::Member(member.agent_id.clone()));
     }
     bail!(
-        "This session is not a member of team '{team_name}'; only its lead and teammates can use it"
+        "This session is not a member of team '{team_name}'; only its lead and teammates can act on it"
     )
 }
 
