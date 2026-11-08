@@ -650,15 +650,33 @@ impl TeamManagerSlot {
         self.0.write().take()
     }
 
+    /// Unbind `expected` only if it is still the bound manager.
+    ///
+    /// A caller that decided to unbind after inspecting the slot (see
+    /// [`Self::stale`]) uses this rather than [`Self::clear`], so a manager
+    /// another task bound in between is not dropped by mistake.
+    ///
+    /// # Returns
+    /// `true` when `expected` was bound and has been unbound.
+    pub fn clear_if(&self, expected: &Arc<TeamManager>) -> bool {
+        let mut slot = self.0.write();
+        if slot
+            .as_ref()
+            .is_some_and(|bound| Arc::ptr_eq(bound, expected))
+        {
+            *slot = None;
+            return true;
+        }
+        false
+    }
+
     /// The bound manager when its team is no longer usable (its directory or
     /// `config.json` is gone, or the team is not `Active`), so a caller can
     /// replace it. `None` when nothing is bound or the bound team is live.
     #[must_use]
     pub fn stale(&self) -> Option<Arc<TeamManager>> {
         let manager = self.get()?;
-        let live = TeamStore::load(&manager.team_dir)
-            .is_ok_and(|store| store.config.status == crate::team::TeamStatus::Active);
-        (!live).then_some(manager)
+        (!manager.team_is_live()).then_some(manager)
     }
 }
 
@@ -1455,6 +1473,14 @@ impl TeamManager {
             .member_status(agent_id)
             .is_some_and(|now| now != MemberStatus::Idle);
         Ok((transition, interrupted))
+    }
+
+    /// Whether this manager's team still exists and is `Active` (its
+    /// `config.json` loads and reports `TeamStatus::Active`).
+    #[must_use]
+    pub fn team_is_live(&self) -> bool {
+        TeamStore::load(&self.team_dir)
+            .is_ok_and(|store| store.config.status == crate::team::TeamStatus::Active)
     }
 
     /// Decide what a teammate's agent loop does after a turn.
@@ -3872,7 +3898,14 @@ impl TeamManagerInterface for TeamManager {
     }
 
     fn manages(&self, team_dir: &Path) -> bool {
+        // Both sides normally come from `find_team_dir`, so the cheap
+        // comparison decides; canonical paths cover a symlinked or otherwise
+        // differently spelled route to the same directory.
         team_dir == self.team_dir
+            || matches!(
+                (team_dir.canonicalize(), self.team_dir.canonicalize()),
+                (Ok(a), Ok(b)) if a == b
+            )
     }
 
     /// PERF-017 / PERF-018: expose the in-memory lead session id so team

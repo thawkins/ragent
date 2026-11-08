@@ -152,7 +152,10 @@ async fn test_team_binding_rebinds_from_a_cleaned_up_team() {
 }
 
 #[tokio::test]
-async fn test_team_binding_rebinds_when_the_lead_moves_to_another_team() {
+async fn test_team_binding_keeps_a_live_manager_of_another_team() {
+    // One processor serves many sessions in `serve` mode: a session leading a
+    // different team must not displace a live manager (the slot would flip on
+    // every step and strand each team's running teammates).
     let (processor, tmp) = fixture();
     let other = manager_for(&processor, tmp.path(), "other");
     assert!(processor.team_manager.set(Arc::clone(&other)).is_ok());
@@ -160,8 +163,26 @@ async fn test_team_binding_rebinds_when_the_lead_moves_to_another_team() {
     processor.ensure_team_manager(Some(&lead()), tmp.path(), &model());
     assert_eq!(
         processor.team_manager.get().expect("bound").team_name,
-        "bind-a"
+        "other"
     );
+}
+
+#[tokio::test]
+async fn test_team_binding_clear_if_leaves_a_manager_bound_meanwhile() {
+    let (processor, tmp) = fixture();
+    let slot = TeamManagerSlot::default();
+    let seen = manager_for(&processor, tmp.path(), "seen");
+    let newer = manager_for(&processor, tmp.path(), "newer");
+    assert!(slot.set(Arc::clone(&seen)).is_ok());
+    // Another task rebinds between the caller's inspection and its clear.
+    slot.replace(Arc::clone(&newer));
+    assert!(
+        !slot.clear_if(&seen),
+        "a manager that is no longer bound is not cleared"
+    );
+    assert_eq!(slot.get().expect("bound").team_name, "newer");
+    assert!(slot.clear_if(&newer));
+    assert!(slot.get().is_none());
 }
 
 #[tokio::test]

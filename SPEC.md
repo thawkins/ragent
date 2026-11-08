@@ -3749,8 +3749,9 @@ through `TeamStore::update`, which holds the exclusive lock from read to write.
 members queued in `Spawning` and starts the watchdog. A `team_spawn` that runs
 before the runtime is bound is refused with an instruction to retry. The
 processor holds the runtime in a rebindable `TeamManagerSlot`. A manager whose
-team is gone is unbound, and one bound to a different team than the lead's is
-replaced. A manager refuses to spawn into a team it does not drive.
+team is gone is unbound, atomically. The processor keeps a live manager of
+another team rather than replacing it, so concurrent sessions do not fight over
+the slot. The TUI rebinds when its active team changes. A manager refuses to spawn into a team it does not drive.
 `team_shutdown_teammate` and `team_task_cancel` fall back to acting on disk when
 the bound manager drives another team.
 

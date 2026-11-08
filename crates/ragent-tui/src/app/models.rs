@@ -1073,7 +1073,7 @@ impl App {
                     stale.team_name
                 ),
             );
-            self.session_processor.team_manager.clear();
+            self.session_processor.team_manager.clear_if(&stale);
         }
         if self
             .session_processor

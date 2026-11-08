@@ -723,9 +723,10 @@ impl SessionProcessor {
     /// The TUI binds one when it sees a team created; the other entry points
     /// (`run`, `serve`, ACP) had nothing that did, so `team_spawn` there could
     /// never start a teammate. This runs before tool dispatch. A manager whose
-    /// team is gone is unbound, and one bound to a different team than the one
-    /// this session leads is replaced. It is a no-op when the manager already
-    /// drives this session's team, when the session leads no team, or when
+    /// team is gone is unbound; a live manager of another team is kept, so
+    /// concurrent sessions leading different teams do not fight over the slot.
+    /// It is a no-op when the manager already drives this session's team, when
+    /// the session leads no team, or when
     /// no [`AgentManager`](crate::task::AgentManager) is wired (it supplies the
     /// owning `Arc` of this processor that a `TeamManager` needs). Members left
     /// in `Spawning` (queued by blueprint seeding before the runtime existed)
@@ -741,24 +742,27 @@ impl SessionProcessor {
         working_dir: &std::path::Path,
         model: &crate::agent::ModelRef,
     ) {
-        // A manager whose team was closed, deleted or cleaned up is unbound,
-        // so the next team this session leads gets its own runtime.
-        if let Some(stale) = self.team_manager.stale() {
-            tracing::info!(team = %stale.team_name, "unbinding the TeamManager of a team that is gone");
-            self.team_manager.clear();
-        }
         let Some(tc) = team_context.filter(|tc| tc.is_lead) else {
             return;
         };
-        // Already bound to this team: nothing to do. Bound to another team:
-        // rebind below. The replaced manager stays alive for as long as its
-        // own teammate tasks hold it, so running teammates are not killed.
-        if self
-            .team_manager
-            .get()
-            .is_some_and(|bound| bound.team_name == tc.team_name)
-        {
-            return;
+        if let Some(bound) = self.team_manager.get() {
+            // Team context resolves only `Active` teams, so a manager already
+            // driving this session's team is live: nothing to do, no disk read.
+            if bound.team_name == tc.team_name {
+                return;
+            }
+            // A live manager of another team is kept. One processor serves
+            // many sessions in `serve` mode; replacing it whenever a session
+            // leading a different team ran a step would flip the binding back
+            // and forth and strand each team's running teammates. That team's
+            // `team_spawn` is refused by the manager until it is gone.
+            if bound.team_is_live() {
+                return;
+            }
+            // Its team was closed, deleted or cleaned up: unbind it, unless
+            // another session already rebound the slot meanwhile.
+            tracing::info!(team = %bound.team_name, "unbinding the TeamManager of a team that is gone");
+            self.team_manager.clear_if(&bound);
         }
         let Some(agent_manager) = self.agent_manager.get() else {
             return;
@@ -775,13 +779,13 @@ impl SessionProcessor {
         );
         manager.active_model = Some(model.clone());
         let manager = manager.into_arc();
-        if let Some(previous) = self.team_manager.replace(Arc::clone(&manager)) {
-            tracing::info!(from = %previous.team_name, to = %tc.team_name, "TeamManager rebound");
-        } else {
+        // `set` binds only into an empty slot, so a manager another session
+        // bound in the meantime wins and this one is dropped unused.
+        if self.team_manager.set(Arc::clone(&manager)).is_ok() {
             tracing::info!(team = %tc.team_name, "TeamManager bound for the lead session");
+            Arc::clone(&manager).reconcile_spawning_members();
+            manager.start_watchdog();
         }
-        Arc::clone(&manager).reconcile_spawning_members();
-        manager.start_watchdog();
     }
 
     /// Set the activity-log store.

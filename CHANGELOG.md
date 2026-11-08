@@ -24,9 +24,13 @@
   still driven by the old team's manager, and `team_spawn` wrote into the old
   roster while reporting the new team. The new `TeamManagerSlot` is
   rebindable:
-  - a manager whose team is gone is unbound;
-  - a lead moving to another team gets a new manager. Teammates already running
-    keep the old manager alive until they finish;
+  - a manager whose team is gone is unbound, atomically (`clear_if`), so a
+    manager another session bound meanwhile is kept;
+  - the session processor keeps a live manager of another team rather than
+    replacing it, so concurrent `serve` sessions leading different teams do not
+    flip the binding on every step. The TUI, which has a single user, rebinds
+    when its active team changes; teammates already running keep the old
+    manager alive until they finish;
   - `spawn_teammate` refuses a `team_name` its manager does not drive;
   - `team_shutdown_teammate` and `team_task_cancel` use the bound manager only
     when it drives the named team. Otherwise they fall back to acting on disk.
