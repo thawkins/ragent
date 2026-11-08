@@ -158,11 +158,11 @@ fn parse_update_tolerates_extra_arguments() {
 }
 
 #[test]
-fn parse_update_without_name_defaults_to_empty() {
-    match ResearchCliCommand::parse("update") {
-        ResearchCliCommand::Update { name } => assert_eq!(name, ""),
-        other => panic!("expected Update, got {other:?}"),
-    }
+fn parse_update_without_name_is_a_usage_error() {
+    assert_eq!(
+        ResearchCliCommand::parse("update"),
+        ResearchCliCommand::Invalid("`update` requires a research item name".to_string())
+    );
 }
 
 #[test]

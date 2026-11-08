@@ -1153,9 +1153,10 @@ async fn research_help_renders_the_usage_block() {
 async fn research_bare_and_unknown_subcommands_report_errors() {
     let (_g, _e, _t, mut app) = isolated_app();
 
+    // A bare `/research` shows the help rather than an empty-verb error.
     app.execute_slash_command("/research").await;
     assert!(
-        last_message(&app).contains("unknown subcommand"),
+        last_message(&app).contains("Available `/research` commands"),
         "got: {}",
         last_message(&app)
     );
@@ -1189,11 +1190,8 @@ async fn research_create_with_a_bad_integer_flag_is_rejected() {
     app.execute_slash_command("/research create bad topic --max-concepts xyz")
         .await;
     let text = last_message(&app);
-    // The diagnostic is rendered inside the message window, where the markdown
-    // pass may close the inline code span, so assert the flag/value and the
-    // reason separately rather than as one contiguous span.
     assert!(
-        text.contains("invalid value for `--max-concepts xyz"),
+        text.contains("invalid value for `--max-concepts xyz`"),
         "got: {text}"
     );
     assert!(text.contains("expected an integer"), "got: {text}");
@@ -1205,17 +1203,20 @@ async fn research_create_with_a_bad_age_span_is_rejected() {
     app.execute_slash_command("/research create fresh topic --age 30w")
         .await;
     let text = last_message(&app);
-    assert!(text.contains("invalid value for `--age 30w"), "got: {text}");
+    assert!(
+        text.contains("invalid value for `--age 30w`"),
+        "got: {text}"
+    );
     assert!(text.contains("unknown unit `w`"), "got: {text}");
 }
 
 #[tokio::test]
-async fn research_create_without_a_name_reports_the_unknown_verb() {
+async fn research_create_without_a_name_reports_the_missing_name() {
     let (_g, _e, _t, mut app) = isolated_app();
     app.execute_slash_command("/research create --depth deep")
         .await;
     assert!(
-        last_message(&app).contains("unknown subcommand `create`"),
+        last_message(&app).contains("`create` requires a research item name"),
         "got: {}",
         last_message(&app)
     );
@@ -1226,8 +1227,9 @@ async fn research_delete_without_confirmation_is_refused() {
     let (_g, _e, _t, mut app) = isolated_app();
     app.execute_slash_command("/research delete topic-a").await;
     let text = last_message(&app);
+    assert!(text.contains("Not deleted"), "got: {text}");
     assert!(
-        text.contains("Refusing to delete research/topic-a"),
+        text.contains("/research delete topic-a --yes"),
         "got: {text}"
     );
     assert!(text.contains("--yes"), "got: {text}");
@@ -1337,7 +1339,8 @@ async fn research_cluster_with_a_model_spawns_the_extraction_and_reports_failure
         app.status
     );
 
-    let notice = wait_for_notice(&mut rx, "cluster 'kilo' failed").await;
+    // The failure arrives as the run's terminal progress report.
+    let notice = wait_for_notice(&mut rx, "kilo failed:").await;
     assert!(
         notice.is_some(),
         "the extraction reports its failure to the session"

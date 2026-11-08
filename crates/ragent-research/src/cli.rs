@@ -296,15 +296,37 @@ impl ResearchCliCommand {
     ///
     /// Splits on whitespace, respecting double-quoted arguments, then
     /// dispatches to the verb-specific parser.
+    ///
+    /// Typed input is parsed strictly: an unknown `--flag` or a value flag with
+    /// no value is reported as [`ResearchCliCommand::Invalid`] instead of being
+    /// folded into the item name or topic.
     #[must_use]
     pub fn parse(input: &str) -> Self {
+        Self::parse_with(input, true)
+    }
+
+    /// Parse a recorded invocation for replay (`research update`).
+    ///
+    /// Unlike [`ResearchCliCommand::parse`], unknown `create` flags are
+    /// tolerated: a CLI-recorded argv can carry global flags such as
+    /// `--log-level`, which must not stop an old run from replaying.
+    #[must_use]
+    pub(crate) fn parse_recorded(input: &str) -> Self {
+        Self::parse_with(input, false)
+    }
+
+    fn parse_with(input: &str, strict: bool) -> Self {
+        if input.chars().filter(|c| *c == '"').count() % 2 == 1 {
+            return Self::Invalid("unterminated `\"` in arguments".to_string());
+        }
         let tokens = split_args(input);
         let args: Vec<&str> = tokens.iter().map(String::as_str).collect();
         if args.is_empty() {
-            return Self::Unknown(String::new());
+            // A bare `/research` asks what the command can do.
+            return Self::Help;
         }
-        match args[0] {
-            "create" => Self::parse_create(&args[1..]),
+        let command = match args[0] {
+            "create" => Self::parse_create(&args[1..], strict),
             "list" => Self::parse_list(&args[1..]),
             "show" => Self::parse_show(&args[1..]),
             "search" => Self::parse_search(&args[1..]),
@@ -321,10 +343,59 @@ impl ResearchCliCommand {
             "config" => Self::Config,
             "help" | "--help" | "-h" => Self::Help,
             other => Self::Unknown(other.to_string()),
+        };
+        command.reject_missing_target()
+    }
+
+    /// Turn a verb parsed without its required name (or query/path) into a
+    /// usage error naming what is missing, instead of passing an empty name
+    /// on to the manager.
+    fn reject_missing_target(self) -> Self {
+        let missing = match &self {
+            Self::Show { name, .. }
+            | Self::Open { name }
+            | Self::Delete { name, .. }
+            | Self::Archive { name }
+            | Self::Resume { name }
+            | Self::Continue { name, .. }
+            | Self::Update { name }
+            | Self::Cluster { name, .. }
+            | Self::Deck { name, .. }
+            | Self::Export { name, .. } => name.is_empty().then_some("a research item name"),
+            Self::Search { query, .. } => query.is_empty().then_some("a search query"),
+            Self::Import { path, .. } => path.is_empty().then_some("a path to import"),
+            _ => None,
+        };
+        match missing {
+            Some(what) => Self::Invalid(format!("`{}` requires {what}", self.verb())),
+            None => self,
         }
     }
 
-    fn parse_create(rest: &[&str]) -> Self {
+    /// The sub-command verb for a parsed command, for usage messages.
+    const fn verb(&self) -> &'static str {
+        match self {
+            Self::Create { .. } => "create",
+            Self::Open { .. } => "open",
+            Self::List { .. } => "list",
+            Self::Show { .. } => "show",
+            Self::Search { .. } => "search",
+            Self::Delete { .. } => "delete",
+            Self::Archive { .. } => "archive",
+            Self::Resume { .. } => "resume",
+            Self::Continue { .. } => "continue",
+            Self::Update { .. } => "update",
+            Self::Cluster { .. } => "cluster",
+            Self::Deck { .. } => "deck",
+            Self::Export { .. } => "export",
+            Self::Import { .. } => "import",
+            Self::Config => "config",
+            Self::Help => "help",
+            Self::Invalid(_) | Self::Unknown(_) => "research",
+        }
+    }
+
+    fn parse_create(rest: &[&str], strict: bool) -> Self {
         let mut i = 0;
         let mut name: Option<String> = None;
         let mut topic_words: Vec<&str> = Vec::new();
@@ -371,6 +442,10 @@ impl ResearchCliCommand {
         // not a non-negative integer, so the run is rejected instead of the
         // invalid argument being silently ignored (FR-019).
         let mut invalid: Option<String> = None;
+        // Set (strict parsing only) for an unknown `--flag` or a value flag
+        // with no value. The first such argument wins and is reported before
+        // anything else, so a typo never becomes the item name or topic.
+        let mut rejected: Option<String> = None;
 
         while i < rest.len() {
             let arg = rest[i];
@@ -409,6 +484,9 @@ impl ResearchCliCommand {
                 | "--age"
                 | "--brief" => {
                     i += 1;
+                    if strict && rest.get(i).is_none() && rejected.is_none() {
+                        rejected = Some(format!("`{arg}` requires a value"));
+                    }
                     if let Some(v) = rest.get(i) {
                         match arg {
                             "--from-url" | "--from-urls" => from_urls.push((*v).to_string()),
@@ -572,6 +650,11 @@ impl ResearchCliCommand {
                 "--no-clarify" => clarify = Some(false),
                 "--evaluate" => evaluate = true,
                 "--url-cloak" => url_cloak = true,
+                _ if strict && arg.starts_with("--") => {
+                    if rejected.is_none() {
+                        rejected = Some(format!("unknown flag `{arg}` for `create`"));
+                    }
+                }
                 _ => {
                     if name.is_none() {
                         name = Some(arg.to_string());
@@ -582,15 +665,21 @@ impl ResearchCliCommand {
             }
             i += 1;
         }
+        if let Some(message) = rejected {
+            return Self::Invalid(message);
+        }
         let Some(name) = name else {
-            return Self::Unknown("create".to_string());
+            return Self::Invalid(CREATE_MISSING_NAME.to_string());
         };
-        // `invalid` carries the fully formatted diagnostic for the offending
-        // flag, including the closing backtick, so the rejection below does not
-        // have to re-inspect the flag name to decide which message shape
-        // applies and a presentation surface can interpolate it verbatim.
+        // `invalid` carries `<flag> <value>: <reason>`; quote the flag and its
+        // value so the message renders as balanced inline code.
         if let Some(arg) = invalid {
-            return Self::Invalid(format!("invalid value for `{arg}"));
+            return Self::Invalid(match arg.split_once(": ") {
+                Some((flag_value, reason)) => {
+                    format!("invalid value for `{flag_value}`: {reason}")
+                }
+                None => format!("invalid value for `{arg}`"),
+            });
         }
         let topic = topic_words.join(" ");
         Self::Create {
@@ -681,9 +770,11 @@ impl ResearchCliCommand {
     }
 
     fn parse_search(rest: &[&str]) -> Self {
+        // Only the `--json` switch is a flag here; any other word (including
+        // one starting with `-`) is part of the query.
         let query = rest
             .iter()
-            .filter(|a| !Self::is_flag(a))
+            .filter(|a| **a != "--json")
             .copied()
             .collect::<Vec<_>>()
             .join(" ");
@@ -718,20 +809,35 @@ impl ResearchCliCommand {
         }
     }
 
+    /// Parse `continue <name> [message...]` or `continue <name> --message <text>`.
+    ///
+    /// Words after the name are the follow-up message, matching
+    /// `ragent research continue <name> <message...>`; an explicit
+    /// `--message` wins over them.
     fn parse_continue(rest: &[&str]) -> Self {
-        let mut message: Option<String> = None;
+        let mut name: Option<String> = None;
+        let mut flagged: Option<String> = None;
+        let mut words: Vec<&str> = Vec::new();
         let mut i = 0;
         while i < rest.len() {
-            if rest[i] == "--message" {
+            let arg = rest[i];
+            if arg == "--message" {
                 i += 1;
                 if let Some(v) = rest.get(i) {
-                    message = Some((*v).to_string());
+                    flagged = Some((*v).to_string());
                 }
+            } else if name.is_none() {
+                if !Self::is_flag(arg) {
+                    name = Some(arg.to_string());
+                }
+            } else {
+                words.push(arg);
             }
             i += 1;
         }
+        let message = flagged.or_else(|| (!words.is_empty()).then(|| words.join(" ")));
         Self::Continue {
-            name: Self::first_positional(rest, &["--message"]).unwrap_or_default(),
+            name: name.unwrap_or_default(),
             message,
         }
     }
@@ -882,25 +988,32 @@ impl ResearchCliCommand {
     /// parser would reject.
     #[must_use]
     pub fn build_help_message() -> String {
-        format!(
-            r"Available `ragent research` commands:
+        Self::build_help_message_for("ragent research")
+    }
 
-  create <name> [topic] [flags]   Start a new research run
-  list [--all] [--json]          List research items
-  show <name> [--json]           Show one research item
-  open <name>                     Open a research item in the viewer
-  search <query> [--json]        Search research items
-  delete <name> [--yes]           Delete a research item
-  archive <name>                  Archive a research item
-  resume <name>                  Resume an in-progress run
-  continue <name> [--message ...] Continue a completed run with a follow-up
-  update <name>                   Replay the recorded invocation for a run
-  cluster <name> [--force]        Extract concept clusters for a run
-  deck <name> [flags]             Write a diff deck from two dated reports
-  export <name> [--output path]   Export a research item
-  import <path> [--name name]    Import a research item
-  config                         Show effective research defaults
-  help                           Show this help message
+    /// Build the help message with `prefix` as the command spelling, so the
+    /// TUI shows `/research` and the CLI shows `ragent research`.
+    #[must_use]
+    pub fn build_help_message_for(prefix: &str) -> String {
+        format!(
+            r"Available `{prefix}` commands:
+
+  create <name> [topic] [flags]    Start a new research run
+  list [--all] [--json]            List research items
+  show <name> [--json]             Show one research item
+  open <name>                      Open a research item in the viewer
+  search <query> [--json]          Search research items
+  delete <name> [--yes]            Delete a research item
+  archive <name>                   Archive a research item
+  continue <name> [--message ...]  Continue a run with a follow-up
+  update <name>                    Replay the recorded invocation for a run
+  cluster <name> [--force]         Extract concept clusters for a run
+  deck <name> [flags]              Write a diff deck from two dated reports
+  config                           Show the effective `research` settings
+  help                             Show this help message
+  resume <name>                    (not yet implemented)
+  export <name> [--output path]    (not yet implemented)
+  import <path> [--name name]      (not yet implemented)
 
 Common create flags:
   --from-url <URL> (repeatable)                      Seed the run from URL(s)
@@ -964,6 +1077,11 @@ Deck flags (`deck <name>`, spec diffdeck):
         )
     }
 }
+
+/// The usage error `create` reports when no item name is given. Shared with
+/// [`crate::ResearchRunRequest::from_invocation`], which maps it to
+/// `InvocationParseError::MissingName`.
+pub(crate) const CREATE_MISSING_NAME: &str = "`create` requires a research item name";
 
 /// The `deck` flags that consume the following token as their value.
 ///
@@ -1206,6 +1324,32 @@ pub fn render_show_output_json(
         "sources": sources_json,
     }))
     .unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Build the `(id, url, title, kind, preview)` source rows consumed by
+/// [`render_show_output`] and [`render_show_output_json`].
+///
+/// `id` is the 1-based position of the source in the item, `kind` is the
+/// source's own type (`web`, `spec`, a local kind, ...), and `preview` is the
+/// open-access recovery note when one exists. Shared by the CLI and the TUI so
+/// both `show` surfaces label sources identically.
+#[must_use]
+pub fn show_source_rows(
+    sources: &[crate::source::Source],
+) -> Vec<(String, String, String, String, Option<String>)> {
+    sources
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            (
+                (index + 1).to_string(),
+                source.path_or_url().to_string(),
+                source.title().to_string(),
+                source.type_str().to_string(),
+                source.oa_recovery_note(),
+            )
+        })
+        .collect()
 }
 
 /// Pretty-print a research item (T-034: `ragent research show`).

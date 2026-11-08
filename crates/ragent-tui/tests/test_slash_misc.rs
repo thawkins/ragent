@@ -228,7 +228,7 @@ async fn research_help_renders_usage() {
     app.execute_slash_command("/research help").await;
     assert_eq!(app.status, "research: help");
     assert!(
-        last_message(&app).contains("ragent research"),
+        last_message(&app).contains("Available `/research` commands"),
         "help body: {}",
         last_message(&app)
     );

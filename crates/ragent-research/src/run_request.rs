@@ -207,7 +207,7 @@ impl ResearchRunRequest {
             return Err(InvocationParseError::Empty);
         }
         let command = normalize_invocation(trimmed);
-        match crate::cli::ResearchCliCommand::parse(&command) {
+        match crate::cli::ResearchCliCommand::parse_recorded(&command) {
             crate::cli::ResearchCliCommand::Create {
                 name,
                 topic,
@@ -302,11 +302,13 @@ impl ResearchRunRequest {
                     invocation: Some(trimmed.to_string()),
                 })
             }
+            crate::cli::ResearchCliCommand::Invalid(diagnostic)
+                if diagnostic == crate::cli::CREATE_MISSING_NAME =>
+            {
+                Err(InvocationParseError::MissingName)
+            }
             crate::cli::ResearchCliCommand::Invalid(diagnostic) => {
                 Err(InvocationParseError::InvalidArgument(diagnostic))
-            }
-            crate::cli::ResearchCliCommand::Unknown(verb) if verb == "create" => {
-                Err(InvocationParseError::MissingName)
             }
             crate::cli::ResearchCliCommand::Unknown(verb) => {
                 Err(InvocationParseError::NotCreate(verb))

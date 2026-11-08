@@ -36,6 +36,15 @@ const ERROR_PREVIEW_CHARS: usize = 200;
 /// (those with options); free-text and askpass prompts are never auto-timed.
 pub(super) const QUESTION_TIMEOUT_SECS: u64 = 120;
 
+/// First-line prefix of every research progress message, as emitted by
+/// `ResearchProgress::render` and the deck tracker.
+const RESEARCH_PROGRESS_HEADER: &str = "[research] Research Progress";
+
+/// The exact first line of the progress message for run `name`.
+fn research_progress_header_line(name: &str) -> String {
+    format!("{RESEARCH_PROGRESS_HEADER} - `{name}`")
+}
+
 impl App {
     /// Render a swarm failure uniformly: status line, chat panel message,
     /// and a warn-level log entry.
@@ -935,6 +944,17 @@ impl App {
                         last
                     };
                     progress.apply(decoded.phase, decoded.status, decoded.detail.clone());
+                    // A finalize-phase error is the terminal failure report a
+                    // `/research` spawn publishes when its run fails, so end
+                    // the run rather than leaving it "running".
+                    if decoded.phase == crate::research_progress::SessionPhase::Finalize
+                        && decoded.status == crate::research_progress::StepStatus::Error
+                    {
+                        progress.fail();
+                        if let Some(deck) = progress.deck.as_mut() {
+                            deck.fail(decoded.detail.clone());
+                        }
+                    }
                     if let Some(total) = decoded.total_sources {
                         progress.finish(
                             total,
@@ -3090,6 +3110,45 @@ impl App {
         self.refresh_research_progress_message(&name);
     }
 
+    /// Start tracking a new research run and render its progress message.
+    ///
+    /// Progress events and message refreshes look a run up by name, so a
+    /// second run under a name already tracked (`/research update` after a
+    /// `create`, a `deck` after either) would otherwise extend the earlier
+    /// run's tracker and overwrite its message. The earlier tracker is
+    /// dropped and its message is retired - its header is marked as an
+    /// earlier run so it stays visible but is never matched again - before
+    /// the new tracker is added.
+    pub fn begin_research_progress(
+        &mut self,
+        progress: crate::research_progress::ResearchProgress,
+    ) {
+        let name = progress.name.clone();
+        if self.research_progress.iter().any(|p| p.name == name) {
+            self.research_progress.retain(|p| p.name != name);
+            let header_line = research_progress_header_line(&name);
+            let retired = format!("{header_line} (earlier run)");
+            let mut dirty: Vec<usize> = Vec::new();
+            for (i, msg) in self.messages.iter_mut().enumerate() {
+                if msg.role != Role::Assistant {
+                    continue;
+                }
+                if let Some(MessagePart::Text { text }) = msg.parts.first_mut()
+                    && text.lines().next() == Some(header_line.as_str())
+                {
+                    text.replace_range(..header_line.len(), &retired);
+                    msg.touch();
+                    dirty.push(i);
+                }
+            }
+            for i in dirty {
+                self.mark_message_dirty(i);
+            }
+        }
+        self.research_progress.push(progress);
+        self.refresh_research_progress_message(&name);
+    }
+
     /// Refresh the research progress message shown for topic `name`.
     pub fn refresh_research_progress_message(&mut self, name: &str) {
         let Some(progress) = self
@@ -3110,13 +3169,13 @@ impl App {
         // Must match the first line emitted by `ResearchProgress::render`
         // ("[research] Research Progress - `{name}`") so the existing
         // message is replaced in place instead of duplicating per event.
-        const HEADER: &str = "[research] Research Progress";
+        const HEADER: &str = RESEARCH_PROGRESS_HEADER;
         // Each research run gets its own message in the window, tagged with
         // the run name so older runs stay visible alongside the latest one.
         // We look for an existing assistant message whose first text part
         // starts with the header AND carries this run's name on its first
         // line, replacing it in place; otherwise we insert a new message.
-        let header_line = format!("{HEADER} - `{}`", name);
+        let header_line = research_progress_header_line(name);
 
         for (i, msg) in self.messages.iter_mut().enumerate() {
             if msg.role != Role::Assistant {

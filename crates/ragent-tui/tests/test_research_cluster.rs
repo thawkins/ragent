@@ -66,8 +66,8 @@ async fn test_research_cluster_valid_sources() {
         app.status
     );
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("Request accepted for `foo`"), "{text}");
-    assert!(text.contains("force=false"), "{text}");
+    assert!(text.contains("Clustering `foo`"), "{text}");
+    assert!(!text.contains("overwriting CONCEPTS.md"), "{text}");
 }
 
 #[tokio::test]
@@ -88,7 +88,7 @@ async fn test_research_cluster_valid_sources_force() {
         app.status
     );
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("force=true"), "{text}");
+    assert!(text.contains("(overwriting CONCEPTS.md)"), "{text}");
 }
 
 #[tokio::test]
@@ -186,6 +186,6 @@ async fn test_research_cluster_force_overwrites_existing_concepts() {
         app.status
     );
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("force=true"), "{text}");
-    assert!(text.contains("Request accepted for `forced`"), "{text}");
+    assert!(text.contains("(overwriting CONCEPTS.md)"), "{text}");
+    assert!(text.contains("Clustering `forced`"), "{text}");
 }

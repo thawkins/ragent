@@ -3353,14 +3353,15 @@ in-memory strings; the implementation contains no `unsafe` code and no
 | `/research create <name> --from-url <URL>` | Fetch the URL, use it as the research subject and capture it as the primary source |
 | `/research create <name> --from-file <PATH>` | Extract a local document and use it as the research subject |
 | `/research create ... --use-low-relevance` | Retain low-relevance web sources |
-| `/research continue <name> [message]` | Resume an in-progress research item |
+| `/research continue <name> [message]` | Add the follow-up to the item's plan and re-run the session on it |
 | `/research update <name>` | Replay the recorded invocation for a run and write a new dated report (`RESEARCH-<run date>.md`); the earlier run's report is kept |
 | `/research list` | List research items |
 | `/research open <name>` | Show the path to the item's report (the newest dated `RESEARCH-<date>.md`, or the legacy `RESEARCH.md`) |
-| `/research show <name>` | Show metadata |
-| `/research search <query>` | Search across every item's resolved report file |
-| `/research delete <name>` | Delete a research item |
+| `/research show <name> [--json]` | Show metadata and sources (each labelled with its own kind) |
+| `/research search <query> [--json]` | Search across every item's resolved report file |
+| `/research delete <name> --yes` | Delete a research item (the TUI requires `--yes`; the CLI prompts) |
 | `/research archive <name>` | Archive a research item |
+| `/research config` | Print the effective `research` settings as JSON |
 | `/research deck <name>` | Write `DECK-<YYYY-MM-DD>.md` for the item: a deterministic, LLM-free slide deck diffing two of its dated reports (§11.4.1) |
 | `/research deck <name> --from <date> --to <date>` | Diff the named report pair instead of the two most recent; one alone pairs with its adjacent dated report |
 | `/research deck <name> --elements <list>` | Restrict the deck to named elements (case-insensitive; slide label or report heading); unknown names are refused |
