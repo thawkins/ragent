@@ -2340,7 +2340,12 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
-## Version 1.0.165
+## Version 1.0.166
+
+Research, teams and agents release. The `/research` family is repaired end to
+end, the team runtime works outside the TUI and is rebindable, team tools
+enforce who is calling, and the sub-agent lifecycle regains one definition of
+"finished".
 
 - **`wait_agents` waits on running background tasks again.** Since 1.0.153 the
   call with `task_ids` omitted only collected tasks that had already finished, so

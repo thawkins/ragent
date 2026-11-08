@@ -4,7 +4,7 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.165)
+## Highlights (v1.0.166)
 
 - **`wait_agents` waits on running background tasks again** - with `task_ids`
   omitted it had been collecting only already-finished tasks since 1.0.153 and

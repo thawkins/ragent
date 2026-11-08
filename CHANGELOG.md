@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.0.166] - 2026-11-08
+
+Research, teams and agents release. The `/research` command family is repaired
+end to end (continue, show, progress, parsing, and overlapping runs), the team
+runtime works outside the TUI and is rebindable instead of pinned to the first
+team, team tools enforce who is calling, idle teammates act on new mail, and the
+sub-agent lifecycle regains one definition of "finished".
+
 ### Security
 
 - Team tools now check who is calling. Lead-only tools refuse a teammate:

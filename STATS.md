@@ -1,13 +1,17 @@
 # Project Statistics
 
-**Version:** 1.0.165
+**Version:** 1.0.166
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
 > Metrics below are measured against the current working tree at the
-> `1.0.165` state, which carries the sub-agent lifecycle and team-runtime release
-> on top of the code-audit remediation pass. That
-> pass closes rows 1-25 of `docs/reports/code-audit.md`: it redacts credentials
+> `1.0.166` state, which carries the research, teams and agents release on top
+> of the sub-agent lifecycle pass and the code-audit remediation pass. The
+> research, teams and agents pass repairs the `/research` family end to end,
+> binds the team runtime outside the TUI and makes it rebindable, adds
+> per-tool caller checks inside teams, wakes idle teammates on mail, and
+> restores one `TaskStatus::is_terminal()` definition of "finished" for
+> sub-agents. The code-audit pass closes rows 1-25 of `docs/reports/code-audit.md`: it redacts credentials
 > on five logging paths and two `Debug` impls, validates the `GITLAB_*` instance
 > URL through one shared rule (`ragent_types::url_validation`), fences the LLM
 > security analyzer's model-authored values, defaults an MCP server entry's
@@ -116,17 +120,17 @@
 | Research output formats | 6 (`report`, `executive-summary`, `comparison-table`, `source-bibliography`, `imrad`, `newsletter`) |
 | Documentation | 24 top-level how-tos (including the new `skills.md`), 23 files in `docs/howtos/tools/` (22 per-category tool how-tos + `INDEX.md`, + generated PDFs), 83 files in `docs/howtos/slashcommands/` (82 command pages + `INDEX.md`, + generated PDFs) |
 | Authors | 1 |
-| Version | 1.0.165 |
+| Version | 1.0.166 |
 
 The tool registry is unchanged this pass: the code-audit remediation added a
 shared `no_parameters_schema()` helper and rerouted the eight parameterless tools
-through it without adding or removing a tool, and the 1.0.165 sub-agent/team
-lifecycle pass changed tool *behaviour* (one `TaskStatus::is_terminal()` predicate
+through it without adding or removing a tool, and the 1.0.165/1.0.166 sub-agent,
+team and research passes changed tool *behaviour* (one `TaskStatus::is_terminal()` predicate
 behind reaping, injection, kill refusal and both wait tools) rather than the
 registry, so the count stays at 150 across 21 families. The crate count stays at
 19 - `ragent-hyperresearch` is a workspace member picked up by `crates/*`.
 
-The 1.0.165 pass moves `crates/` from 760,840 to 803,408 lines (+42,568) and the
+The 1.0.165-1.0.166 passes move `crates/` from 760,840 to 803,408 lines (+42,568) and the
 test tree from 1,211 to 1,252 files, most of it the `test_subagent_lifecycle_review`
 modules in `ragent-agent` (8 cases) and `ragent-tui` (5 cases), the
 `test_team_manager_binding` / `test_team_caller_roles` / `test_team_store_atomic_update`
@@ -412,7 +416,8 @@ most test-dominant crates by ratio are `ragent-tui` (82%), `ragent-tools-extende
 
 ---
 
-_Generated 2026-11-07 (v1.0.165 tree: the sub-agent lifecycle and team-runtime
+_Generated 2026-11-08 (v1.0.166 tree: the research, teams and agents release on
+top of the sub-agent lifecycle and team-runtime
 release - one `TaskStatus::is_terminal()` predicate behind reaping, injection,
 kill refusal and both wait tools; `wait_agents` waiting on running tasks again;
 `SubagentComplete` carrying `status` and `output_file`; the team runtime bound in
