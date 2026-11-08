@@ -18,6 +18,18 @@
 
 ### Fixed
 
+- Teams: an idle teammate now acts on new mail. Before, a teammate's agent loop
+  ended after its first turn, so a message, task assignment, plan verdict or
+  shutdown request sent to an idle teammate waited unread indefinitely, and a
+  graceful shutdown of an idle teammate never completed. The loop now stays
+  alive between turns. It runs a turn that reads new mail, or that works a task
+  auto-claimed for the member, and it is woken when mail arrives, when a task is
+  auto-claimed, on resume, and on a graceful shutdown request. Suspended,
+  blocked and plan-pending teammates are not woken, and a message is prompted
+  for only once (`TeamManager::next_teammate_turn`).
+- Test `mcp::orphan_sweep_tests::shutdown_kills_the_stdio_child_process_group`
+  no longer fails intermittently in containers. It counted a killed grandchild
+  that lingered as an unreaped zombie as a surviving group member.
 - Teams: messages sent to a teammate are no longer lost. The manager's mailbox
   poll loop called `drain_unread()`, which marked every message read when it
   announced it on the event bus. The teammate's own `team_read_messages` reads

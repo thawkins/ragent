@@ -609,6 +609,8 @@ mod test_team_caller_roles;
 mod test_team_name_validation;
 #[path = "test_team_poll_loop_keeps_unread.rs"]
 mod test_team_poll_loop_keeps_unread;
+#[path = "test_team_teammate_wake.rs"]
+mod test_team_teammate_wake;
 
 #[path = "test_team_store_extra.rs"]
 mod test_team_store_extra;
