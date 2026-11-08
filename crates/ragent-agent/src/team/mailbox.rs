@@ -503,12 +503,11 @@ impl Mailbox {
 
     /// Return all unread messages and mark them as read (acquires an exclusive lock).
     ///
-    /// This is the legacy "read and mark" path. It is still used by the
-    /// mailbox poll loop in [`crate::team::manager::TeamManager`], which
-    /// treats publishing an [`Event::TeammateMessage`] as the successful
-    /// processing step. Tools that want at-least-once delivery semantics
-    /// (redelivery on failure) should use [`peek_unread`] + [`acknowledge`]
-    /// instead.
+    /// This is the legacy "read and mark" path. The mailbox poll loop must
+    /// NOT use it: announcing a message on the event bus does not deliver it
+    /// to the teammate, so marking it read there hides it from the teammate's
+    /// own `team_read_messages`. Readers that want at-least-once delivery
+    /// should use [`peek_unread`] + [`acknowledge`] instead.
     ///
     /// M6-T5: if the mailbox file is corrupt it is moved aside and an empty
     /// list is returned, so the poll loop can continue with a fresh inbox

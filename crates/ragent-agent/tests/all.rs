@@ -605,6 +605,8 @@ mod test_team_manager_spawn;
 
 #[path = "test_team_name_validation.rs"]
 mod test_team_name_validation;
+#[path = "test_team_poll_loop_keeps_unread.rs"]
+mod test_team_poll_loop_keeps_unread;
 
 #[path = "test_team_store_extra.rs"]
 mod test_team_store_extra;

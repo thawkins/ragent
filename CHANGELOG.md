@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- Teams: messages sent to a teammate are no longer lost. The manager's mailbox
+  poll loop called `drain_unread()`, which marked every message read when it
+  announced it on the event bus. The teammate's own `team_read_messages` reads
+  only unread messages, so it reported "No new messages". Lead directives, task
+  assignments, plan verdicts, cancellations and shutdown requests were lost as a
+  result. The poll loop now peeks without marking messages read
+  (`team::poll_mailbox_once`), and it announces each message once rather than
+  on every tick.
 - `/research continue` now resumes the item (adds the follow-up to its plan and
   re-runs the session) instead of printing "Resuming" and doing nothing. Words
   after the name are now the follow-up (`/research continue <name> <message>`),
