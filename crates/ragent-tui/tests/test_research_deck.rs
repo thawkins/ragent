@@ -159,13 +159,18 @@ async fn test_deck_command_reports_the_covered_stamp_range() {
 }
 
 #[tokio::test]
-async fn test_deck_command_publishes_a_success_notice() {
+async fn test_deck_command_publishes_one_success_block() {
     let (_dir, mut app) = fixture("notice");
     app.execute_slash_command("/research deck deckspec").await;
-    let notices = agent_notices(&drain(&app).await);
+    let events = drain(&app).await;
+    let text = text_deltas(&events);
+    assert!(text.contains("[ok] Wrote"), "got: {text}");
+    assert!(text.contains("2 change(s)"), "got: {text}");
+    // The result is reported once, not echoed as a second notice bubble.
     assert!(
-        notices.contains("research: deck 'deckspec' written (2 change(s))"),
-        "got: {notices}"
+        !agent_notices(&events).contains("written"),
+        "got: {}",
+        agent_notices(&events)
     );
 }
 
@@ -186,11 +191,6 @@ async fn test_deck_command_reports_no_changes_for_identical_reports() {
     assert!(
         !text.contains("NEW 0"),
         "the no-change line omits counts: {text}"
-    );
-    assert!(
-        agent_notices(&events).contains("research: deck 'same' written (no changes)"),
-        "got: {}",
-        agent_notices(&events)
     );
 }
 
@@ -276,8 +276,10 @@ async fn test_deck_command_existing_deck_without_force_is_refused() {
     assert!(text.starts_with("From: /research deck"), "got: {text}");
     assert!(text.contains("**Error:**"), "got: {text}");
     assert!(text.contains("--force"), "got: {text}");
+    // The refusal ends the run: a terminal failure report is published so
+    // the progress tracker and `[wait]` status do not stay live.
     assert!(
-        agent_notices(&events).contains("research: deck 'deckspec' failed"),
+        agent_notices(&events).contains("deckspec failed:"),
         "got: {}",
         agent_notices(&events)
     );

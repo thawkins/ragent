@@ -2562,7 +2562,7 @@ async fn h001_web_phase_timeout_keeps_partial_sources_and_proceeds() {
         }
     }
     let web = WebGatherer::new(Arc::new(FastSearch), Arc::new(SlowFetch))
-        .with_fetch_timeout(std::time::Duration::from_secs(3600));
+        .with_fetch_timeout(std::time::Duration::from_hours(1));
 
     let tmp = TempDir::new().unwrap();
     let research_root = tmp.path().join("research");
@@ -2647,7 +2647,7 @@ async fn h001_local_phase_timeout_aborts_slow_local_gather() {
             _root: &std::path::Path,
             _pattern: &str,
         ) -> anyhow::Result<Vec<std::path::PathBuf>> {
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            tokio::time::sleep(std::time::Duration::from_mins(1)).await;
             Ok(Vec::new())
         }
         async fn grep(

@@ -573,7 +573,7 @@ async fn gather_times_out_slow_fetch() {
     #[async_trait]
     impl WebFetchTool for SlowFetch {
         async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            tokio::time::sleep(std::time::Duration::from_mins(1)).await;
             Ok(WebFetchedPage {
                 published_at: None,
                 url: _url.to_string(),

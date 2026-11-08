@@ -235,7 +235,7 @@ fn limits_from_config_maps_zero_to_default_and_reads_ttl() {
     let limits = CatalogueLimits::from_config(1500, 4096, 60);
     assert_eq!(limits.timeout, Duration::from_millis(1500));
     assert_eq!(limits.max_bytes, 4096);
-    assert_eq!(limits.cache_ttl, Duration::from_secs(60));
+    assert_eq!(limits.cache_ttl, Duration::from_mins(1));
 }
 
 // -- Offline fixture fetcher (NFR-003) ---------------------------------------
@@ -295,7 +295,7 @@ fn cache_round_trips_a_catalogue_within_ttl() {
         .expect("cache write succeeds");
 
     let loaded = cache
-        .load(CatalogueKind::Claude, ep, Duration::from_secs(3600), 1_100)
+        .load(CatalogueKind::Claude, ep, Duration::from_hours(1), 1_100)
         .expect("within ttl");
     assert_eq!(loaded.connectors.len(), 1);
     assert_eq!(loaded.endpoint, ep);
@@ -345,7 +345,7 @@ fn cache_ignores_a_file_for_a_different_endpoint() {
         .expect("cache write succeeds");
     assert!(
         cache
-            .load(CatalogueKind::Claude, ep, Duration::from_secs(3600), 1_000)
+            .load(CatalogueKind::Claude, ep, Duration::from_hours(1), 1_000)
             .is_none()
     );
 }
@@ -360,7 +360,7 @@ fn fetch_catalogue_serves_from_cache_then_refetches_when_expired() {
     let limits = CatalogueLimits::new(
         Duration::from_secs(1),
         CatalogueLimits::DEFAULT_MAX_BYTES,
-        Duration::from_secs(600),
+        Duration::from_mins(10),
     );
 
     let first = ragent_connectors::fetch_catalogue(
@@ -413,7 +413,7 @@ fn a_failed_fetch_leaves_a_previously_cached_catalogue_untouched() {
     let limits = CatalogueLimits::new(
         Duration::from_secs(1),
         CatalogueLimits::DEFAULT_MAX_BYTES,
-        Duration::from_secs(600),
+        Duration::from_mins(10),
     );
 
     // Prime the cache at t=1000.
@@ -459,7 +459,7 @@ fn a_failed_fetch_leaves_a_previously_cached_catalogue_untouched() {
             .load(
                 CatalogueKind::Claude,
                 ep.as_str(),
-                Duration::from_secs(600),
+                Duration::from_mins(10),
                 1_000
             )
             .is_some()
@@ -474,7 +474,7 @@ fn parse_failure_does_not_replace_an_existing_cache_entry() {
     let limits = CatalogueLimits::new(
         Duration::from_secs(1),
         CatalogueLimits::DEFAULT_MAX_BYTES,
-        Duration::from_secs(600),
+        Duration::from_mins(10),
     );
 
     let good = FixtureCatalogueFetcher::new()
@@ -509,7 +509,7 @@ fn parse_failure_does_not_replace_an_existing_cache_entry() {
         .load(
             CatalogueKind::Claude,
             ep.as_str(),
-            Duration::from_secs(600),
+            Duration::from_mins(10),
             1_000,
         )
         .expect("the previously cached catalogue is still served");

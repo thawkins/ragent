@@ -1441,7 +1441,7 @@ fn state_poll_run_cost_banner_expiry() {
     app.poll_run_cost_banner_expiry();
     assert!(app.run_cost_banner.is_some());
 
-    app.run_cost_banner_at = Some(now().checked_sub(Duration::from_secs(60)).expect("clock"));
+    app.run_cost_banner_at = Some(now().checked_sub(Duration::from_mins(1)).expect("clock"));
     app.poll_run_cost_banner_expiry();
     assert!(app.run_cost_banner.is_none());
     assert!(app.run_cost_banner_at.is_none());

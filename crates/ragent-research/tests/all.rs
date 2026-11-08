@@ -45,6 +45,8 @@ mod test_chunked_synthesis_diagram;
 mod test_clarification_brief_entity;
 #[path = "test_cli_parser_full.rs"]
 mod test_cli_parser_full;
+#[path = "test_cli_review_fixes.rs"]
+mod test_cli_review_fixes;
 #[path = "test_cli_session_event_json.rs"]
 mod test_cli_session_event_json;
 #[path = "test_comparison_table.rs"]

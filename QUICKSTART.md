@@ -1672,7 +1672,7 @@ detects missing links, and stops adaptively.
 Run any of these from the TUI prompt:
 
 ```text
-/research rust-async async/await idioms in stable Rust
+/research create rust-async async/await idioms in stable Rust
 /research create rust-async async/await idioms --depth deep --iterations 5
 /research create rust-async --from-url https://example.com/article
 /research continue rust-async focus on io_uring integration
