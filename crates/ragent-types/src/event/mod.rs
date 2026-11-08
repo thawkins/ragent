@@ -717,6 +717,17 @@ pub enum Event {
         /// limit), `"truncation"` (silent end-of-stream), `"cancelled"`, or
         /// `"error"`. Consumers can flag results that are likely incomplete.
         finish_reason: String,
+        /// The task registry's terminal status for the run (`completed`,
+        /// `failed`, `cancelled`, `timed_out`), or empty when unknown.
+        ///
+        /// Carried on the event because the registry entry may be reaped
+        /// before a consumer handles the event, so it cannot be looked up.
+        #[serde(default)]
+        status: String,
+        /// Durable copy of the full report (`log/subagents/<task-id>.md`),
+        /// or `None` when no copy was written.
+        #[serde(default)]
+        output_file: Option<std::path::PathBuf>,
     },
     /// A sub-agent task was suspended by the user.
     SubagentSuspended {

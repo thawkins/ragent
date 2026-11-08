@@ -17,7 +17,8 @@ use std::path::PathBuf;
 use ragent_agent::task::{ReportStatus, TaskEntry, TaskStatus};
 use ragent_tui::App;
 use ragent_tui::app::{
-    note_subagent_completed_with_registry_for_tests, note_subagent_killed_for_tests,
+    note_subagent_cancelled_for_tests, note_subagent_completed_with_status_for_tests,
+    note_subagent_killed_for_tests,
 };
 use support::make_app;
 
@@ -57,25 +58,26 @@ fn test_failed_completion_is_recorded_as_failed() {
     let mut app = app();
     app.active_tasks.push(task("t-fail", TaskStatus::Running));
 
-    note_subagent_completed_with_registry_for_tests(&mut app, "t-fail", "error", false, None);
+    note_subagent_completed_with_status_for_tests(&mut app, "t-fail", "error", false, "", None);
 
     let row = app.agents_history.front().expect("history row");
     assert_eq!(row.status, TaskStatus::Failed);
 }
 
 #[test]
-fn test_completion_uses_registry_status_and_output_file() {
+fn test_completion_uses_event_status_and_output_file() {
+    // The registry entry may already be reaped when the event is handled, so
+    // the status and report path come from the event itself.
     let mut app = app();
     app.active_tasks.push(task("t-to", TaskStatus::Running));
-    let mut registry = task("t-to", TaskStatus::TimedOut);
-    registry.output_file = Some(PathBuf::from("log/subagents/t-to.md"));
 
-    note_subagent_completed_with_registry_for_tests(
+    note_subagent_completed_with_status_for_tests(
         &mut app,
         "t-to",
         "error",
         false,
-        Some(&registry),
+        "timed_out",
+        Some(std::path::Path::new("log/subagents/t-to.md")),
     );
 
     let row = app.agents_history.front().expect("history row");
@@ -85,6 +87,18 @@ fn test_completion_uses_registry_status_and_output_file() {
         Some(std::path::Path::new("log/subagents/t-to.md"))
     );
     assert!(row.durable_copy_absence().is_none());
+}
+
+#[test]
+fn test_cancel_after_kill_records_cancelled_not_terminating() {
+    let mut app = app();
+    app.active_tasks.push(task("t-k", TaskStatus::Running));
+    note_subagent_killed_for_tests(&mut app, "t-k", false);
+
+    note_subagent_cancelled_for_tests(&mut app, "t-k");
+
+    let row = app.agents_history.front().expect("history row");
+    assert_eq!(row.status, TaskStatus::Cancelled);
 }
 
 #[test]

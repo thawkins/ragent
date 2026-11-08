@@ -337,7 +337,7 @@ fn a_cancelled_task_is_snapshotted_and_named_as_in_memory() {
         .front()
         .expect("the cancelled run is snapshotted");
     assert_eq!(row.id, "task-0008");
-    assert_eq!(row.status, TaskStatus::Running);
+    assert_eq!(row.status, TaskStatus::Cancelled);
     assert!(
         row.durable_copy_absence().is_some(),
         "a cancelled run with no persisted report must say so (FR-032)"

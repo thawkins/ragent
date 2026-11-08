@@ -58,6 +58,8 @@ async fn complete(app: &mut App, session: &str, task: &str, child: &str, reason:
         success: true,
         duration_ms: 42,
         finish_reason: reason.to_string(),
+        status: String::new(),
+        output_file: None,
     })
     .await;
 }
@@ -262,6 +264,8 @@ async fn test_failed_completion_logs_the_error_icon() {
         success: false,
         duration_ms: 1,
         finish_reason: "error".to_string(),
+        status: String::new(),
+        output_file: None,
     })
     .await;
 

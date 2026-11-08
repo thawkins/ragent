@@ -169,22 +169,23 @@ pub fn note_subagent_completed_for_tests(
     task_id: &str,
     finish_reason: &str,
 ) -> Option<ragent_agent::task::ReportStatus> {
-    app.note_subagent_completed(task_id, finish_reason, true, None)
+    app.note_subagent_completed(task_id, finish_reason, true, "", None)
 }
 
 /// Test hook: drive the `SubagentComplete` transition with the event's
-/// `success` flag and the task registry's entry, so a test can assert that a
-/// failed or timed-out run is recorded with its real status and durable
-/// `output_file` (`tests/test_subagent_lifecycle_review.rs`).
+/// `success`, `status` and `output_file`, so a test can assert that a failed
+/// or timed-out run is recorded with its real status and durable report path
+/// (`tests/test_subagent_lifecycle_review.rs`).
 #[doc(hidden)]
-pub fn note_subagent_completed_with_registry_for_tests(
+pub fn note_subagent_completed_with_status_for_tests(
     app: &mut App,
     task_id: &str,
     finish_reason: &str,
     success: bool,
-    registry: Option<&ragent_agent::task::TaskEntry>,
+    status: &str,
+    output_file: Option<&std::path::Path>,
 ) -> Option<ragent_agent::task::ReportStatus> {
-    app.note_subagent_completed(task_id, finish_reason, success, registry)
+    app.note_subagent_completed(task_id, finish_reason, success, status, output_file)
 }
 
 /// Test hook: drive the `SubagentKilled` transition without a live run

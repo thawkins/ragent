@@ -495,7 +495,7 @@ pub struct AgentManager {
     /// agent loop checks this flag before calling `drain_completed` so the
     /// common "no background tasks" path avoids acquiring the task-map lock
     /// and scanning every entry on every loop step.
-    has_pending_background: AtomicBool,
+    has_pending_background: Arc<AtomicBool>,
 }
 
 impl Drop for AgentManager {
@@ -526,7 +526,7 @@ impl AgentManager {
             processor,
             max_background,
             background_timeout_secs,
-            has_pending_background: AtomicBool::new(false),
+            has_pending_background: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -647,20 +647,25 @@ impl AgentManager {
                 // terminal reason is what tells a cancel from a real finish.
                 let reason = self.processor.last_message_end_reason(&child_sid);
                 let cancelled = matches!(reason, Some(FinishReason::Cancelled));
-                {
-                    if let Some(mut entry) = self.tasks.get_mut(&task_id) {
-                        entry.status = if cancelled {
-                            TaskStatus::Cancelled
-                        } else {
-                            TaskStatus::Completed
-                        };
-                        entry.result = Some(Arc::from(response.as_str()));
-                        entry.completed_at = Some(Utc::now());
-                        // The caller receives the result inline, so the entry
-                        // is already "reported"; the next drain reaps it.
-                        entry.reported = true;
-                    }
-                }
+                // The snapshot returned to the caller is taken under the same
+                // guard that marks the entry reported: once the guard drops, a
+                // concurrent drain may reap it, so a later lookup could fail.
+                let snapshot = {
+                    let mut entry = self.tasks.get_mut(&task_id).ok_or_else(|| {
+                        anyhow::anyhow!("task {task_id} vanished before completion")
+                    })?;
+                    entry.status = if cancelled {
+                        TaskStatus::Cancelled
+                    } else {
+                        TaskStatus::Completed
+                    };
+                    entry.result = Some(Arc::from(response.as_str()));
+                    entry.completed_at = Some(Utc::now());
+                    // The caller receives the result inline, so the entry is
+                    // already "reported"; the next drain reaps it.
+                    entry.reported = true;
+                    entry.value().clone()
+                };
                 self.has_pending_background.store(true, Ordering::Relaxed);
                 self.cancel_flags.remove(&task_id);
                 self.suspend_flags.remove(&child_sid);
@@ -681,15 +686,15 @@ impl AgentManager {
                             .as_ref()
                             .map_or("stop", crate::session::finish_reason_label)
                             .to_string(),
+                        status: snapshot.status.as_str().to_string(),
+                        output_file: None,
                     });
                 }
 
-                let entry = self
-                    .tasks
-                    .get(&task_id)
-                    .map(|r| r.value().clone())
-                    .ok_or_else(|| anyhow::anyhow!("task {task_id} vanished after completion"))?;
-                Ok(TaskResult { entry, response })
+                Ok(TaskResult {
+                    entry: snapshot,
+                    response,
+                })
             }
             Err(e) => {
                 let error_msg = e.to_string();
@@ -721,6 +726,14 @@ impl AgentManager {
                     success: false,
                     duration_ms,
                     finish_reason: "error".to_string(),
+                    status: if hit_bound {
+                        TaskStatus::TimedOut
+                    } else {
+                        TaskStatus::Failed
+                    }
+                    .as_str()
+                    .to_string(),
+                    output_file: None,
                 });
 
                 Err(e)
@@ -911,6 +924,7 @@ impl AgentManager {
         let task_prompt_str = task_prompt.to_string();
         let working_dir_buf = working_dir.to_path_buf();
         let cancel_flag_outer = cancel_flag.clone();
+        let pending_background = Arc::clone(&self.has_pending_background);
 
         tokio::spawn(async move {
             let start = Instant::now();
@@ -1065,7 +1079,7 @@ impl AgentManager {
                             entry.status = TaskStatus::Completed;
                             entry.result = Some(Arc::from(response.as_str()));
                             entry.completed_at = Some(Utc::now());
-                            entry.output_file = output_file;
+                            entry.output_file = output_file.clone();
                             entry.report_status = report_status;
                         }
                     }
@@ -1081,6 +1095,8 @@ impl AgentManager {
                         success: true,
                         duration_ms,
                         finish_reason: finish_reason.to_string(),
+                        status: TaskStatus::Completed.as_str().to_string(),
+                        output_file,
                     });
                 }
                 Err(e) => {
@@ -1124,10 +1140,23 @@ impl AgentManager {
                             success: false,
                             duration_ms,
                             finish_reason: "error".to_string(),
+                            status: if hit_bound {
+                                TaskStatus::TimedOut
+                            } else {
+                                TaskStatus::Failed
+                            }
+                            .as_str()
+                            .to_string(),
+                            output_file: None,
                         });
                     }
                 }
             }
+            // Re-arm the drain fast-path flag now that this task has settled:
+            // a drain that ran while the task was still live may have cleared
+            // it, and without this the result would never be injected or
+            // reaped until unrelated work set the flag again.
+            pending_background.store(true, Ordering::Relaxed);
         });
 
         Ok(entry)
@@ -1174,14 +1203,18 @@ impl AgentManager {
                 anyhow::bail!("Task '{task_id}' is not running (status: {})", entry.status);
             }
             entry.status = TaskStatus::Suspended;
+            // The flag is stored while the task guard is still held, so a
+            // concurrent resume (which takes the same guard) can never see
+            // `Suspended` with the flag not yet set and leave a `running`
+            // task parked.
+            if let Some(flag) = self.suspend_flags.get(&entry.child_session_id) {
+                flag.store(true, Ordering::Relaxed);
+            }
             (
                 entry.child_session_id.clone(),
                 entry.parent_session_id.clone(),
             )
         };
-        if let Some(flag) = self.suspend_flags.get(&child) {
-            flag.store(true, Ordering::Relaxed);
-        }
         self.event_bus.publish(Event::SubagentSuspended {
             session_id: parent,
             task_id: task_id.to_string(),
@@ -1214,14 +1247,16 @@ impl AgentManager {
                 ),
             }
             entry.status = TaskStatus::Running;
+            // Cleared under the task guard, for the same reason as in
+            // `suspend_task`.
+            if let Some(flag) = self.suspend_flags.get(&entry.child_session_id) {
+                flag.store(false, Ordering::Relaxed);
+            }
             (
                 entry.child_session_id.clone(),
                 entry.parent_session_id.clone(),
             )
         };
-        if let Some(flag) = self.suspend_flags.get(&child) {
-            flag.store(false, Ordering::Relaxed);
-        }
         self.event_bus.publish(Event::SubagentResumed {
             session_id: parent,
             task_id: task_id.to_string(),
@@ -1483,12 +1518,13 @@ impl AgentManager {
                 // Reportable and drained: reap.
                 return false;
             }
-            if same_parent
-                && e.background
-                && !e.reported
-                && e.status.is_terminal()
-                && e.waiter_count == 0
-            {
+            // The flag is manager-wide, so it may only be cleared when NO
+            // survivor of ANY parent still needs a drain: a background task
+            // that is live or not yet injected, or a reported entry waiting to
+            // be reaped. Scoping this to one parent cleared the flag under
+            // another parent's pending result, and ignoring live tasks
+            // cleared it while they ran, so their results were never drained.
+            if (e.background && !e.reported) || (e.reported && e.status.is_terminal()) {
                 still_pending = true;
             }
             true

@@ -264,3 +264,44 @@ async fn test_finished_foreground_task_is_reaped_by_next_drain() {
         "a finished foreground run must not stay in the registry forever"
     );
 }
+
+#[tokio::test]
+async fn test_pending_flag_stays_armed_while_background_task_runs() {
+    let mgr = manager(4);
+    mgr.insert_task_for_test(entry_full(
+        "explore-live",
+        TaskStatus::Running,
+        "parent",
+        true,
+        false,
+    ));
+    mgr.set_pending_background_for_test();
+
+    assert!(mgr.drain_completed("parent").await.is_empty());
+    assert!(
+        mgr.has_pending_background(),
+        "a drain while a background task is live must not disarm the flag, or \
+         its result is never drained"
+    );
+}
+
+#[tokio::test]
+async fn test_pending_flag_kept_for_other_parents_pending_result() {
+    let mgr = manager(4);
+    mgr.insert_task_for_test(entry_full(
+        "explore-other",
+        TaskStatus::Completed,
+        "other-parent",
+        true,
+        false,
+    ));
+    mgr.set_pending_background_for_test();
+
+    assert!(mgr.drain_completed("parent").await.is_empty());
+    assert!(
+        mgr.has_pending_background(),
+        "draining one parent must not disarm the flag under another's result"
+    );
+    assert_eq!(mgr.drain_completed("other-parent").await.len(), 1);
+    assert!(!mgr.has_pending_background());
+}

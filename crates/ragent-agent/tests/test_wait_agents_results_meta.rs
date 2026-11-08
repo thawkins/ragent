@@ -619,6 +619,8 @@ async fn test_wait_agents_event_path_prefers_registry_status_over_the_event_bool
             success: false,
             duration_ms: 10,
             finish_reason: "cancelled".to_string(),
+            status: String::new(),
+            output_file: None,
         });
     });
 
@@ -673,6 +675,8 @@ async fn test_wait_agents_returns_when_task_completes_via_event() {
             success: true,
             duration_ms: 42,
             finish_reason: "complete".to_string(),
+            status: String::new(),
+            output_file: None,
         });
     });
 

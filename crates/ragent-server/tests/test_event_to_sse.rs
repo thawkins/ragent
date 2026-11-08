@@ -515,6 +515,8 @@ fn test_subagent_complete() {
         success: true,
         duration_ms: 1500,
         finish_reason: "complete".into(),
+        status: String::new(),
+        output_file: None,
     });
     assert_eq!(name, "subagent_complete");
     assert_eq!(v["success"], true);

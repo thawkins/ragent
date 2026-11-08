@@ -168,8 +168,9 @@ async fn drain_completed_reports_and_reaps_completed_background_tasks() {
         "completed task reaped"
     );
     assert!(mgr.get_task("running").await.is_some());
-    // The flag cleared because no unreported completed background tasks remain.
-    assert!(!mgr.has_pending_background());
+    // The flag stays armed while a background task is still live: clearing
+    // it here meant the running task's result was never drained.
+    assert!(mgr.has_pending_background());
 }
 
 #[tokio::test]

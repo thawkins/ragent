@@ -40,6 +40,12 @@
   records a `failed` history row, and the active-agents gauge no longer leaks.
   The registry reconciliation retires finished rows (including `timed_out`)
   into history. A failed run logs `[err] Task failed`.
+- Sub-agents: the background drain flag is no longer cleared while a
+  background task is still running or another session's result is pending,
+  and each background completion re-arms it, so a result is never stranded.
+  Suspend and resume set the park flag under the same guard as the status.
+  `SubagentComplete` now carries the terminal `status` and `output_file`, so
+  the Agents panel no longer depends on the registry entry still existing.
 - Teams: the team runtime is no longer stuck on the first team for the life of
   the process. The session processor held its `TeamManager` in a `OnceLock`.
   After the first team was cleaned up, a second `team_create` or a `/swarm` was

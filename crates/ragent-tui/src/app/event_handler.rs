@@ -1444,6 +1444,8 @@ impl App {
                 ref summary,
                 ref finish_reason,
                 success,
+                ref status,
+                ref output_file,
                 ..
             } if self.is_current_or_descendant_session(session_id) => {
                 // Record the report status derived from the finish reason and
@@ -1451,17 +1453,15 @@ impl App {
                 // marker come from that one derived value, so the panel can
                 // never disagree with the row written by the task registry
                 // (`list_agents` / `wait_agents`).
-                // The registry entry carries the real terminal status and the
-                // durable `output_file`, neither of which the event carries.
-                let registry = match self.session_processor.agent_manager.get() {
-                    Some(tm) => tm.get_task(task_id).await,
-                    None => None,
-                };
+                // The event carries the registry's terminal status and the
+                // durable `output_file`: the registry entry itself may already
+                // have been reaped by the time this event is handled.
                 let recorded = self.note_subagent_completed(
                     task_id,
                     finish_reason,
                     success,
-                    registry.as_ref(),
+                    status,
+                    output_file.as_deref(),
                 );
                 self.close_agents_window_when_empty();
                 let report_status = recorded.unwrap_or_else(|| {

@@ -5549,6 +5549,9 @@ impl App {
             } else if entry.status == TaskStatus::Running {
                 self.active_tasks.push(entry.clone());
                 added.push(entry);
+                // Balance the decrement a later retirement of this row makes:
+                // the dropped `SubagentStart` never incremented the gauge.
+                ragent_telemetry::counters::add_agents_active(1);
             }
         }
 
