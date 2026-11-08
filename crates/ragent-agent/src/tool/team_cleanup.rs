@@ -67,6 +67,7 @@ impl Tool for TeamCleanupTool {
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+        super::team_caller::require_lead(ctx, team_name, &team_dir, self.name())?;
 
         // Load config to check for active teammates.
         let store = TeamStore::load(&team_dir)?;

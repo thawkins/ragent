@@ -465,9 +465,14 @@ async fn team_spawn_tool_rejects_missing_required_args() {
 #[tokio::test]
 async fn team_spawn_tool_returns_pending_without_manager() {
     let bus = Arc::new(EventBus::new(64));
+    // The caller must be the lead of an existing team before the missing
+    // manager is reported.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join(".ragent")).expect("create .ragent");
+    TeamStore::create("t", "no-manager", tmp.path(), true).expect("create team");
     let ctx = ToolContext {
         session_id: "no-manager".to_string(),
-        working_dir: std::env::current_dir().unwrap(),
+        working_dir: tmp.path().to_path_buf(),
         event_bus: bus,
         storage: None,
         agent_manager: None,
@@ -508,11 +513,16 @@ async fn team_spawn_tool_returns_pending_without_manager() {
 async fn team_spawn_tool_spawns_and_persists_memory_scope() {
     let (manager, _tmp, _proc) = live_team_manager("tool-spawn-team", "lead-1");
     let ws = workspace_of(&manager.team_dir);
-    let ctx = tool_ctx(
+    let mut ctx = tool_ctx(
         Arc::new(EventBus::new(64)),
         ws,
         Arc::clone(&manager) as Arc<dyn TeamManagerInterface>,
     );
+    ctx.team_context = Some(Arc::new(ragent_agent::tool::TeamContext {
+        team_name: "tool-spawn-team".to_string(),
+        agent_id: "lead".to_string(),
+        is_lead: true,
+    }));
 
     let out = spawn_tool()
         .execute(

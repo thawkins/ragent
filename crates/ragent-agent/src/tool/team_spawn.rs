@@ -99,6 +99,10 @@ impl Tool for TeamSpawnTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: prompt"))?;
 
+        let team_dir = crate::team::find_team_dir(&ctx.working_dir, team_name)
+            .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+        super::team_caller::require_lead(ctx, team_name, &team_dir, self.name())?;
+
         // Guard: detect multi-item prompts that violate the "one per spawn" rule.
         // Only flag when there is strong evidence of an actual enumerated list
         // (3+ numbered items, or 3+ bullet items). Single connectives like "and"

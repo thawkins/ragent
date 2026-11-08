@@ -82,13 +82,10 @@ impl Tool for TeamTaskCancelTool {
         // runtime enforces the lead-only rule (and refuses before the task list
         // is even loaded); naming the caller here means the refusal can say who
         // tried, instead of the tool silently acting as the lead.
-        let agent_id = ctx
-            .team_context
-            .as_ref()
-            .map_or_else(|| ctx.session_id.clone(), |tc| tc.agent_id.clone());
-
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+        let caller = super::team_caller::resolve_caller(ctx, team_name, &team_dir)?;
+        let agent_id = caller.agent_id().to_string();
 
         // One cancellation implementation (FR-025). A session with a manager
         // reaches it through the trait, so the lead-only rule and the FR-005

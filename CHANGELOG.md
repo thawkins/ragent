@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Security
+
+- Team tools now check who is calling. Lead-only tools refuse a teammate:
+  `team_spawn`, `team_task_create`, `team_assign_task`, `team_approve_plan`,
+  `team_shutdown_teammate`, `team_cleanup` and `team_wait`. Before, a teammate
+  could approve its own plan or force-delete the whole team. Every team tool
+  now also refuses a session that is neither the lead nor a member of the team
+  named in the call. A teammate of one team can no longer read another team's
+  mailbox or complete its tasks, and a session outside every team can no longer
+  send messages as the lead. The caller is identified from the session's team
+  context, or from the team's `config.json` when the context does not name that
+  team (`tool::team_caller`). `team_wait` without `team_name` now defaults to
+  the caller's own team.
+
 ### Fixed
 
 - Teams: messages sent to a teammate are no longer lost. The manager's mailbox

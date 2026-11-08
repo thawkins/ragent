@@ -603,6 +603,8 @@ mod test_team_manager_runtime;
 #[path = "test_team_manager_spawn.rs"]
 mod test_team_manager_spawn;
 
+#[path = "test_team_caller_roles.rs"]
+mod test_team_caller_roles;
 #[path = "test_team_name_validation.rs"]
 mod test_team_name_validation;
 #[path = "test_team_poll_loop_keeps_unread.rs"]

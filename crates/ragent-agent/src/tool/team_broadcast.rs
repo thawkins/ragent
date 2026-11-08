@@ -68,13 +68,11 @@ impl Tool for TeamBroadcastTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: content"))?;
 
-        let from = ctx
-            .team_context
-            .as_ref()
-            .map_or_else(|| "lead".to_string(), |tc| tc.agent_id.clone());
-
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+        let from = super::team_caller::resolve_caller(ctx, team_name, &team_dir)?
+            .agent_id()
+            .to_string();
 
         let store = TeamStore::load(&team_dir)?;
         let active: Vec<_> = store

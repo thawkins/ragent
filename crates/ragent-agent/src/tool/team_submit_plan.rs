@@ -58,13 +58,11 @@ impl Tool for TeamSubmitPlanTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: plan"))?;
 
-        let agent_id = ctx
-            .team_context
-            .as_ref()
-            .map_or_else(|| ctx.session_id.clone(), |tc| tc.agent_id.clone());
-
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+        let agent_id = super::team_caller::resolve_caller(ctx, team_name, &team_dir)?
+            .agent_id()
+            .to_string();
 
         // Update member's plan_status to Pending and status to PlanPending.
         // FR-032: a member that is not in the roster has no plan to record, and

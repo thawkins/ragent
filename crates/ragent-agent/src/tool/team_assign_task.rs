@@ -71,6 +71,7 @@ impl Tool for TeamAssignTaskTool {
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+        super::team_caller::require_lead(ctx, team_name, &team_dir, self.name())?;
 
         // Resolve name -> agent ID.
         let agent_id = super::team_message::resolve_agent_id(&team_dir, to)?;
