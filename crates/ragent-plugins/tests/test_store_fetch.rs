@@ -182,7 +182,7 @@ fn read_capped_handles_an_empty_body() {
 #[test]
 fn fetch_limits_defaults_are_the_compiled_values() {
     let limits = FetchLimits::default();
-    assert_eq!(limits.timeout, Duration::from_millis(10_000));
+    assert_eq!(limits.timeout, Duration::from_secs(10));
     assert_eq!(limits.max_bytes, 2 * 1024 * 1024);
     assert_eq!(
         FetchLimits::new(FetchLimits::DEFAULT_TIMEOUT, FetchLimits::DEFAULT_MAX_BYTES),
@@ -245,7 +245,7 @@ fn fetch_reports_a_network_failure_without_panicking() {
     // code runs and no store is touched (FR-023).
     let endpoint =
         StoreEndpoint::parse("https://store.invalid.example/index.json").expect("https endpoint");
-    let limits = FetchLimits::new(Duration::from_millis(2_000), 2 * 1024 * 1024);
+    let limits = FetchLimits::new(Duration::from_secs(2), 2 * 1024 * 1024);
     let err = ragent_plugins::fetch_index(StoreKind::Codex, &endpoint, &limits)
         .expect_err("network must fail");
     assert!(

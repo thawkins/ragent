@@ -171,7 +171,7 @@ fn the_default_fetcher_is_the_network_fetcher() {
     // yields a contained error with no external network dependency (FR-037,
     // NFR-003).
     let endpoint = StoreEndpoint::parse("https://127.0.0.1:9/index.json").expect("valid endpoint");
-    let limits = FetchLimits::new(Duration::from_millis(2000), FetchLimits::DEFAULT_MAX_BYTES);
+    let limits = FetchLimits::new(Duration::from_secs(2), FetchLimits::DEFAULT_MAX_BYTES);
     let err = default_fetcher()
         .fetch_index(StoreKind::Codex, &endpoint, &limits)
         .expect_err("the loopback endpoint refuses the connection");
@@ -186,7 +186,7 @@ fn a_network_fetcher_instance_delegates_to_the_http_path() {
     // `NetworkStoreFetcher` is the concrete production fetcher; pointing it at a
     // refused port exercises the same contained-failure contract as above.
     let endpoint = StoreEndpoint::parse("https://127.0.0.1:9/index.json").expect("valid endpoint");
-    let limits = FetchLimits::new(Duration::from_millis(2000), FetchLimits::DEFAULT_MAX_BYTES);
+    let limits = FetchLimits::new(Duration::from_secs(2), FetchLimits::DEFAULT_MAX_BYTES);
     let err = NetworkStoreFetcher
         .fetch_index(StoreKind::Codex, &endpoint, &limits)
         .expect_err("the loopback endpoint refuses the connection");
