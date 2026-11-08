@@ -60,13 +60,11 @@ impl Tool for TeamMemoryReadTool {
             .unwrap_or("MEMORY.md");
         let path_tag = path_tag(path);
 
-        let agent_id = ctx
-            .team_context
-            .as_ref()
-            .map_or_else(|| ctx.session_id.clone(), |tc| tc.agent_id.clone());
-
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+        let agent_id = super::team_caller::resolve_caller(ctx, team_name, &team_dir)?
+            .agent_id()
+            .to_string();
 
         // Look up member to confirm membership and check memory scope.
         let store = TeamStore::load(&team_dir)?;

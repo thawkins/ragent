@@ -2,8 +2,48 @@
 
 ## [Unreleased]
 
+### Security
+
+- Team tools now check who is calling. Lead-only tools refuse a teammate:
+  `team_spawn`, `team_task_create`, `team_assign_task`, `team_approve_plan`,
+  `team_shutdown_teammate`, `team_cleanup` and `team_wait`. Before, a teammate
+  could approve its own plan or force-delete the whole team. Every team tool
+  now also refuses a session that is neither the lead nor a member of the team
+  named in the call. A teammate of one team can no longer read another team's
+  mailbox or complete its tasks, and a session outside every team can no longer
+  send messages as the lead. The caller is identified from the session's team
+  context, or from the team's `config.json` when the context does not name that
+  team (`tool::team_caller`). `team_wait` without `team_name` now defaults to
+  the caller's own team.
+
 ### Fixed
 
+- Teams: concurrent changes to a team's `config.json` are no longer lost.
+  `TeamStore::load` released its read lock before `save` took the write lock,
+  so two writers, for example two teammates changing status at once, could read
+  the same snapshot, and the later save silently discarded the earlier change.
+  The new `TeamStore::update(dir, |config| ...)` reads, changes and writes under
+  one exclusive lock, and it skips the write when nothing changed. These now go
+  through it:
+  - the member-status writer, `update_member`, spawn allocation, session
+    assignment and lead adoption;
+  - the plan, shutdown, claim, cleanup and spawn tools;
+  - the TUI swarm roster writes.
+
+  Three of those writes used to discard save errors (`let _ = store.save()`);
+  they now log them.
+- Teams: an idle teammate now acts on new mail. Before, a teammate's agent loop
+  ended after its first turn, so a message, task assignment, plan verdict or
+  shutdown request sent to an idle teammate waited unread indefinitely, and a
+  graceful shutdown of an idle teammate never completed. The loop now stays
+  alive between turns. It runs a turn that reads new mail, or that works a task
+  auto-claimed for the member, and it is woken when mail arrives, when a task is
+  auto-claimed, on resume, and on a graceful shutdown request. Suspended,
+  blocked and plan-pending teammates are not woken, and a message is prompted
+  for only once (`TeamManager::next_teammate_turn`).
+- Test `mcp::orphan_sweep_tests::shutdown_kills_the_stdio_child_process_group`
+  no longer fails intermittently in containers. It counted a killed grandchild
+  that lingered as an unreaped zombie as a surviving group member.
 - Teams: messages sent to a teammate are no longer lost. The manager's mailbox
   poll loop called `drain_unread()`, which marked every message read when it
   announced it on the event bus. The teammate's own `team_read_messages` reads

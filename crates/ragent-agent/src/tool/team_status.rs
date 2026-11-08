@@ -68,6 +68,7 @@ impl Tool for TeamStatusTool {
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+        super::team_caller::resolve_caller(ctx, team_name, &team_dir)?;
 
         let store = TeamStore::load(&team_dir)?;
 

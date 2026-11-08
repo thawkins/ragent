@@ -586,6 +586,10 @@ struct TeammateHandle {
     poll_cancel: Arc<AtomicBool>,
     /// Notify handle for push-based mailbox wakeup.
     notify: Arc<Notify>,
+    /// Wakes the teammate's agent-loop task between turns: signalled when the
+    /// poll loop sees new mail, when a task is auto-claimed for the member,
+    /// on resume, and on a graceful shutdown request.
+    wake: Arc<Notify>,
     /// M6-T1: last time progress was observed for this teammate (idle / failure /
     /// task completion). Used by the watchdog to detect hung agents.
     last_progress: Arc<std::sync::Mutex<std::time::Instant>>,
@@ -918,14 +922,14 @@ impl TeamManager {
                     reset_task_ids,
                 });
                 // Update the config to reflect the new lead.
-                if let Ok(mut new_store) = TeamStore::load(&team_dir) {
-                    new_store.config.lead_session_id = lead_sid.clone();
-                    // Best-effort team-store persistence; log a failure so an
-                    // unpersisted lead hand-off is visible.
-                    if let Err(e) = new_store.save() {
-                        tracing::warn!(team = %name, error = %e,
-                            "failed to persist lead-session hand-off");
-                    }
+                // Best-effort team-store persistence; log a failure so an
+                // unpersisted lead hand-off is visible.
+                if let Err(e) = TeamStore::update(&team_dir, |config| {
+                    config.lead_session_id = lead_sid.clone();
+                    Ok(())
+                }) {
+                    tracing::warn!(team = %name, error = %e,
+                        "failed to persist lead-session hand-off");
                 }
             }
             Ok(None) => {}
@@ -1134,12 +1138,10 @@ impl TeamManager {
     /// will ever do: the member reads `Working`, `team_idle` refuses to park it
     /// ("you still hold a task"), and no run exists to complete the task or to
     /// call [`Self::record_progress`], so the watchdog later fails a teammate
-    /// that had in fact finished. The spawn loop is the one route into `Idle`
-    /// this bites: it awaits `process_message` to completion and *then* parks
-    /// the member, so at that instant its loop is over. A member whose loop is
-    /// over stays `Idle` and can still claim for itself (the claim rule is in
-    /// its prompt) or be assigned by the lead, which is exactly what the
-    /// setting-off path leaves it to do.
+    /// that had in fact finished. A spawned teammate's loop task stays alive
+    /// between turns and is woken to run the claimed task (see
+    /// [`Self::next_teammate_turn`]); a member with no loop stays `Idle` and
+    /// can still claim for itself or be assigned by the lead.
     ///
     /// A claim that finds nothing claimable is not an error - the member stays
     /// idle exactly as it would with the setting off, which is what
@@ -1231,6 +1233,10 @@ impl TeamManager {
                     task_id = %task.id,
                     "auto-claimed the next task for an idle member (FR-015)"
                 );
+                // The member's agent loop runs the claimed task on its next turn.
+                if let Some(handle) = self.handles.get(agent_id) {
+                    handle.wake.notify_one();
+                }
             }
             // Nothing claimable: the member stays idle, which is also what the
             // setting off does.
@@ -1390,6 +1396,74 @@ impl TeamManager {
         Ok((transition, interrupted))
     }
 
+    /// Decide what a teammate's agent loop does after a turn.
+    ///
+    /// Called by the spawn loop after it has parked the member, and again
+    /// each time the loop is woken. The rules, in order:
+    /// - a member that is gone or terminal (`Stopped`, `Failed`) ends the loop;
+    /// - a member left `Working` on a claimed task (auto-claim) runs that task;
+    /// - a member with unread mail it has not yet been prompted about runs a
+    ///   turn that reads it, unless it is parked (`Suspended`, `Blocked`) or
+    ///   waiting on its plan (`PlanPending`);
+    /// - otherwise the loop waits for its next wake.
+    ///
+    /// `prompted` holds the ids of messages a turn was already started for, so
+    /// a teammate that leaves a message unread is not re-prompted in a loop.
+    ///
+    /// # Arguments
+    /// * `agent_id` - the teammate.
+    /// * `prompted` - message ids already prompted about; updated in place.
+    ///
+    /// # Returns
+    /// The action the loop should take.
+    #[doc(hidden)]
+    pub fn next_teammate_turn(
+        &self,
+        agent_id: &str,
+        prompted: &mut HashSet<String>,
+    ) -> TeammateNextTurn {
+        let Ok(store) = TeamStore::load(&self.team_dir) else {
+            return TeammateNextTurn::Wait;
+        };
+        let Some(member) = store.config.member_by_id(agent_id) else {
+            return TeammateNextTurn::Exit;
+        };
+        if member.status.is_terminal() {
+            return TeammateNextTurn::Exit;
+        }
+        if member.status == MemberStatus::Working
+            && let Some(task_id) = member.current_task_id.as_deref()
+        {
+            return TeammateNextTurn::Run(format!(
+                "Task '{task_id}' in team '{}' has been claimed for you. Work it now, then \
+                 call team_task_complete for it.",
+                self.team_name
+            ));
+        }
+        if matches!(
+            member.status,
+            MemberStatus::Suspended | MemberStatus::Blocked | MemberStatus::PlanPending
+        ) {
+            return TeammateNextTurn::Wait;
+        }
+        let unread = Mailbox::open(&self.team_dir, agent_id)
+            .and_then(|m| m.peek_unread())
+            .unwrap_or_default();
+        prompted.retain(|id| unread.iter().any(|m| &m.message_id == id));
+        let fresh = unread
+            .iter()
+            .filter(|m| prompted.insert(m.message_id.clone()))
+            .count();
+        if fresh == 0 {
+            return TeammateNextTurn::Wait;
+        }
+        TeammateNextTurn::Run(format!(
+            "You have {fresh} new message(s) in team '{}'. Call team_read_messages and act on \
+             them.",
+            self.team_name
+        ))
+    }
+
     /// Whether `agent_id` has an agent-loop task that has not finished.
     ///
     /// [`Self::auto_claim_on_idle`] asks this before it hands an idle member a
@@ -1456,6 +1530,7 @@ impl TeamManager {
                 cancel: Arc::new(AtomicBool::new(false)),
                 poll_cancel: Arc::new(AtomicBool::new(false)),
                 notify: Arc::new(Notify::new()),
+                wake: Arc::new(Notify::new()),
                 last_progress: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
                 agent_handle: None,
                 poll_handle: None,
@@ -1475,27 +1550,89 @@ impl TeamManager {
         // This write is about to change `config.json`, so the watchdog's cached
         // parse must not survive it (FR-012).
         self.invalidate_config_cache();
-        let mut store = TeamStore::load(&self.team_dir)?;
+        // The read, the transition check and the write happen under one
+        // exclusive lock (`TeamStore::update`), so two writers cannot both
+        // validate against the same stale snapshot and lose an update.
+        let (from, member_name, held_task) = TeamStore::update(&self.team_dir, |config| {
+            // Read the current status before mutating so the refusal below can name
+            // it, and so the event carries the real previous status. FR-015 also
+            // needs the pre-write answer to "does this member hold a task": the
+            // `Idle` side effect below clears `current_task_id`, so an auto-claim
+            // that re-read afterwards would see a parked member and hand it work it
+            // was already doing.
+            let (from, member_name, held_task) = config
+                .member_by_id(agent_id)
+                .map(|m| (m.status, m.name.clone(), m.current_task_id.is_some()))
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "cannot move a member of team '{}' to {}: no teammate with id '{agent_id}' \
+                         is in the roster. Read the roster with `team_status`, which lists every \
+                         member and its id",
+                        self.team_name,
+                        crate::team::status_word(to)
+                    )
+                })?;
 
-        // Read the current status before mutating so the refusal below can name
-        // it, and so the event carries the real previous status. FR-015 also
-        // needs the pre-write answer to "does this member hold a task": the
-        // `Idle` side effect below clears `current_task_id`, so an auto-claim
-        // that re-read afterwards would see a parked member and hand it work it
-        // was already doing.
-        let (from, member_name, held_task) = store
-            .config
-            .member_by_id(agent_id)
-            .map(|m| (m.status, m.name.clone(), m.current_task_id.is_some()))
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "cannot move a member of team '{}' to {}: no teammate with id '{agent_id}' \
-                     is in the roster. Read the roster with `team_status`, which lists every \
-                     member and its id",
+            if from == to {
+                // A re-assertion changes nothing, so nothing is written.
+                return Ok((from, member_name, held_task));
+            }
+
+            if !from.can_transition_to(to) {
+                // FR-032/FR-033: the refusal names the member, the state it holds
+                // and the state it was asked for, using the same status words every
+                // panel paints, and closes with the next action.
+                anyhow::bail!(
+                    "cannot move {} to {} in team '{}' (cause: {}). The member status transition \
+                     table has no edge from {} to {} - check the member with `team_status` and \
+                     choose an action that matches the state it is actually in",
+                    crate::team::member_status_clause(&member_name, agent_id, from),
+                    crate::team::status_word(to),
                     self.team_name,
-                    crate::team::status_word(to)
-                )
+                    cause.as_str(),
+                    from.display_label(),
+                    to.display_label()
+                );
+            }
+
+            // -- Side effects, derived from the destination status -------------
+            let member = config.member_by_id_mut(agent_id).ok_or_else(|| {
+                anyhow::anyhow!("teammate '{agent_id}' disappeared while being moved")
             })?;
+            // T-004: this is the **only** assignment to `TeamMember::status` in the
+            // workspace's manager. Every write site (spawn, the teammate agent
+            // loop's idle and failure verdicts, suspend, resume, shutdown, the
+            // watchdog, plan approval) calls this function instead, so a status
+            // cannot move without the validation above, the side effects below, the
+            // `config.json` write, and the event at the end of this function.
+            member.status = to;
+            match to {
+                // Work finished, was released, or the session ended: the member
+                // holds no task.
+                MemberStatus::Idle | MemberStatus::Stopped | MemberStatus::Failed => {
+                    member.current_task_id = None;
+                }
+                // No per-status side effect beyond the status itself.
+                MemberStatus::Spawning
+                | MemberStatus::Working
+                | MemberStatus::PlanPending
+                | MemberStatus::Blocked
+                | MemberStatus::Suspended
+                | MemberStatus::ShuttingDown => {}
+            }
+            // A plan verdict was reached, so the request id it correlated has been
+            // answered and must not be copied again by a later reply.
+            if from == MemberStatus::PlanPending {
+                member.plan_request_id = None;
+            }
+            // The shutdown request was answered: the correlation id has served its
+            // purpose.
+            if to == MemberStatus::Stopped {
+                member.shutdown_request_id = None;
+            }
+
+            Ok((from, member_name, held_task))
+        })?;
 
         if from == to {
             // FR-008 / FR-035: a re-asserted status is not a *transition*, so it
@@ -1540,61 +1677,6 @@ impl TeamManager {
             });
             return Ok((None, held_task));
         }
-
-        if !from.can_transition_to(to) {
-            // FR-032/FR-033: the refusal names the member, the state it holds
-            // and the state it was asked for, using the same status words every
-            // panel paints, and closes with the next action.
-            anyhow::bail!(
-                "cannot move {} to {} in team '{}' (cause: {}). The member status transition \
-                 table has no edge from {} to {} - check the member with `team_status` and \
-                 choose an action that matches the state it is actually in",
-                crate::team::member_status_clause(&member_name, agent_id, from),
-                crate::team::status_word(to),
-                self.team_name,
-                cause.as_str(),
-                from.display_label(),
-                to.display_label()
-            );
-        }
-
-        // -- Side effects, derived from the destination status -------------
-        let member = store.config.member_by_id_mut(agent_id).ok_or_else(|| {
-            anyhow::anyhow!("teammate '{agent_id}' disappeared while being moved")
-        })?;
-        // T-004: this is the **only** assignment to `TeamMember::status` in the
-        // workspace's manager. Every write site (spawn, the teammate agent
-        // loop's idle and failure verdicts, suspend, resume, shutdown, the
-        // watchdog, plan approval) calls this function instead, so a status
-        // cannot move without the validation above, the side effects below, the
-        // `config.json` write, and the event at the end of this function.
-        member.status = to;
-        match to {
-            // Work finished, was released, or the session ended: the member
-            // holds no task.
-            MemberStatus::Idle | MemberStatus::Stopped | MemberStatus::Failed => {
-                member.current_task_id = None;
-            }
-            // No per-status side effect beyond the status itself.
-            MemberStatus::Spawning
-            | MemberStatus::Working
-            | MemberStatus::PlanPending
-            | MemberStatus::Blocked
-            | MemberStatus::Suspended
-            | MemberStatus::ShuttingDown => {}
-        }
-        // A plan verdict was reached, so the request id it correlated has been
-        // answered and must not be copied again by a later reply.
-        if from == MemberStatus::PlanPending {
-            member.plan_request_id = None;
-        }
-        // The shutdown request was answered: the correlation id has served its
-        // purpose.
-        if to == MemberStatus::Stopped {
-            member.shutdown_request_id = None;
-        }
-
-        store.save()?;
 
         // FR-036: the transition is persisted next to the roster, so the tool
         // surface can answer "why did this teammate stop?" after the
@@ -1734,12 +1816,13 @@ impl TeamManager {
         // This write is about to change `config.json`, so the watchdog's cached
         // parse must not survive it (FR-012).
         self.invalidate_config_cache();
-        let mut store = TeamStore::load(&self.team_dir)?;
-        let member = store.config.member_by_id_mut(agent_id).ok_or_else(|| {
-            anyhow::anyhow!("team '{}' has no teammate '{agent_id}'", self.team_name)
-        })?;
-        mutate(member);
-        store.save()
+        TeamStore::update(&self.team_dir, |config| {
+            let member = config.member_by_id_mut(agent_id).ok_or_else(|| {
+                anyhow::anyhow!("team '{}' has no teammate '{agent_id}'", self.team_name)
+            })?;
+            mutate(member);
+            Ok(())
+        })
     }
 
     /// Reconcile any members recorded on-disk with `Spawning` status by
@@ -1986,67 +2069,69 @@ impl TeamManager {
         // in parallel once their agent IDs are allocated.
         let agent_id = {
             let _guard = self.spawn_lock.lock().await;
-            let mut store = TeamStore::load(&self.team_dir)?;
-            // SEC-ragent-team-004 (SECTASKS T-052): `max_teammates` was
-            // declared in `TeamSettings` but never consulted, so a blueprint or
-            // an LLM loop could spawn an unbounded number of concurrent
-            // teammate sessions (each an agent loop with its own LLM spend).
-            // Enforce the limit here, before a fresh id is allocated and while
-            // the spawn lock is held.
-            //
-            // teamssetup FR-016 / F-12: the check must run on **both** paths.
-            // It used to sit inside `if existing.is_none()`, so respawning an
-            // existing name skipped the cap entirely and an LLM loop that
-            // re-spawned one name repeatedly was unbounded. The count is now
-            // taken *including* the member being respawned, which is the
-            // roster the spawn would produce: a new name adds one to the
-            // active count, a respawn replaces a slot it already occupies.
-            let max_teammates = store.config.settings.max_teammates;
-            let existing = store.config.member_by_name(teammate_name).cloned();
-            // A respawn of a member that is still active reuses its slot, so it
-            // only has to fit the cap as it already does. A respawn of a
-            // terminal member (`Stopped`/`Failed`) or a brand-new name starts
-            // from no slot and must fit one more.
-            let respawn_reuses_slot = existing
-                .as_ref()
-                .is_some_and(|m| !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed));
-            let active = store
-                .config
-                .members
-                .iter()
-                .filter(|m| !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed))
-                .count();
-            if max_teammates > 0 && !respawn_reuses_slot && active >= max_teammates {
-                // FR-032: name the limit, the current count, and the one action
-                // that frees a slot, so the refusal is actionable as written.
-                anyhow::bail!(
-                    "cannot spawn teammate '{teammate_name}' in team '{}': {active} teammate(s) \
-                     are already live and the configured maximum is {max_teammates}. Shut one \
-                     down with `team_shutdown_teammate`, or raise `max_teammates` in the team's \
-                     settings",
-                    self.team_name
-                );
-            }
-            // FR-008: the record is inserted in `Spawning` (the status
-            // `TeamMember::new` already sets) or, for a respawn, the existing
-            // records are updated here. The move to `Spawning` itself is made
-            // through `set_member_status` below, after the lock is released, so
-            // a respawn of a terminal member validates `Failed | Stopped ->
-            // Spawning` against the transition table instead of bypassing it.
-            let id = if let Some(existing) = existing {
-                tracing::debug!(team = %self.team_name, teammate = %teammate_name, agent_id = %existing.agent_id, "Reusing existing member record for spawn");
-                existing.agent_id.clone()
-            } else {
-                let id = store.next_agent_id();
-                tracing::info!(team = %self.team_name, teammate = %teammate_name, agent_id = %id, "Allocating new agent id and recording Spawning member");
-                let mut member = TeamMember::new(teammate_name, &id, &resolved_agent_type);
-                member.model_override = teammate_model.cloned();
-                store.add_member(member)?;
-                id
-            };
-            // Persist now so external tools (e.g., team_create) see the member.
-            store.save()?;
-            id
+            // The roster read, the cap check, the id allocation and the
+            // insert are one `TeamStore::update`, so a concurrent status write
+            // cannot be lost to this save (and vice versa).
+            TeamStore::update(&self.team_dir, |config| {
+                // SEC-ragent-team-004 (SECTASKS T-052): `max_teammates` was
+                // declared in `TeamSettings` but never consulted, so a blueprint or
+                // an LLM loop could spawn an unbounded number of concurrent
+                // teammate sessions (each an agent loop with its own LLM spend).
+                // Enforce the limit here, before a fresh id is allocated and while
+                // the spawn lock is held.
+                //
+                // teamssetup FR-016 / F-12: the check must run on **both** paths.
+                // It used to sit inside `if existing.is_none()`, so respawning an
+                // existing name skipped the cap entirely and an LLM loop that
+                // re-spawned one name repeatedly was unbounded. The count is now
+                // taken *including* the member being respawned, which is the
+                // roster the spawn would produce: a new name adds one to the
+                // active count, a respawn replaces a slot it already occupies.
+                let max_teammates = config.settings.max_teammates;
+                let existing = config.member_by_name(teammate_name).cloned();
+                // A respawn of a member that is still active reuses its slot, so it
+                // only has to fit the cap as it already does. A respawn of a
+                // terminal member (`Stopped`/`Failed`) or a brand-new name starts
+                // from no slot and must fit one more.
+                let respawn_reuses_slot = existing.as_ref().is_some_and(|m| {
+                    !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed)
+                });
+                let active = config
+                    .members
+                    .iter()
+                    .filter(|m| !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed))
+                    .count();
+                if max_teammates > 0 && !respawn_reuses_slot && active >= max_teammates {
+                    // FR-032: name the limit, the current count, and the one action
+                    // that frees a slot, so the refusal is actionable as written.
+                    anyhow::bail!(
+                        "cannot spawn teammate '{teammate_name}' in team '{}': {active} teammate(s) \
+                         are already live and the configured maximum is {max_teammates}. Shut one \
+                         down with `team_shutdown_teammate`, or raise `max_teammates` in the team's \
+                         settings",
+                        self.team_name
+                    );
+                }
+                // FR-008: the record is inserted in `Spawning` (the status
+                // `TeamMember::new` already sets) or, for a respawn, the existing
+                // records are updated here. The move to `Spawning` itself is made
+                // through `set_member_status` below, after the lock is released, so
+                // a respawn of a terminal member validates `Failed | Stopped ->
+                // Spawning` against the transition table instead of bypassing it.
+                let id = if let Some(existing) = existing {
+                    tracing::debug!(team = %self.team_name, teammate = %teammate_name, agent_id = %existing.agent_id, "Reusing existing member record for spawn");
+                    existing.agent_id.clone()
+                } else {
+                    let id = config.next_agent_id();
+                    tracing::info!(team = %self.team_name, teammate = %teammate_name, agent_id = %id, "Allocating new agent id and recording Spawning member");
+                    let mut member = TeamMember::new(teammate_name, &id, &resolved_agent_type);
+                    member.model_override = teammate_model.cloned();
+                    config.members.push(member);
+                    id
+                };
+                // Persist now so external tools (e.g., team_create) see the member.
+                Ok(id)
+            })?
         };
         // spawn_lock released here - concurrent spawns may proceed.
 
@@ -2090,29 +2175,28 @@ impl TeamManager {
         // concurrent spawns - the agent-ID allocation - already happened
         // under the lock above.
         let (teammate_roster, memory_scope, auto_claim_tasks) = {
-            let mut store = TeamStore::load(&self.team_dir)?;
-            if let Some(m) = store.config.member_by_id_mut(&agent_id) {
-                m.session_id = Some(child_sid.clone());
-                tracing::info!(team = %self.team_name, teammate = %m.name, agent_id = %agent_id, session_id = %child_sid, "Updated team config with session id");
-            } else {
-                tracing::warn!(team = %self.team_name, agent_id = %agent_id, "Could not find member by id when updating session info");
-            }
-            let roster: Vec<(String, String)> = store
-                .config
-                .members
-                .iter()
-                .filter(|m| m.agent_id != agent_id)
-                .map(|m| (m.name.clone(), m.agent_id.clone()))
-                .collect();
-            let mem_scope = store
-                .config
-                .member_by_id(&agent_id)
-                .map_or(super::config::MemoryScope::None, |m| m.memory_scope);
-            // FR-027: read the same setting `auto_claim_on_idle` reads, from
-            // the same store read, so the prompt cannot describe a claim rule
-            // the runtime will not apply.
-            let auto_claim = store.config.settings.auto_claim_tasks;
-            store.save()?;
+            let (roster, mem_scope, auto_claim) = TeamStore::update(&self.team_dir, |config| {
+                if let Some(m) = config.member_by_id_mut(&agent_id) {
+                    m.session_id = Some(child_sid.clone());
+                    tracing::info!(team = %self.team_name, teammate = %m.name, agent_id = %agent_id, session_id = %child_sid, "Updated team config with session id");
+                } else {
+                    tracing::warn!(team = %self.team_name, agent_id = %agent_id, "Could not find member by id when updating session info");
+                }
+                let roster: Vec<(String, String)> = config
+                    .members
+                    .iter()
+                    .filter(|m| m.agent_id != agent_id)
+                    .map(|m| (m.name.clone(), m.agent_id.clone()))
+                    .collect();
+                let mem_scope = config
+                    .member_by_id(&agent_id)
+                    .map_or(super::config::MemoryScope::None, |m| m.memory_scope);
+                // FR-027: read the same setting `auto_claim_on_idle` reads, from
+                // the same store read, so the prompt cannot describe a claim rule
+                // the runtime will not apply.
+                let auto_claim = config.settings.auto_claim_tasks;
+                Ok((roster, mem_scope, auto_claim))
+            })?;
             tracing::debug!(team = %self.team_name, agent_id = %agent_id, "Team config saved after session assignment");
             (roster, mem_scope, auto_claim)
         };
@@ -2188,6 +2272,7 @@ impl TeamManager {
         let cancel = Arc::new(AtomicBool::new(false));
         let poll_cancel = Arc::new(AtomicBool::new(false));
         let notify = Arc::new(Notify::new());
+        let wake = Arc::new(Notify::new());
 
         // Register notifier so Mailbox::push() can wake this agent's poll loop.
         register_notifier(&self.team_dir, &agent_id, Arc::clone(&notify));
@@ -2203,6 +2288,7 @@ impl TeamManager {
                 cancel: cancel.clone(),
                 poll_cancel: poll_cancel.clone(),
                 notify: Arc::clone(&notify),
+                wake: Arc::clone(&wake),
                 last_progress: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
                 agent_handle: None,
                 poll_handle: None,
@@ -2230,6 +2316,7 @@ impl TeamManager {
         // captures a strong handle on the manager. The loop owns this handle
         // until it exits, so it cannot observe the manager being dropped.
         let manager = Arc::clone(self);
+        let wake_clone = Arc::clone(&wake);
         let agent_handle = tokio::spawn(async move {
             // FR-012: the progress subscription ends with the turn it observes.
             // It lives inside the loop task rather than beside it so a loop that
@@ -2242,131 +2329,157 @@ impl TeamManager {
             // moment retried at the same time and re-triggered the upstream
             // pressure.  See `teammate_retry_backoff` for the schedule.
             const MAX_RETRIES: u32 = 3;
-            let mut last_error = String::new();
-            for attempt in 0..=MAX_RETRIES {
-                if attempt > 0 {
-                    let backoff = crate::team::manager::teammate_retry_backoff(attempt);
-                    tracing::info!(
-                        team = %team_name_clone,
-                        agent_id = %agent_id_clone,
-                        attempt,
-                        backoff_ms = backoff.as_millis() as u64,
-                        "Retrying teammate agent loop after transient failure"
-                    );
-                    tokio::time::sleep(backoff).await;
-                }
-
-                match proc
-                    .process_message(
-                        &child_sid_clone,
-                        &prompt_owned,
-                        &agent_clone,
-                        cancel_clone.clone(),
-                    )
-                    .await
-                {
-                    Ok(_msg) => {
-                        // Teammate finished its initial prompt - mark as Idle.
+            // The loop task outlives the first turn: after each successful
+            // turn it parks the member and then waits for a reason to run
+            // another (new mail, an auto-claimed task), so a message sent to
+            // an idle teammate is acted on instead of sitting unread.
+            let mut prompt_owned = prompt_owned;
+            let mut prompted: HashSet<String> = HashSet::new();
+            'turns: loop {
+                let mut last_error = String::new();
+                let mut succeeded = false;
+                for attempt in 0..=MAX_RETRIES {
+                    if attempt > 0 {
+                        let backoff = crate::team::manager::teammate_retry_backoff(attempt);
                         tracing::info!(
                             team = %team_name_clone,
                             agent_id = %agent_id_clone,
-                            "Teammate finished initial prompt; marking idle"
-                        );
-                        // FR-008: the parked move goes through the single status
-                        // writer, which validates `Working -> Idle`, clears
-                        // `current_task_id`, persists, and publishes one
-                        // `TeammateStatusChanged`. FR-015: the auto-claiming
-                        // variant is the one that asks `auto_claim_tasks` what
-                        // "idle" means, so a teammate with work waiting is given
-                        // it instead of parking.
-                        if let Err(e) = manager
-                            .set_member_status_auto_claiming(
-                                &agent_id_clone,
-                                crate::team::config::MemberStatus::Idle,
-                                TransitionCause::ReportedIdle,
-                            )
-                            .await
-                        {
-                            tracing::warn!(team = %team_name_clone, agent = %agent_id_clone,
-                                error = %e, "failed to persist teammate-idle state");
-                        }
-                        event_bus_clone.publish(Event::TeammateIdle {
-                            session_id: lead_sid_clone,
-                            team_name: team_name_clone,
-                            agent_id: agent_id_clone,
-                        });
-                        return; // success - exit the retry loop
-                    }
-                    Err(e) => {
-                        last_error = format!("{e}");
-                        warn!(
-                            child_session = %child_sid_clone,
-                            error = %last_error,
                             attempt,
-                            max_retries = MAX_RETRIES,
-                            "Teammate agent loop error"
+                            backoff_ms = backoff.as_millis() as u64,
+                            "Retrying teammate agent loop after transient failure"
                         );
+                        tokio::time::sleep(backoff).await;
+                    }
 
-                        // Token overflow is handled by the session processor's compression
-                        // pipeline on the next turn, so no special recovery is needed here.
-                        if is_token_overflow_error(&last_error) {
-                            tracing::warn!(
-                                team = %team_name_clone,
-                                agent_id = %agent_id_clone,
-                                "Token overflow - the session processor will compress history on retry"
-                            );
-                        }
-
-                        // Don't retry permanent errors (4xx except 429 / 408 / token overflow).
-                        if is_permanent_api_error(&last_error) {
-                            tracing::error!(
-                                team = %team_name_clone,
-                                agent_id = %agent_id_clone,
-                                "Permanent API error - skipping remaining retries"
-                            );
+                    match proc
+                        .process_message(
+                            &child_sid_clone,
+                            &prompt_owned,
+                            &agent_clone,
+                            cancel_clone.clone(),
+                        )
+                        .await
+                    {
+                        Ok(_msg) => {
+                            succeeded = true;
                             break;
+                        }
+                        Err(e) => {
+                            last_error = format!("{e}");
+                            warn!(
+                                child_session = %child_sid_clone,
+                                error = %last_error,
+                                attempt,
+                                max_retries = MAX_RETRIES,
+                                "Teammate agent loop error"
+                            );
+
+                            // Token overflow is handled by the session processor's compression
+                            // pipeline on the next turn, so no special recovery is needed here.
+                            if is_token_overflow_error(&last_error) {
+                                tracing::warn!(
+                                    team = %team_name_clone,
+                                    agent_id = %agent_id_clone,
+                                    "Token overflow - the session processor will compress history on retry"
+                                );
+                            }
+
+                            // Don't retry permanent errors (4xx except 429 / 408 / token overflow).
+                            if is_permanent_api_error(&last_error) {
+                                tracing::error!(
+                                    team = %team_name_clone,
+                                    agent_id = %agent_id_clone,
+                                    "Permanent API error - skipping remaining retries"
+                                );
+                                break;
+                            }
                         }
                     }
                 }
-            }
-            // All retries exhausted or permanent error - persist failure.
-            tracing::error!(
-                team = %team_name_clone,
-                agent_id = %agent_id_clone,
-                "Teammate agent loop failed after {} retries",
-                MAX_RETRIES
-            );
-            // FR-008: the failure verdict goes through the single status writer
-            // (`Working | Spawning -> Failed` are the only legal edges here).
-            // `last_spawn_error` accompanies the move and lands in an earlier
-            // write, so a status the table forbids keeps the recorded error
-            // rather than the verdict.
-            let recorded = manager
-                .update_member(&agent_id_clone, |m| {
-                    m.last_spawn_error = Some(last_error.clone());
-                })
-                .map_err(|e| {
-                    warn!(error = %e, "Failed to save team config after spawn error");
+                if succeeded {
+                    tracing::info!(
+                        team = %team_name_clone,
+                        agent_id = %agent_id_clone,
+                        "Teammate finished a turn; parking"
+                    );
+                    // A turn that left the member `Working` is parked through the
+                    // auto-claiming writer (FR-008, FR-015). A member already
+                    // `Idle` (it called `team_idle`) is offered the next task.
+                    match manager.member_status(&agent_id_clone) {
+                        Some(crate::team::config::MemberStatus::Working) => {
+                            if let Err(e) = manager
+                                .set_member_status_auto_claiming(
+                                    &agent_id_clone,
+                                    crate::team::config::MemberStatus::Idle,
+                                    TransitionCause::ReportedIdle,
+                                )
+                                .await
+                            {
+                                tracing::warn!(team = %team_name_clone, agent = %agent_id_clone,
+                                error = %e, "failed to persist teammate-idle state");
+                            }
+                        }
+                        Some(crate::team::config::MemberStatus::Idle) => {
+                            manager.auto_claim_on_idle(&agent_id_clone).await;
+                        }
+                        _ => {}
+                    }
+                    event_bus_clone.publish(Event::TeammateIdle {
+                        session_id: lead_sid_clone.clone(),
+                        team_name: team_name_clone.clone(),
+                        agent_id: agent_id_clone.clone(),
+                    });
+                    loop {
+                        match manager.next_teammate_turn(&agent_id_clone, &mut prompted) {
+                            TeammateNextTurn::Run(next) => {
+                                prompt_owned = next;
+                                continue 'turns;
+                            }
+                            TeammateNextTurn::Exit => return,
+                            TeammateNextTurn::Wait => wake_clone.notified().await,
+                        }
+                    }
+                }
+                // All retries exhausted or permanent error - persist failure.
+                tracing::error!(
+                    team = %team_name_clone,
+                    agent_id = %agent_id_clone,
+                    "Teammate agent loop failed after {} retries",
+                    MAX_RETRIES
+                );
+                // FR-008: the failure verdict goes through the single status writer
+                // (`Working | Spawning -> Failed` are the only legal edges here).
+                // `last_spawn_error` accompanies the move and lands in an earlier
+                // write, so a status the table forbids keeps the recorded error
+                // rather than the verdict.
+                let recorded = manager
+                    .update_member(&agent_id_clone, |m| {
+                        m.last_spawn_error = Some(last_error.clone());
+                    })
+                    .map_err(|e| {
+                        warn!(error = %e, "Failed to save team config after spawn error");
+                    });
+                if recorded.is_ok()
+                    && let Err(e) = manager.set_member_status(
+                        &agent_id_clone,
+                        crate::team::config::MemberStatus::Failed,
+                        TransitionCause::SpawnFailed,
+                    )
+                {
+                    warn!(error = %e, "Failed to persist teammate-failed status");
+                }
+                event_bus_clone.publish(Event::TeammateFailed {
+                    session_id: lead_sid_clone,
+                    team_name: team_name_clone,
+                    agent_id: agent_id_clone,
+                    error: last_error,
                 });
-            if recorded.is_ok()
-                && let Err(e) = manager.set_member_status(
-                    &agent_id_clone,
-                    crate::team::config::MemberStatus::Failed,
-                    TransitionCause::SpawnFailed,
-                )
-            {
-                warn!(error = %e, "Failed to persist teammate-failed status");
+                return;
             }
-            event_bus_clone.publish(Event::TeammateFailed {
-                session_id: lead_sid_clone,
-                team_name: team_name_clone,
-                agent_id: agent_id_clone,
-                error: last_error,
-            });
         });
 
         // Start mailbox polling loop.
-        let poll_handle = self.start_poll_loop(agent_id.clone(), poll_cancel, notify);
+        let poll_handle = self.start_poll_loop(agent_id.clone(), poll_cancel, notify, wake);
 
         // R-18/R-19: Store the JoinHandles so they can be force-aborted on
         // shutdown_teammate / Drop.
@@ -2397,6 +2510,7 @@ impl TeamManager {
         agent_id: String,
         cancel: Arc<AtomicBool>,
         notify: Arc<Notify>,
+        wake: Arc<Notify>,
     ) -> tokio::task::JoinHandle<()> {
         let team_dir = self.team_dir.clone();
         let team_name = self.team_name.clone();
@@ -2432,7 +2546,7 @@ impl TeamManager {
                     break;
                 }
 
-                if let Err(e) = poll_mailbox_once(
+                match poll_mailbox_once(
                     &team_dir,
                     &agent_id,
                     &mut announced,
@@ -2440,7 +2554,10 @@ impl TeamManager {
                     &lead_session_id,
                     &team_name,
                 ) {
-                    warn!(agent_id, error = %e, "Cannot poll mailbox");
+                    // New mail: wake the teammate's agent loop so it reads it.
+                    Ok(n) if n > 0 => wake.notify_one(),
+                    Ok(_) => {}
+                    Err(e) => warn!(agent_id, error = %e, "Cannot poll mailbox"),
                 }
             }
             debug!(agent_id, "Mailbox polling loop stopped");
@@ -2540,8 +2657,10 @@ impl TeamManager {
         // PERF-025: DashMap - `.get()` returns a short-lived shard guard.
         if let Some(handle) = self.handles.get(agent_id) {
             handle.poll_cancel.store(false, Ordering::Relaxed);
-            // Wake the poll loop so it starts processing again.
+            // Wake the poll loop so it starts processing again, and the agent
+            // loop so mail that arrived while parked is acted on.
             handle.notify.notify_one();
+            handle.wake.notify_one();
         }
 
         // FR-008: the move back to `Idle` goes through the single status writer.
@@ -2668,11 +2787,12 @@ impl TeamManager {
         // ShutdownRequest mailbox message and exit on its own.
         if graceful {
             if let Some((_key, handle)) = self.handles.remove(agent_id) {
-                // Abort the poll loop immediately; the agent loop will
-                // exit via the mailbox message.
+                // Abort the poll loop immediately, and wake the agent loop so
+                // an idle teammate runs a turn on the request and acks it.
                 if let Some(h) = handle.poll_handle {
                     h.abort();
                 }
+                handle.wake.notify_one();
             }
         }
 
@@ -3887,7 +4007,19 @@ fn cancellation_notice(task: &Task, reason: Option<&str>) -> String {
     )
 }
 
-/// Translate an inbound mailbox message into the appropriate `Event`.
+/// What a teammate's agent loop does after a turn
+/// ([`TeamManager::next_teammate_turn`]).
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TeammateNextTurn {
+    /// Run another turn with this prompt.
+    Run(String),
+    /// Wait for the next wake.
+    Wait,
+    /// The member is gone or terminal; end the loop.
+    Exit,
+}
+
 /// Run one tick of a teammate's mailbox poll loop.
 ///
 /// Peeks the unread messages in `agent_id`'s mailbox and publishes an event
@@ -3930,6 +4062,7 @@ pub fn poll_mailbox_once<S: BuildHasher>(
     Ok(published)
 }
 
+/// Translate an inbound mailbox message into the appropriate `Event`.
 fn publish_message_event(
     event_bus: &EventBus,
     lead_session_id: &str,

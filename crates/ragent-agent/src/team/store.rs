@@ -331,9 +331,60 @@ impl TeamStore {
     pub fn save(&self) -> Result<()> {
         let config_path = self.dir.join("config.json");
         let lock = Self::acquire_lock(&config_path, true)?;
+        let result = Self::write_config(&self.dir, &self.config);
+        drop(lock);
+        result
+    }
+
+    /// Atomically read, change and write a team's `config.json` under one
+    /// exclusive lock.
+    ///
+    /// [`Self::load`] followed by [`Self::save`] is not atomic: the shared
+    /// read lock is released before the exclusive write lock is taken, so two
+    /// concurrent writers can both read the same snapshot and the later save
+    /// silently discards the earlier one (a lost member-status update). Every
+    /// read-modify-write of the roster goes through this function instead.
+    ///
+    /// The file is rewritten only when `mutate` changed the config, so a
+    /// closure that inspects and declines (or fails) leaves it untouched.
+    ///
+    /// # Arguments
+    /// * `team_dir` - the team directory holding `config.json`.
+    /// * `mutate` - applied to the freshly read config while the lock is held.
+    ///
+    /// # Returns
+    /// Whatever `mutate` returns.
+    ///
+    /// # Errors
+    /// Returns an error if the lock cannot be taken, the config cannot be read
+    /// or parsed, `mutate` fails (nothing is written), or the write fails.
+    pub fn update<T>(
+        team_dir: &Path,
+        mutate: impl FnOnce(&mut TeamConfig) -> Result<T>,
+    ) -> Result<T> {
+        let config_path = team_dir.join("config.json");
+        let lock = Self::acquire_lock(&config_path, true)?;
+        let raw = fs::read_to_string(&config_path)
+            .with_context(|| format!("read {}", config_path.display()))?;
+        let mut config: TeamConfig = serde_json::from_str(&raw)
+            .with_context(|| format!("parse {}", config_path.display()))?;
+        config.migrate();
+        let before = serde_json::to_value(&config)?;
+        let out = mutate(&mut config)?;
+        if serde_json::to_value(&config)? != before {
+            Self::write_config(team_dir, &config)?;
+        }
+        drop(lock);
+        Ok(out)
+    }
+
+    /// Write `config` to `team_dir/config.json` via a synced temp file and an
+    /// atomic rename. The caller must hold the exclusive lock.
+    fn write_config(team_dir: &Path, config: &TeamConfig) -> Result<()> {
+        let config_path = team_dir.join("config.json");
 
         // M5-T2/T5: stamp schema_version and updated_at on every write.
-        let mut config = self.config.clone();
+        let mut config = config.clone();
         if config.schema_version == 0 {
             config.schema_version = crate::team::config::TEAM_CONFIG_SCHEMA_VERSION;
         }
@@ -344,9 +395,7 @@ impl TeamStore {
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "config.json".to_string());
-        let tmp_path = self
-            .dir
-            .join(format!(".{file_name}.{}", uuid::Uuid::new_v4()));
+        let tmp_path = team_dir.join(format!(".{file_name}.{}", uuid::Uuid::new_v4()));
         fs::write(&tmp_path, json).with_context(|| format!("write {}", tmp_path.display()))?;
         let result: Result<()> = (|| {
             let temp = OpenOptions::new().read(true).open(&tmp_path)?;
@@ -360,7 +409,6 @@ impl TeamStore {
         if result.is_err() {
             let _ = fs::remove_file(&tmp_path);
         }
-        drop(lock);
         result.with_context(|| {
             format!(
                 "atomic write {} -> {}",
@@ -484,18 +532,7 @@ impl TeamStore {
     /// Generate the next available agent ID in the form `tm-NNN`.
     #[must_use]
     pub fn next_agent_id(&self) -> String {
-        let max = self
-            .config
-            .members
-            .iter()
-            .filter_map(|m| {
-                m.agent_id
-                    .strip_prefix("tm-")
-                    .and_then(|n| n.parse::<u32>().ok())
-            })
-            .max()
-            .unwrap_or(0);
-        format!("tm-{:03}", max + 1)
+        self.config.next_agent_id()
     }
 
     /// Stamp the config with a UTC creation time (used internally by `create`).

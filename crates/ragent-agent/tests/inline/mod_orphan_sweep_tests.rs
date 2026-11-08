@@ -38,14 +38,23 @@ async fn shutdown_kills_the_stdio_child_process_group() {
     for _ in 0..200 {
         kill_stdio_child(leader_pid);
         let _ = child.try_wait();
-        // Probing the leader pid (kill with signal 0) and the process group
-        // (killpg with signal 0) must both return ESRCH once teardown settles.
+        // The leader pid must return ESRCH to a signal-0 probe, and the group
+        // must hold no live member once teardown settles. A killed grandchild
+        // is re-parented to PID 1; where PID 1 is not an init that reaps
+        // promptly (a container), it lingers as a zombie that still answers
+        // `killpg(pgid, 0)`. A zombie has exited and holds no pipes, so it is
+        // not a survivor: only non-zombie members count.
         #[allow(unsafe_code)]
-        // approved: kill/killpg signal-0 probes are harmless; no safe std alternative
+        // approved: kill signal-0 probe is harmless; no safe std alternative
         unsafe {
             leader_alive = libc::kill(leader_pid as libc::pid_t, 0) == 0;
-            group_alive = libc::killpg(leader_pid as libc::pid_t, 0) == 0;
         }
+        group_alive = process_group_members(leader_pid).into_iter().any(|pid| {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|stat| stat_field_after_comm(&stat, 0).map(|s| s != "Z"))
+                .unwrap_or(false)
+        });
         if !leader_alive && !group_alive {
             break;
         }

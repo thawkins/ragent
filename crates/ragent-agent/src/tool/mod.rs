@@ -38,6 +38,7 @@ pub mod structured_memory;
 pub mod team_approve_plan;
 pub mod team_assign_task;
 pub mod team_broadcast;
+pub mod team_caller;
 pub mod team_cleanup;
 pub mod team_create;
 pub mod team_idle;

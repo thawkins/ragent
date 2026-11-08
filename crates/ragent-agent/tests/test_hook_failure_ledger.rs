@@ -435,7 +435,11 @@ async fn test_team_status_reports_the_hook_failure_count() {
         agent_manager: None,
         active_model: None,
         provider_registry: None,
-        team_context: None,
+        team_context: Some(std::sync::Arc::new(ragent_agent::tool::TeamContext {
+            team_name: "ledger-surface".to_string(),
+            agent_id: "lead".to_string(),
+            is_lead: true,
+        })),
         team_manager: None,
         code_index: None,
         bg_service: None,

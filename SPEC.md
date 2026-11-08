@@ -3723,6 +3723,26 @@ at the write boundary rather than silently forwarded.
 | `team_wait` | Block until teammates settle |
 | `team_cleanup` | Remove team state |
 
+**Caller checks.** Every team tool except `team_create` first resolves who is
+calling within the team named by `team_name` (`tool::team_caller`). It uses
+the session's team context when that names the team. Otherwise it falls back
+to the team's `config.json`: the caller is the lead when the session is
+`lead_session_id`, and a teammate when the session is a member's `session_id`.
+A session that is neither is refused. `team_spawn`, `team_task_create`,
+`team_assign_task`, `team_approve_plan`, `team_shutdown_teammate`,
+`team_cleanup` and `team_wait` are lead-only. `team_wait` without `team_name`
+waits on the caller's own team.
+
+**Teammate turns.** A teammate's agent loop stays alive between turns. After
+each turn it runs another one when the member holds an auto-claimed task, or
+when it has unread mail it has not yet been prompted about. Otherwise it waits.
+New mail, an auto-claim, a resume and a graceful shutdown request all wake it.
+Suspended, blocked and plan-pending members are not woken
+(`TeamManager::next_teammate_turn`).
+
+**Roster writes.** Every read-modify-write of a team's `config.json` goes
+through `TeamStore::update`, which holds the exclusive lock from read to write.
+
 ### 14.4 Team Slash Commands
 
 | Command | Purpose |

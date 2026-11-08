@@ -164,7 +164,8 @@ impl Tool for TeamWaitTool {
         let team_name: Option<String> = input
             .get("team_name")
             .and_then(|v| v.as_str())
-            .map(std::string::ToString::to_string);
+            .map(std::string::ToString::to_string)
+            .or_else(|| ctx.team_context.as_ref().map(|tc| tc.team_name.clone()));
 
         // M3-T1: subscribe to the event bus BEFORE reading the team store so
         // that any `TeammateIdle` / `TeammateFailed` events that fire between
@@ -188,6 +189,7 @@ impl Tool for TeamWaitTool {
         };
 
         let resolved_team_name = store.config.name.clone();
+        super::team_caller::require_lead(ctx, &resolved_team_name, &store.dir, self.name())?;
         let lead_session_id = store.config.lead_session_id.clone();
 
         // Determine which agent IDs to wait for.

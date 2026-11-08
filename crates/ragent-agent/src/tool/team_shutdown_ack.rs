@@ -46,23 +46,20 @@ impl Tool for TeamShutdownAckTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: team_name"))?;
 
-        let agent_id = ctx
-            .team_context
-            .as_ref()
-            .map_or_else(|| ctx.session_id.clone(), |tc| tc.agent_id.clone());
-
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+        let agent_id = super::team_caller::resolve_caller(ctx, team_name, &team_dir)?
+            .agent_id()
+            .to_string();
 
         // Mark member as Stopped.
-        {
-            let mut store = TeamStore::load(&team_dir)?;
-            if let Some(member) = store.config.member_by_id_mut(&agent_id) {
+        TeamStore::update(&team_dir, |config| {
+            if let Some(member) = config.member_by_id_mut(&agent_id) {
                 member.status = MemberStatus::Stopped;
                 member.current_task_id = None;
             }
-            store.save()?;
-        }
+            Ok(())
+        })?;
 
         // Send ack to lead mailbox.
         // M5-T4: copy the correlation id from the member's shutdown_request_id
@@ -87,13 +84,12 @@ impl Tool for TeamShutdownAckTool {
         lead_mailbox.push(msg)?;
 
         // M5-T4: clear the member's shutdown_request_id now that the ack is sent.
-        {
-            let mut store = TeamStore::load(&team_dir)?;
-            if let Some(m) = store.config.member_by_id_mut(&agent_id) {
+        TeamStore::update(&team_dir, |config| {
+            if let Some(m) = config.member_by_id_mut(&agent_id) {
                 m.shutdown_request_id = None;
             }
-            store.save()?;
-        }
+            Ok(())
+        })?;
 
         Ok(ToolOutput {
             content: format!(

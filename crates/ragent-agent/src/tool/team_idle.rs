@@ -59,13 +59,11 @@ impl Tool for TeamIdleTool {
             .and_then(|v| v.as_str())
             .unwrap_or("No summary provided.");
 
-        let agent_id = ctx
-            .team_context
-            .as_ref()
-            .map_or_else(|| ctx.session_id.clone(), |tc| tc.agent_id.clone());
-
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+        let agent_id = super::team_caller::resolve_caller(ctx, team_name, &team_dir)?
+            .agent_id()
+            .to_string();
 
         // Guard: block idle if this agent still has InProgress tasks that aren't completed.
         // This prevents teammates from going idle mid-task, which leaves tasks stuck.
