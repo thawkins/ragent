@@ -267,7 +267,7 @@ async fn test_failed_completion_logs_the_error_icon() {
 
     assert!(app.active_tasks.is_empty());
     assert!(
-        log_text(&app).contains("[err] Task completed"),
+        log_text(&app).contains("[err] Task failed"),
         "an unsuccessful run paints the failure icon: {:?}",
         log_text(&app)
     );

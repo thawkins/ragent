@@ -181,10 +181,7 @@ pub(crate) fn durable_copy_absence_note(task: &TaskEntry, prefix: &str) -> Optio
 /// other status is terminal, including `TimedOut` (FR-017) - a task that hit
 /// its per-call bound must be reported, not dropped.
 fn is_settled(status: &TaskStatus) -> bool {
-    !matches!(
-        status,
-        TaskStatus::Running | TaskStatus::Suspended | TaskStatus::Terminating
-    )
+    status.is_terminal()
 }
 
 /// Describe the state of the tasks a wait is still holding open when it
@@ -477,10 +474,15 @@ impl Tool for WaitAgentsTool {
         // status is collectable, so a task that hit its per-call time bound
         // (`timed_out`, FR-017) is reported like one that was cancelled or
         // failed instead of silently vanishing from the count.
+        // Omitting `task_ids` waits for every background task that is working
+        // or has finished: `running` and `terminating` tasks are awaited, and
+        // settled ones are collected below. A parked (`suspended`) task is left
+        // out - nothing progresses for it, so including it would turn every
+        // omit-`task_ids` call into a wait for the full deadline.
         let mut waiting_for: HashSet<String> = if requested.is_empty() {
             all_tasks
                 .iter()
-                .filter(|t| t.background && is_settled(&t.status))
+                .filter(|t| t.background && t.status != TaskStatus::Suspended)
                 .map(|t| t.id.clone())
                 .collect()
         } else {

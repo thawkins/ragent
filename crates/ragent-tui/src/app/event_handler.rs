@@ -1451,7 +1451,18 @@ impl App {
                 // marker come from that one derived value, so the panel can
                 // never disagree with the row written by the task registry
                 // (`list_agents` / `wait_agents`).
-                let recorded = self.note_subagent_completed(task_id, finish_reason);
+                // The registry entry carries the real terminal status and the
+                // durable `output_file`, neither of which the event carries.
+                let registry = match self.session_processor.agent_manager.get() {
+                    Some(tm) => tm.get_task(task_id).await,
+                    None => None,
+                };
+                let recorded = self.note_subagent_completed(
+                    task_id,
+                    finish_reason,
+                    success,
+                    registry.as_ref(),
+                );
                 self.close_agents_window_when_empty();
                 let report_status = recorded.unwrap_or_else(|| {
                     ragent_agent::task::ReportStatus::from_finish_reason_label(finish_reason)
@@ -1460,7 +1471,11 @@ impl App {
                     telemetry_counters::add_agents_active(-1);
                 }
                 telemetry_counters::increment_agents_completed(1);
-                let icon = if success { "[ok]" } else { "[err]" };
+                let (icon, verb) = if success {
+                    ("[ok]", "completed")
+                } else {
+                    ("[err]", "failed")
+                };
                 let suffix = match report_status {
                     ragent_agent::task::ReportStatus::Continued => {
                         " (truncated; continuation retry recovered the tail)"
@@ -1473,8 +1488,9 @@ impl App {
                 self.push_log_for(
                     LogLevel::Info,
                     format!(
-                        "{} Task completed{} ({}): {}",
+                        "{} Task {}{} ({}): {}",
                         icon,
+                        verb,
                         suffix,
                         short_id(task_id),
                         summary
@@ -1543,10 +1559,10 @@ impl App {
                 ref child_session_id,
                 force,
             } if self.is_current_or_descendant_session(session_id) => {
-                if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
-                    self.active_tasks.remove(idx);
+                if self.note_subagent_killed(task_id, force) {
+                    telemetry_counters::add_agents_active(-1);
                 }
-                let label = if force { "Force-killed" } else { "Killed" };
+                let label = if force { "Force-killed" } else { "Terminating" };
                 self.push_log_for(
                     LogLevel::Info,
                     format!("[kill] {} task ({})", label, short_id(task_id)),

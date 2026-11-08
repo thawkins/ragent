@@ -119,16 +119,31 @@ impl App {
     ///
     /// Returns `None` when no row was painted for the task (the completion is
     /// then log-only and must not mutate anything else).
+    ///
+    /// `registry` is the task registry's entry for the run, when it is still
+    /// tracked. It is authoritative for the terminal status (a failed or
+    /// timed-out run must not be recorded as `completed`) and for the durable
+    /// `output_file`, which the completion event does not carry. Without it the
+    /// status falls back to `success` (`completed` / `failed`).
     pub(crate) fn note_subagent_completed(
         &mut self,
         task_id: &str,
         finish_reason: &str,
+        success: bool,
+        registry: Option<&TaskEntry>,
     ) -> Option<ReportStatus> {
         let idx = self.active_tasks.iter().position(|t| t.id == task_id)?;
         let report_status = ReportStatus::from_finish_reason_label(finish_reason);
         if let Some(entry) = self.active_tasks.get_mut(idx) {
             entry.report_status = report_status;
-            entry.status = TaskStatus::Completed;
+            entry.status = match registry {
+                Some(reg) if reg.status.is_terminal() => reg.status.clone(),
+                _ if success => TaskStatus::Completed,
+                _ => TaskStatus::Failed,
+            };
+            if let Some(path) = registry.and_then(|reg| reg.output_file.clone()) {
+                entry.output_file = Some(path);
+            }
             entry.completed_at = Some(chrono::Utc::now());
         }
         let entry = self.active_tasks.remove(idx);
@@ -155,6 +170,52 @@ impl App {
         // on the same record-before-removal rule as a completion (FR-028).
         self.record_completed_task(&entry);
         child_session_id
+    }
+
+    /// Apply a `SubagentKilled` event to the tracked row.
+    ///
+    /// A plain kill only *requests* termination: the row stays painted as
+    /// `terminating` (it is still live, and may yet finish on its own) and the
+    /// later `SubagentCancelled` / `SubagentComplete` event retires it with its
+    /// real terminal status. A forced kill is final - the registry has already
+    /// marked the run `failed` - so the row is recorded into history and
+    /// removed.
+    ///
+    /// Returns `true` when a row was removed, so the caller can keep the
+    /// active-agents telemetry gauge in step.
+    pub(crate) fn note_subagent_killed(&mut self, task_id: &str, force: bool) -> bool {
+        let Some(idx) = self.active_tasks.iter().position(|t| t.id == task_id) else {
+            return false;
+        };
+        if !force {
+            if let Some(entry) = self.active_tasks.get_mut(idx) {
+                entry.status = TaskStatus::Terminating;
+            }
+            return false;
+        }
+        let mut entry = self.active_tasks.remove(idx);
+        entry.status = TaskStatus::Failed;
+        entry.completed_at = Some(chrono::Utc::now());
+        self.record_completed_task(&entry);
+        true
+    }
+
+    /// Retire a row the task registry reports as finished, recording it into
+    /// history with the registry's terminal status and durable `output_file`
+    /// (the repair path for a dropped completion event, FR-054).
+    ///
+    /// Returns `true` when a row was removed.
+    pub(crate) fn retire_reconciled_task(&mut self, registry: &TaskEntry) -> bool {
+        let Some(idx) = self.active_tasks.iter().position(|t| t.id == registry.id) else {
+            return false;
+        };
+        let mut entry = self.active_tasks.remove(idx);
+        entry.status = registry.status.clone();
+        entry.output_file = registry.output_file.clone();
+        entry.report_status = registry.report_status;
+        entry.completed_at = registry.completed_at.or_else(|| Some(chrono::Utc::now()));
+        self.record_completed_task(&entry);
+        true
     }
 
     /// Snapshot a finished task into the completed history (FR-021, FR-028).
