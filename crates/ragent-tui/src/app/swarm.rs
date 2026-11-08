@@ -183,18 +183,29 @@ impl App {
 
             // Record member in config
             {
-                if let Ok(mut store) = team::TeamStore::load_by_name(team_name, &working_dir) {
-                    if store.config.member_by_name(&teammate_name).is_none() {
-                        let agent_id = store.next_agent_id();
+                // The roster read, id allocation and insert are one atomic
+                // `TeamStore::update`, so a concurrent status write is not lost.
+                if let Some(team_dir) = team::find_team_dir(&working_dir, team_name) {
+                    let recorded = team::TeamStore::update(&team_dir, |config| {
+                        if config.member_by_name(&teammate_name).is_some() {
+                            return Ok(None);
+                        }
+                        let agent_id = config.next_agent_id();
                         let mut member =
                             team::TeamMember::new(&teammate_name, &agent_id, &agent_type);
                         member.spawn_prompt = Some(prompt.clone());
                         member.model_override = teammate_model.clone();
                         member.status = initial_status;
-                        store.config.members.push(member.clone());
+                        config.members.push(member.clone());
+                        Ok(Some(member))
+                    });
+                    match recorded {
+                        // Add to local state
+                        Ok(Some(member)) => self.team_members.push(member),
+                        Ok(None) => {}
                         // FUNC-027: surface a failed team-state save rather than
                         // silently dropping it while the swarm reports success.
-                        if let Err(e) = store.save() {
+                        Err(e) => {
                             tracing::warn!(
                                 team = %team_name,
                                 teammate = %teammate_name,
@@ -208,9 +219,6 @@ impl App {
                                 ),
                             );
                         }
-
-                        // Add to local state
-                        self.team_members.push(member);
                     }
                 }
             }
@@ -482,14 +490,16 @@ impl App {
                 m.status = MemberStatus::Spawning;
             }
             // Update persisted config
-            if let Ok(mut store) = team::TeamStore::load_by_name(&team_name, &working_dir) {
-                if let Some(m) = store.config.member_by_id_mut(agent_id) {
-                    m.status = MemberStatus::Spawning;
-                }
+            if let Some(team_dir) = team::find_team_dir(&working_dir, &team_name) {
                 // A failed save leaves the persisted member stuck at Blocked
                 // while the in-memory copy moved on - surface it so the swarm
                 // is not left silently inconsistent.
-                if let Err(e) = store.save() {
+                if let Err(e) = team::TeamStore::update(&team_dir, |config| {
+                    if let Some(m) = config.member_by_id_mut(agent_id) {
+                        m.status = MemberStatus::Spawning;
+                    }
+                    Ok(())
+                }) {
                     tracing::warn!(error = %e, agent_id, "failed to persist unblocked swarm member");
                 }
             }

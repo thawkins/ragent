@@ -922,14 +922,14 @@ impl TeamManager {
                     reset_task_ids,
                 });
                 // Update the config to reflect the new lead.
-                if let Ok(mut new_store) = TeamStore::load(&team_dir) {
-                    new_store.config.lead_session_id = lead_sid.clone();
-                    // Best-effort team-store persistence; log a failure so an
-                    // unpersisted lead hand-off is visible.
-                    if let Err(e) = new_store.save() {
-                        tracing::warn!(team = %name, error = %e,
-                            "failed to persist lead-session hand-off");
-                    }
+                // Best-effort team-store persistence; log a failure so an
+                // unpersisted lead hand-off is visible.
+                if let Err(e) = TeamStore::update(&team_dir, |config| {
+                    config.lead_session_id = lead_sid.clone();
+                    Ok(())
+                }) {
+                    tracing::warn!(team = %name, error = %e,
+                        "failed to persist lead-session hand-off");
                 }
             }
             Ok(None) => {}
@@ -1550,27 +1550,89 @@ impl TeamManager {
         // This write is about to change `config.json`, so the watchdog's cached
         // parse must not survive it (FR-012).
         self.invalidate_config_cache();
-        let mut store = TeamStore::load(&self.team_dir)?;
+        // The read, the transition check and the write happen under one
+        // exclusive lock (`TeamStore::update`), so two writers cannot both
+        // validate against the same stale snapshot and lose an update.
+        let (from, member_name, held_task) = TeamStore::update(&self.team_dir, |config| {
+            // Read the current status before mutating so the refusal below can name
+            // it, and so the event carries the real previous status. FR-015 also
+            // needs the pre-write answer to "does this member hold a task": the
+            // `Idle` side effect below clears `current_task_id`, so an auto-claim
+            // that re-read afterwards would see a parked member and hand it work it
+            // was already doing.
+            let (from, member_name, held_task) = config
+                .member_by_id(agent_id)
+                .map(|m| (m.status, m.name.clone(), m.current_task_id.is_some()))
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "cannot move a member of team '{}' to {}: no teammate with id '{agent_id}' \
+                         is in the roster. Read the roster with `team_status`, which lists every \
+                         member and its id",
+                        self.team_name,
+                        crate::team::status_word(to)
+                    )
+                })?;
 
-        // Read the current status before mutating so the refusal below can name
-        // it, and so the event carries the real previous status. FR-015 also
-        // needs the pre-write answer to "does this member hold a task": the
-        // `Idle` side effect below clears `current_task_id`, so an auto-claim
-        // that re-read afterwards would see a parked member and hand it work it
-        // was already doing.
-        let (from, member_name, held_task) = store
-            .config
-            .member_by_id(agent_id)
-            .map(|m| (m.status, m.name.clone(), m.current_task_id.is_some()))
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "cannot move a member of team '{}' to {}: no teammate with id '{agent_id}' \
-                     is in the roster. Read the roster with `team_status`, which lists every \
-                     member and its id",
+            if from == to {
+                // A re-assertion changes nothing, so nothing is written.
+                return Ok((from, member_name, held_task));
+            }
+
+            if !from.can_transition_to(to) {
+                // FR-032/FR-033: the refusal names the member, the state it holds
+                // and the state it was asked for, using the same status words every
+                // panel paints, and closes with the next action.
+                anyhow::bail!(
+                    "cannot move {} to {} in team '{}' (cause: {}). The member status transition \
+                     table has no edge from {} to {} - check the member with `team_status` and \
+                     choose an action that matches the state it is actually in",
+                    crate::team::member_status_clause(&member_name, agent_id, from),
+                    crate::team::status_word(to),
                     self.team_name,
-                    crate::team::status_word(to)
-                )
+                    cause.as_str(),
+                    from.display_label(),
+                    to.display_label()
+                );
+            }
+
+            // -- Side effects, derived from the destination status -------------
+            let member = config.member_by_id_mut(agent_id).ok_or_else(|| {
+                anyhow::anyhow!("teammate '{agent_id}' disappeared while being moved")
             })?;
+            // T-004: this is the **only** assignment to `TeamMember::status` in the
+            // workspace's manager. Every write site (spawn, the teammate agent
+            // loop's idle and failure verdicts, suspend, resume, shutdown, the
+            // watchdog, plan approval) calls this function instead, so a status
+            // cannot move without the validation above, the side effects below, the
+            // `config.json` write, and the event at the end of this function.
+            member.status = to;
+            match to {
+                // Work finished, was released, or the session ended: the member
+                // holds no task.
+                MemberStatus::Idle | MemberStatus::Stopped | MemberStatus::Failed => {
+                    member.current_task_id = None;
+                }
+                // No per-status side effect beyond the status itself.
+                MemberStatus::Spawning
+                | MemberStatus::Working
+                | MemberStatus::PlanPending
+                | MemberStatus::Blocked
+                | MemberStatus::Suspended
+                | MemberStatus::ShuttingDown => {}
+            }
+            // A plan verdict was reached, so the request id it correlated has been
+            // answered and must not be copied again by a later reply.
+            if from == MemberStatus::PlanPending {
+                member.plan_request_id = None;
+            }
+            // The shutdown request was answered: the correlation id has served its
+            // purpose.
+            if to == MemberStatus::Stopped {
+                member.shutdown_request_id = None;
+            }
+
+            Ok((from, member_name, held_task))
+        })?;
 
         if from == to {
             // FR-008 / FR-035: a re-asserted status is not a *transition*, so it
@@ -1615,61 +1677,6 @@ impl TeamManager {
             });
             return Ok((None, held_task));
         }
-
-        if !from.can_transition_to(to) {
-            // FR-032/FR-033: the refusal names the member, the state it holds
-            // and the state it was asked for, using the same status words every
-            // panel paints, and closes with the next action.
-            anyhow::bail!(
-                "cannot move {} to {} in team '{}' (cause: {}). The member status transition \
-                 table has no edge from {} to {} - check the member with `team_status` and \
-                 choose an action that matches the state it is actually in",
-                crate::team::member_status_clause(&member_name, agent_id, from),
-                crate::team::status_word(to),
-                self.team_name,
-                cause.as_str(),
-                from.display_label(),
-                to.display_label()
-            );
-        }
-
-        // -- Side effects, derived from the destination status -------------
-        let member = store.config.member_by_id_mut(agent_id).ok_or_else(|| {
-            anyhow::anyhow!("teammate '{agent_id}' disappeared while being moved")
-        })?;
-        // T-004: this is the **only** assignment to `TeamMember::status` in the
-        // workspace's manager. Every write site (spawn, the teammate agent
-        // loop's idle and failure verdicts, suspend, resume, shutdown, the
-        // watchdog, plan approval) calls this function instead, so a status
-        // cannot move without the validation above, the side effects below, the
-        // `config.json` write, and the event at the end of this function.
-        member.status = to;
-        match to {
-            // Work finished, was released, or the session ended: the member
-            // holds no task.
-            MemberStatus::Idle | MemberStatus::Stopped | MemberStatus::Failed => {
-                member.current_task_id = None;
-            }
-            // No per-status side effect beyond the status itself.
-            MemberStatus::Spawning
-            | MemberStatus::Working
-            | MemberStatus::PlanPending
-            | MemberStatus::Blocked
-            | MemberStatus::Suspended
-            | MemberStatus::ShuttingDown => {}
-        }
-        // A plan verdict was reached, so the request id it correlated has been
-        // answered and must not be copied again by a later reply.
-        if from == MemberStatus::PlanPending {
-            member.plan_request_id = None;
-        }
-        // The shutdown request was answered: the correlation id has served its
-        // purpose.
-        if to == MemberStatus::Stopped {
-            member.shutdown_request_id = None;
-        }
-
-        store.save()?;
 
         // FR-036: the transition is persisted next to the roster, so the tool
         // surface can answer "why did this teammate stop?" after the
@@ -1809,12 +1816,13 @@ impl TeamManager {
         // This write is about to change `config.json`, so the watchdog's cached
         // parse must not survive it (FR-012).
         self.invalidate_config_cache();
-        let mut store = TeamStore::load(&self.team_dir)?;
-        let member = store.config.member_by_id_mut(agent_id).ok_or_else(|| {
-            anyhow::anyhow!("team '{}' has no teammate '{agent_id}'", self.team_name)
-        })?;
-        mutate(member);
-        store.save()
+        TeamStore::update(&self.team_dir, |config| {
+            let member = config.member_by_id_mut(agent_id).ok_or_else(|| {
+                anyhow::anyhow!("team '{}' has no teammate '{agent_id}'", self.team_name)
+            })?;
+            mutate(member);
+            Ok(())
+        })
     }
 
     /// Reconcile any members recorded on-disk with `Spawning` status by
@@ -2061,67 +2069,69 @@ impl TeamManager {
         // in parallel once their agent IDs are allocated.
         let agent_id = {
             let _guard = self.spawn_lock.lock().await;
-            let mut store = TeamStore::load(&self.team_dir)?;
-            // SEC-ragent-team-004 (SECTASKS T-052): `max_teammates` was
-            // declared in `TeamSettings` but never consulted, so a blueprint or
-            // an LLM loop could spawn an unbounded number of concurrent
-            // teammate sessions (each an agent loop with its own LLM spend).
-            // Enforce the limit here, before a fresh id is allocated and while
-            // the spawn lock is held.
-            //
-            // teamssetup FR-016 / F-12: the check must run on **both** paths.
-            // It used to sit inside `if existing.is_none()`, so respawning an
-            // existing name skipped the cap entirely and an LLM loop that
-            // re-spawned one name repeatedly was unbounded. The count is now
-            // taken *including* the member being respawned, which is the
-            // roster the spawn would produce: a new name adds one to the
-            // active count, a respawn replaces a slot it already occupies.
-            let max_teammates = store.config.settings.max_teammates;
-            let existing = store.config.member_by_name(teammate_name).cloned();
-            // A respawn of a member that is still active reuses its slot, so it
-            // only has to fit the cap as it already does. A respawn of a
-            // terminal member (`Stopped`/`Failed`) or a brand-new name starts
-            // from no slot and must fit one more.
-            let respawn_reuses_slot = existing
-                .as_ref()
-                .is_some_and(|m| !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed));
-            let active = store
-                .config
-                .members
-                .iter()
-                .filter(|m| !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed))
-                .count();
-            if max_teammates > 0 && !respawn_reuses_slot && active >= max_teammates {
-                // FR-032: name the limit, the current count, and the one action
-                // that frees a slot, so the refusal is actionable as written.
-                anyhow::bail!(
-                    "cannot spawn teammate '{teammate_name}' in team '{}': {active} teammate(s) \
-                     are already live and the configured maximum is {max_teammates}. Shut one \
-                     down with `team_shutdown_teammate`, or raise `max_teammates` in the team's \
-                     settings",
-                    self.team_name
-                );
-            }
-            // FR-008: the record is inserted in `Spawning` (the status
-            // `TeamMember::new` already sets) or, for a respawn, the existing
-            // records are updated here. The move to `Spawning` itself is made
-            // through `set_member_status` below, after the lock is released, so
-            // a respawn of a terminal member validates `Failed | Stopped ->
-            // Spawning` against the transition table instead of bypassing it.
-            let id = if let Some(existing) = existing {
-                tracing::debug!(team = %self.team_name, teammate = %teammate_name, agent_id = %existing.agent_id, "Reusing existing member record for spawn");
-                existing.agent_id.clone()
-            } else {
-                let id = store.next_agent_id();
-                tracing::info!(team = %self.team_name, teammate = %teammate_name, agent_id = %id, "Allocating new agent id and recording Spawning member");
-                let mut member = TeamMember::new(teammate_name, &id, &resolved_agent_type);
-                member.model_override = teammate_model.cloned();
-                store.add_member(member)?;
-                id
-            };
-            // Persist now so external tools (e.g., team_create) see the member.
-            store.save()?;
-            id
+            // The roster read, the cap check, the id allocation and the
+            // insert are one `TeamStore::update`, so a concurrent status write
+            // cannot be lost to this save (and vice versa).
+            TeamStore::update(&self.team_dir, |config| {
+                // SEC-ragent-team-004 (SECTASKS T-052): `max_teammates` was
+                // declared in `TeamSettings` but never consulted, so a blueprint or
+                // an LLM loop could spawn an unbounded number of concurrent
+                // teammate sessions (each an agent loop with its own LLM spend).
+                // Enforce the limit here, before a fresh id is allocated and while
+                // the spawn lock is held.
+                //
+                // teamssetup FR-016 / F-12: the check must run on **both** paths.
+                // It used to sit inside `if existing.is_none()`, so respawning an
+                // existing name skipped the cap entirely and an LLM loop that
+                // re-spawned one name repeatedly was unbounded. The count is now
+                // taken *including* the member being respawned, which is the
+                // roster the spawn would produce: a new name adds one to the
+                // active count, a respawn replaces a slot it already occupies.
+                let max_teammates = config.settings.max_teammates;
+                let existing = config.member_by_name(teammate_name).cloned();
+                // A respawn of a member that is still active reuses its slot, so it
+                // only has to fit the cap as it already does. A respawn of a
+                // terminal member (`Stopped`/`Failed`) or a brand-new name starts
+                // from no slot and must fit one more.
+                let respawn_reuses_slot = existing.as_ref().is_some_and(|m| {
+                    !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed)
+                });
+                let active = config
+                    .members
+                    .iter()
+                    .filter(|m| !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed))
+                    .count();
+                if max_teammates > 0 && !respawn_reuses_slot && active >= max_teammates {
+                    // FR-032: name the limit, the current count, and the one action
+                    // that frees a slot, so the refusal is actionable as written.
+                    anyhow::bail!(
+                        "cannot spawn teammate '{teammate_name}' in team '{}': {active} teammate(s) \
+                         are already live and the configured maximum is {max_teammates}. Shut one \
+                         down with `team_shutdown_teammate`, or raise `max_teammates` in the team's \
+                         settings",
+                        self.team_name
+                    );
+                }
+                // FR-008: the record is inserted in `Spawning` (the status
+                // `TeamMember::new` already sets) or, for a respawn, the existing
+                // records are updated here. The move to `Spawning` itself is made
+                // through `set_member_status` below, after the lock is released, so
+                // a respawn of a terminal member validates `Failed | Stopped ->
+                // Spawning` against the transition table instead of bypassing it.
+                let id = if let Some(existing) = existing {
+                    tracing::debug!(team = %self.team_name, teammate = %teammate_name, agent_id = %existing.agent_id, "Reusing existing member record for spawn");
+                    existing.agent_id.clone()
+                } else {
+                    let id = config.next_agent_id();
+                    tracing::info!(team = %self.team_name, teammate = %teammate_name, agent_id = %id, "Allocating new agent id and recording Spawning member");
+                    let mut member = TeamMember::new(teammate_name, &id, &resolved_agent_type);
+                    member.model_override = teammate_model.cloned();
+                    config.members.push(member);
+                    id
+                };
+                // Persist now so external tools (e.g., team_create) see the member.
+                Ok(id)
+            })?
         };
         // spawn_lock released here - concurrent spawns may proceed.
 
@@ -2165,29 +2175,28 @@ impl TeamManager {
         // concurrent spawns - the agent-ID allocation - already happened
         // under the lock above.
         let (teammate_roster, memory_scope, auto_claim_tasks) = {
-            let mut store = TeamStore::load(&self.team_dir)?;
-            if let Some(m) = store.config.member_by_id_mut(&agent_id) {
-                m.session_id = Some(child_sid.clone());
-                tracing::info!(team = %self.team_name, teammate = %m.name, agent_id = %agent_id, session_id = %child_sid, "Updated team config with session id");
-            } else {
-                tracing::warn!(team = %self.team_name, agent_id = %agent_id, "Could not find member by id when updating session info");
-            }
-            let roster: Vec<(String, String)> = store
-                .config
-                .members
-                .iter()
-                .filter(|m| m.agent_id != agent_id)
-                .map(|m| (m.name.clone(), m.agent_id.clone()))
-                .collect();
-            let mem_scope = store
-                .config
-                .member_by_id(&agent_id)
-                .map_or(super::config::MemoryScope::None, |m| m.memory_scope);
-            // FR-027: read the same setting `auto_claim_on_idle` reads, from
-            // the same store read, so the prompt cannot describe a claim rule
-            // the runtime will not apply.
-            let auto_claim = store.config.settings.auto_claim_tasks;
-            store.save()?;
+            let (roster, mem_scope, auto_claim) = TeamStore::update(&self.team_dir, |config| {
+                if let Some(m) = config.member_by_id_mut(&agent_id) {
+                    m.session_id = Some(child_sid.clone());
+                    tracing::info!(team = %self.team_name, teammate = %m.name, agent_id = %agent_id, session_id = %child_sid, "Updated team config with session id");
+                } else {
+                    tracing::warn!(team = %self.team_name, agent_id = %agent_id, "Could not find member by id when updating session info");
+                }
+                let roster: Vec<(String, String)> = config
+                    .members
+                    .iter()
+                    .filter(|m| m.agent_id != agent_id)
+                    .map(|m| (m.name.clone(), m.agent_id.clone()))
+                    .collect();
+                let mem_scope = config
+                    .member_by_id(&agent_id)
+                    .map_or(super::config::MemoryScope::None, |m| m.memory_scope);
+                // FR-027: read the same setting `auto_claim_on_idle` reads, from
+                // the same store read, so the prompt cannot describe a claim rule
+                // the runtime will not apply.
+                let auto_claim = config.settings.auto_claim_tasks;
+                Ok((roster, mem_scope, auto_claim))
+            })?;
             tracing::debug!(team = %self.team_name, agent_id = %agent_id, "Team config saved after session assignment");
             (roster, mem_scope, auto_claim)
         };

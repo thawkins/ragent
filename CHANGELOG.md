@@ -18,6 +18,20 @@
 
 ### Fixed
 
+- Teams: concurrent changes to a team's `config.json` are no longer lost.
+  `TeamStore::load` released its read lock before `save` took the write lock,
+  so two writers, for example two teammates changing status at once, could read
+  the same snapshot, and the later save silently discarded the earlier change.
+  The new `TeamStore::update(dir, |config| ...)` reads, changes and writes under
+  one exclusive lock, and it skips the write when nothing changed. These now go
+  through it:
+  - the member-status writer, `update_member`, spawn allocation, session
+    assignment and lead adoption;
+  - the plan, shutdown, claim, cleanup and spawn tools;
+  - the TUI swarm roster writes.
+
+  Three of those writes used to discard save errors (`let _ = store.save()`);
+  they now log them.
 - Teams: an idle teammate now acts on new mail. Before, a teammate's agent loop
   ended after its first turn, so a message, task assignment, plan verdict or
   shutdown request sent to an idle teammate waited unread indefinitely, and a

@@ -765,6 +765,23 @@ pub struct TeamConfig {
 pub const TEAM_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 impl TeamConfig {
+    /// The next free teammate agent id (`tm-NNN`, one past the highest in
+    /// the roster).
+    #[must_use]
+    pub fn next_agent_id(&self) -> String {
+        let max = self
+            .members
+            .iter()
+            .filter_map(|m| {
+                m.agent_id
+                    .strip_prefix("tm-")
+                    .and_then(|n| n.parse::<u32>().ok())
+            })
+            .max()
+            .unwrap_or(0);
+        format!("tm-{:03}", max + 1)
+    }
+
     /// Create a new team config with no members.
     pub fn new(name: impl Into<String>, lead_session_id: impl Into<String>) -> Self {
         Self {

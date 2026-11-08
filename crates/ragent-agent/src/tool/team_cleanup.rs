@@ -92,10 +92,15 @@ impl Tool for TeamCleanupTool {
 
         // Mark team as disbanded in config before deleting (best-effort).
         let lead_sid = {
-            let mut store = TeamStore::load(&team_dir)?;
             let sid = store.config.lead_session_id.clone();
-            store.config.status = TeamStatus::Disbanded;
-            store.save().ok(); // Ignore errors - we're about to delete.
+            // Best-effort: the directory is deleted next, so a failed write
+            // only loses a status nobody will read.
+            if let Err(e) = TeamStore::update(&team_dir, |config| {
+                config.status = TeamStatus::Disbanded;
+                Ok(())
+            }) {
+                tracing::debug!(error = %e, "team_cleanup: could not mark team disbanded");
+            }
             sid
         };
 

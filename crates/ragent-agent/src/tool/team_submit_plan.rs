@@ -68,9 +68,8 @@ impl Tool for TeamSubmitPlanTool {
         // FR-032: a member that is not in the roster has no plan to record, and
         // naming that - rather than writing a silent no-op - is what tells the
         // caller it is addressing the wrong session.
-        {
-            let mut store = TeamStore::load(&team_dir)?;
-            let Some(member) = store.config.member_by_id_mut(&agent_id) else {
+        TeamStore::update(&team_dir, |config| {
+            let Some(member) = config.member_by_id_mut(&agent_id) else {
                 return Err(anyhow::anyhow!(
                     "cannot submit a plan as '{agent_id}': that agent is not a member of team \
                      '{team_name}'. A plan is submitted by a teammate session - read the roster \
@@ -89,8 +88,8 @@ impl Tool for TeamSubmitPlanTool {
             }
             member.plan_status = PlanStatus::Pending;
             member.status = MemberStatus::PlanPending;
-            store.save()?;
-        }
+            Ok(())
+        })?;
 
         // Send plan_request to lead mailbox.
         let correlation_id = uuid::Uuid::new_v4().to_string();
@@ -105,13 +104,12 @@ impl Tool for TeamSubmitPlanTool {
 
         // M5-T4: store the correlation id on the member so the eventual
         // PlanApproved/PlanRejected reply can copy it.
-        {
-            let mut store = TeamStore::load(&team_dir)?;
-            if let Some(m) = store.config.member_by_id_mut(&agent_id) {
+        TeamStore::update(&team_dir, |config| {
+            if let Some(m) = config.member_by_id_mut(&agent_id) {
                 m.plan_request_id = Some(correlation_id);
             }
-            store.save()?;
-        }
+            Ok(())
+        })?;
 
         Ok(ToolOutput {
             content: "Plan submitted to lead for approval.\n\

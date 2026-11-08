@@ -116,9 +116,8 @@ impl Tool for TeamApprovePlanTool {
         }
 
         // Update member plan_status and status.
-        {
-            let mut store = TeamStore::load(&team_dir)?;
-            if let Some(member) = store.config.member_by_id_mut(&agent_id) {
+        TeamStore::update(&team_dir, |config| {
+            if let Some(member) = config.member_by_id_mut(&agent_id) {
                 if approved {
                     member.plan_status = PlanStatus::Approved;
                     member.status = MemberStatus::Working;
@@ -127,8 +126,8 @@ impl Tool for TeamApprovePlanTool {
                     // Keep PlanPending so the UI shows they need to resubmit.
                 }
             }
-            store.save()?;
-        }
+            Ok(())
+        })?;
 
         let teammate_mailbox = Mailbox::open(&team_dir, &agent_id)?;
         // SEC-ragent-team-003 (SECTASKS T-018): a lead-authored message
@@ -156,13 +155,12 @@ impl Tool for TeamApprovePlanTool {
         teammate_mailbox.push(msg)?;
 
         // M5-T4: clear the member's plan_request_id now that the reply is sent.
-        {
-            let mut store = TeamStore::load(&team_dir)?;
-            if let Some(m) = store.config.member_by_id_mut(&agent_id) {
+        TeamStore::update(&team_dir, |config| {
+            if let Some(m) = config.member_by_id_mut(&agent_id) {
                 m.plan_request_id = None;
             }
-            store.save()?;
-        }
+            Ok(())
+        })?;
 
         let verdict = if approved { "approved" } else { "rejected" };
         Ok(ToolOutput {

@@ -106,11 +106,14 @@ impl Tool for TeamTaskClaimTool {
                     // PERF-017: combine this config write with the claim
                     // write by doing a single `TeamStore::load` + `save`
                     // cycle instead of a separate load per field.
-                    if let Ok(mut store) = crate::team::TeamStore::load(&team_dir) {
-                        if let Some(m) = store.config.member_by_id_mut(&agent_id) {
+                    if let Err(e) = crate::team::TeamStore::update(&team_dir, |config| {
+                        if let Some(m) = config.member_by_id_mut(&agent_id) {
                             m.current_task_id = Some(task.id.clone());
                         }
-                        let _ = store.save();
+                        Ok(())
+                    }) {
+                        tracing::warn!(agent_id = %agent_id, error = %e,
+                            "team_task_claim: could not record the claimed task on the roster");
                     }
                     Ok(ToolOutput {
                         content: format!(
@@ -225,11 +228,14 @@ impl Tool for TeamTaskClaimTool {
                     // M8-T3: update the claiming member's current_task_id.
                     // The `TeamTaskClaimed` event and the `TaskClaimed` hook
                     // fire from the claim itself (FR-017).
-                    if let Ok(mut store) = crate::team::TeamStore::load(&team_dir) {
-                        if let Some(m) = store.config.member_by_id_mut(&agent_id) {
+                    if let Err(e) = crate::team::TeamStore::update(&team_dir, |config| {
+                        if let Some(m) = config.member_by_id_mut(&agent_id) {
                             m.current_task_id = Some(task.id.clone());
                         }
-                        let _ = store.save();
+                        Ok(())
+                    }) {
+                        tracing::warn!(agent_id = %agent_id, error = %e,
+                            "team_task_claim: could not record the claimed task on the roster");
                     } // Successfully claimed a new task
                     Ok(ToolOutput {
                         content: format!(

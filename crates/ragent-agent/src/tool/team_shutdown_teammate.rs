@@ -130,19 +130,20 @@ impl Tool for TeamShutdownTeammateTool {
                     tracing::warn!(error = %e, "disk-only shutdown: cannot push ShutdownRequest");
                 }
             }
-            let mut store = TeamStore::load(&team_dir)?;
-            if let Some(member) = store.config.member_by_id_mut(&agent_id) {
-                member.status = if immediate {
-                    MemberStatus::Stopped
-                } else {
-                    MemberStatus::ShuttingDown
-                };
-                if immediate {
-                    member.current_task_id = None;
+            TeamStore::update(&team_dir, |config| {
+                if let Some(member) = config.member_by_id_mut(&agent_id) {
+                    member.status = if immediate {
+                        MemberStatus::Stopped
+                    } else {
+                        MemberStatus::ShuttingDown
+                    };
+                    if immediate {
+                        member.current_task_id = None;
+                    }
+                    member.shutdown_request_id = Some(correlation_id);
                 }
-                member.shutdown_request_id = Some(correlation_id);
-            }
-            store.save()?;
+                Ok(())
+            })?;
         }
 
         let mode = if immediate { "immediate" } else { "graceful" };
