@@ -463,7 +463,7 @@ async fn team_spawn_tool_rejects_missing_required_args() {
 }
 
 #[tokio::test]
-async fn team_spawn_tool_returns_pending_without_manager() {
+async fn team_spawn_tool_refuses_without_manager() {
     let bus = Arc::new(EventBus::new(64));
     // The caller must be the lead of an existing team before the missing
     // manager is reported.
@@ -493,19 +493,17 @@ async fn team_spawn_tool_returns_pending_without_manager() {
         tool_registry: ToolContext::default_tool_registry(),
     };
 
-    let out = spawn_tool()
+    let err = spawn_tool()
         .execute(
             json!({"team_name": "t", "teammate_name": "bob", "agent_type": "general", "prompt": "one item"}),
             &ctx,
         )
         .await
-        .expect("pending_manager output");
-    assert_eq!(
-        out.metadata
-            .as_ref()
-            .and_then(|m| m.get("status"))
-            .and_then(|v| v.as_str()),
-        Some("pending_manager")
+        .expect_err("a spawn with no team runtime is refused, not reported as queued");
+    assert!(
+        err.to_string().contains("was not spawned")
+            && err.to_string().contains("call team_spawn again"),
+        "err: {err}"
     );
 }
 

@@ -18,6 +18,15 @@
 
 ### Fixed
 
+- Teams now work outside the TUI. Only the TUI ever created a `TeamManager`,
+  so in `ragent run`, `ragent serve` and ACP mode `team_spawn` reported a
+  teammate as "queued" but never started it. The session processor now binds
+  the team runtime before tool dispatch, for the team its session leads
+  (`SessionProcessor::ensure_team_manager`). It then reconciles members queued
+  in `Spawning` and starts the watchdog. A `team_spawn` that runs before the
+  runtime exists, in the same step as `team_create`, now returns an error that
+  says to call it again, instead of a false "queued" result.
+
 - Teams: concurrent changes to a team's `config.json` are no longer lost.
   `TeamStore::load` released its read lock before `save` took the write lock,
   so two writers, for example two teammates changing status at once, could read

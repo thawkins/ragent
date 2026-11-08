@@ -3743,6 +3743,12 @@ Suspended, blocked and plan-pending members are not woken
 **Roster writes.** Every read-modify-write of a team's `config.json` goes
 through `TeamStore::update`, which holds the exclusive lock from read to write.
 
+**Team runtime.** Before tool dispatch, the session processor binds a
+`TeamManager` for the team its session leads, in every entry point (TUI,
+`run`, `serve`, ACP). See `SessionProcessor::ensure_team_manager`. It reconciles
+members queued in `Spawning` and starts the watchdog. A `team_spawn` that runs
+before the runtime is bound is refused with an instruction to retry.
+
 ### 14.4 Team Slash Commands
 
 | Command | Purpose |

@@ -716,6 +716,56 @@ pub struct CachedConfig {
 }
 
 impl SessionProcessor {
+    /// Bind a [`TeamManager`](crate::team::TeamManager) for the team this
+    /// session leads, if no manager is bound yet.
+    ///
+    /// The TUI binds one when it sees a team created; the other entry points
+    /// (`run`, `serve`, ACP) had nothing that did, so `team_spawn` there could
+    /// never start a teammate. This runs before tool dispatch and is a no-op
+    /// when a manager is already bound, when the session leads no team, or when
+    /// no [`AgentManager`](crate::task::AgentManager) is wired (it supplies the
+    /// owning `Arc` of this processor that a `TeamManager` needs). Members left
+    /// in `Spawning` (queued by blueprint seeding before the runtime existed)
+    /// are reconciled, and the watchdog is started.
+    ///
+    /// # Arguments
+    /// * `team_context` - the session's resolved team identity, if any.
+    /// * `working_dir` - the session's working directory (team discovery root).
+    /// * `model` - the lead's active model, inherited by reconciled teammates.
+    pub fn ensure_team_manager(
+        &self,
+        team_context: Option<&crate::tool::TeamContext>,
+        working_dir: &std::path::Path,
+        model: &crate::agent::ModelRef,
+    ) {
+        if self.team_manager.get().is_some() {
+            return;
+        }
+        let Some(tc) = team_context.filter(|tc| tc.is_lead) else {
+            return;
+        };
+        let Some(agent_manager) = self.agent_manager.get() else {
+            return;
+        };
+        let Ok(store) = crate::team::TeamStore::load_by_name(&tc.team_name, working_dir) else {
+            return;
+        };
+        let mut manager = crate::team::TeamManager::new(
+            tc.team_name.clone(),
+            store.config.lead_session_id.clone(),
+            store.dir.clone(),
+            Arc::clone(agent_manager.processor()),
+            self.event_bus.clone(),
+        );
+        manager.active_model = Some(model.clone());
+        let manager = manager.into_arc();
+        if self.team_manager.set(Arc::clone(&manager)).is_ok() {
+            tracing::info!(team = %tc.team_name, "TeamManager bound for the lead session");
+            Arc::clone(&manager).reconcile_spawning_members();
+            manager.start_watchdog();
+        }
+    }
+
     /// Set the activity-log store.
     ///
     /// Called once after construction (matching the `OnceLock` pattern for
@@ -3035,6 +3085,14 @@ impl SessionProcessor {
                     );
                     tc.name = canonical;
                 }
+                // Teams outside the TUI (`run`, `serve`, ACP): bind the team
+                // runtime for the team this session leads before any team
+                // tool runs, so `team_spawn` has a manager to spawn with.
+                self.ensure_team_manager(
+                    turn.team_context.as_deref(),
+                    &turn.working_dir,
+                    &turn.model_ref,
+                );
                 let base_tool_ctx = ToolContext {
                     session_id: session_id.to_string(),
                     working_dir: turn.working_dir.clone(),
