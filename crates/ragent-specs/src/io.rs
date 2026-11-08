@@ -108,6 +108,15 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     None
 }
 
+/// Returns `true` when a frontmatter line starts a new top-level key.
+///
+/// Indented lines, `- item` list entries, blank lines and YAML comments
+/// (`# ...`) are not key lines, so a comment inside a list does not end it.
+pub(crate) fn is_frontmatter_key_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    !line.starts_with([' ', '\t', '-']) && !trimmed.is_empty() && !trimmed.starts_with('#')
+}
+
 /// Read a frontmatter list value given as `key: [a, b]` or as a block of
 /// `- item` lines under `key:`. Surrounding quotes are stripped.
 fn frontmatter_list(fm: &str, key: &str) -> Vec<String> {
@@ -117,8 +126,7 @@ fn frontmatter_list(fm: &str, key: &str) -> Vec<String> {
     let mut items = Vec::new();
     for line in fm.lines() {
         let trimmed = line.trim();
-        let is_top_level = !line.starts_with([' ', '\t', '-']) && !trimmed.is_empty();
-        if is_top_level {
+        if is_frontmatter_key_line(line) {
             in_list = false;
             if let Some(val) = trimmed.strip_prefix(&prefix) {
                 let val = val.trim();
@@ -490,8 +498,7 @@ impl SpecIo {
         let mut in_audit = false;
         let mut entries = Vec::new();
         for line in fm.lines() {
-            let is_top_level = !line.starts_with([' ', '\t', '-']) && !line.trim().is_empty();
-            if is_top_level {
+            if is_frontmatter_key_line(line) {
                 in_audit = line.trim() == "audit:";
                 continue;
             }

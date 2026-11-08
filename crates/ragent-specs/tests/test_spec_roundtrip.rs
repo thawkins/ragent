@@ -211,3 +211,90 @@ fn test_spec_roundtrip_status_cell_parsing() {
     );
     assert_eq!(TaskStatus::Pending.status_cell(Some(1)), "pending");
 }
+
+#[tokio::test]
+async fn test_spec_roundtrip_yaml_comments_do_not_end_lists() {
+    let tmp = tempfile::tempdir().unwrap();
+    let id = SpecId::new("cm").unwrap();
+    let spec_md = "---\nstatus: draft\nreviewers:\n  - alice\n# second reviewer below\n  - bob\n\
+research:\n  - one\n# note\n  - two\n---\n\n# CM\n";
+    SpecIo::create_spec_dir(tmp.path(), &id, spec_md, "")
+        .await
+        .unwrap();
+    let mgr = SpecManager::new(tmp.path());
+    let mut spec = mgr.read_spec(&id).await.unwrap();
+    assert_eq!(spec.reviewers, vec!["alice".to_string(), "bob".to_string()]);
+    assert_eq!(spec.research, vec!["one".to_string(), "two".to_string()]);
+
+    mgr.transition(&mut spec, SpecStatus::InReview, "carol")
+        .await
+        .unwrap();
+    let mut spec = mgr.read_spec(&id).await.unwrap();
+    mgr.transition(&mut spec, SpecStatus::Draft, "dave")
+        .await
+        .unwrap();
+
+    let spec = mgr.read_spec(&id).await.unwrap();
+    assert_eq!(spec.reviewers, vec!["alice".to_string(), "bob".to_string()]);
+    assert_eq!(spec.research, vec!["one".to_string(), "two".to_string()]);
+    let actors: Vec<&str> = spec.audit_trail.iter().map(|e| e.3.as_str()).collect();
+    assert!(
+        actors.contains(&"carol") && actors.contains(&"dave"),
+        "{actors:?}"
+    );
+    // No orphaned reviewer list items copied into the rewritten frontmatter.
+    let (fm, _) = spec.spec_md[4..].split_once("\n---").unwrap();
+    assert!(!fm.contains("  - bob"), "{fm}");
+}
+
+#[tokio::test]
+async fn test_spec_roundtrip_legacy_task_id_header_is_normalised() {
+    let plan = "## Tasks\n\n\
+| Task ID | Title | Requirement | Effort | Priority | Dependencies |\n\
+|---|---|---|---|---|---|\n\
+| T-001 | A | FR-001 | S | High | - |\n\
+| T-002 | B | FR-001 | S | High | T-001 |\n";
+    let tmp = tempfile::tempdir().unwrap();
+    let id = SpecId::new("legacy").unwrap();
+    SpecIo::create_spec_dir(tmp.path(), &id, "# L\n", plan)
+        .await
+        .unwrap();
+    let mgr = SpecManager::new(tmp.path());
+    let mut spec = mgr.read_spec(&id).await.unwrap();
+    mgr.update_task_status(&mut spec, "T-001", TaskStatus::Completed)
+        .await
+        .unwrap();
+
+    let reread = mgr.read_spec(&id).await.unwrap();
+    let t1 = reread.tasks.iter().find(|t| t.id == "T-001").unwrap();
+    let t2 = reread.tasks.iter().find(|t| t.id == "T-002").unwrap();
+    assert_eq!(t1.status, TaskStatus::Completed);
+    assert!(t1.completed_at.is_some());
+    assert_eq!(t2.dependencies, vec!["T-001".to_string()]);
+}
+
+#[tokio::test]
+async fn test_spec_roundtrip_unrelated_table_in_tasks_section_untouched() {
+    let review = "### Review assignments\n\n\
+| ID | Title | Reviewer |\n\
+|---|---|---|\n\
+| T-001 | Security review | Alice |\n";
+    let plan = format!("{PLAN}\n## Tasks appendix\n");
+    let plan = plan.replace("\nTrailing prose", &format!("\n{review}\nTrailing prose"));
+    let tmp = tempfile::tempdir().unwrap();
+    let id = SpecId::new("rev").unwrap();
+    SpecIo::create_spec_dir(tmp.path(), &id, "# R\n", &plan)
+        .await
+        .unwrap();
+    let mgr = SpecManager::new(tmp.path());
+    let mut spec = mgr.read_spec(&id).await.unwrap();
+    mgr.update_task_status(&mut spec, "T-001", TaskStatus::Completed)
+        .await
+        .unwrap();
+
+    let reread = mgr.read_spec(&id).await.unwrap();
+    assert!(reread.plan_md.contains(review), "{}", reread.plan_md);
+    let t1 = reread.tasks.iter().find(|t| t.id == "T-001").unwrap();
+    assert_eq!(t1.status, TaskStatus::Completed);
+    assert_eq!(t1.title, "First");
+}

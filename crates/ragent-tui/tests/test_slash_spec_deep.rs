@@ -148,6 +148,24 @@ async fn task_show_includes_persisted_completion_time() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_flag_without_value_does_not_swallow_next_option() {
+    let (_g, _e, _t, mut app) = app_with_spec();
+    app.execute_slash_command("/spec list --prefix --archived")
+        .await;
+    assert!(
+        app.status.contains("--prefix needs a value"),
+        "{}",
+        app.status
+    );
+    app.execute_slash_command("/spec list --status=").await;
+    assert!(
+        app.status.contains("--status needs a value"),
+        "{}",
+        app.status
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn status_transition_reports_previous_status() {
     let (_g, _e, _t, mut app) = app_with_spec();
     app.execute_slash_command("/spec status sample in_review")

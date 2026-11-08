@@ -3740,36 +3740,54 @@ impl App {
         if next_rank > state.total {
             // All tasks done - transition the spec to `implemented`.
             self.spec_impl_state = None;
-            if spec.status == SpecStatus::InProgress {
+            // Capture the status before transitioning: `transition` mutates
+            // the in-memory spec before its disk write, so a failed write
+            // must not be read back as success.
+            let prior_status = spec.status;
+            let transition_result = if prior_status == SpecStatus::InProgress {
                 // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
-                if let Err(e) = tokio::task::block_in_place(|| {
+                Some(tokio::task::block_in_place(|| {
                     rt.block_on(async {
                         mgr.transition(&mut spec, SpecStatus::Implemented, "spec-impl")
                             .await
                     })
-                }) {
+                }))
+            } else {
+                None
+            };
+            let (status_note, status_line) = match transition_result {
+                Some(Ok(())) => (
+                    "Spec status set to `implemented`.".to_string(),
+                    format!("spec: {} implemented", state.spec_id),
+                ),
+                Some(Err(e)) => {
                     self.push_log_no_agent(
                         LogLevel::Warn,
                         format!("spec impl: failed to transition to implemented: {e}"),
                     );
+                    (
+                        format!(
+                            "**Error:** failed to set the spec status to `implemented`: {e}. \
+                             SPEC.md still says `{}`.",
+                            prior_status.as_str()
+                        ),
+                        format!("spec: {} status update failed", state.spec_id),
+                    )
                 }
-            }
-            // Report the status the spec actually has: it only becomes
-            // `implemented` from `in_progress`, and the transition can fail.
-            let status_note = if spec.status == SpecStatus::Implemented {
-                "Spec status set to `implemented`.".to_string()
-            } else {
-                format!(
-                    "Spec status left as `{}` (only an `in_progress` spec moves to \
-                     `implemented`).",
-                    spec.status.as_str()
-                )
+                None => (
+                    format!(
+                        "Spec status left as `{}` (only an `in_progress` spec moves to \
+                         `implemented`).",
+                        prior_status.as_str()
+                    ),
+                    format!("spec: {} tasks complete", state.spec_id),
+                ),
             };
             self.append_assistant_text(&format!(
                 "From: /spec impl\n\n[done] All {} tasks completed for spec **{}**. {}",
                 state.total, state.spec_id, status_note,
             ));
-            self.status = format!("spec: {} implemented", state.spec_id);
+            self.status = status_line;
             return;
         }
 

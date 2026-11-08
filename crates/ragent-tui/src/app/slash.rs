@@ -8784,7 +8784,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         const USAGE: &str = "Usage: /spec list [--status <status>] \
                                              [--prefix <prefix>] [--archived]";
                         let mut arg_error: Option<String> = None;
-                        let mut tokens = args.split_whitespace();
+                        let mut tokens = args.split_whitespace().peekable();
                         while let Some(token) = tokens.next() {
                             let (flag, inline) = match token.split_once('=') {
                                 Some((f, v)) => (f, Some(v)),
@@ -8795,7 +8795,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     filter = filter.with_archived();
                                 }
                                 "--status" | "--prefix" => {
-                                    let Some(val) = inline.or_else(|| tokens.next()) else {
+                                    // A following option (`--archived`) is not a value:
+                                    // leave it to be parsed as its own flag.
+                                    let Some(val) = inline
+                                        .or_else(|| tokens.next_if(|t| !t.starts_with("--")))
+                                        .filter(|v| !v.is_empty())
+                                    else {
                                         arg_error = Some(format!("{flag} needs a value. {USAGE}"));
                                         break;
                                     };

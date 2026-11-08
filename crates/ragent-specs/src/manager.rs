@@ -219,11 +219,14 @@ impl SpecManager {
 
     /// Rewrite the task rows in PLAN.md with updated task statuses.
     ///
-    /// Rows are replaced in place, so prose, sub-headings and additional
-    /// tables inside the `## Tasks` section survive. Task-table header and
-    /// separator rows are normalised to the 7-column layout (adding a Status
-    /// column to legacy 6-column tables). When the plan has no task section a
-    /// new `## Tasks` table is appended.
+    /// Rows are replaced in place, so prose, sub-headings and unrelated
+    /// tables inside the `## Tasks` section survive. Only the lines
+    /// [`PlanParser`] itself reads as tasks are touched: the first task
+    /// header in the section (normalised, with its separator, to the
+    /// 7-column layout so legacy 6-column and `Task ID` tables gain a Status
+    /// column) and data rows with at least six cells whose ID is a known
+    /// task. When the plan has no task section a new `## Tasks` table is
+    /// appended.
     fn rewrite_plan_tasks(plan_md: &str, tasks: &[crate::spec::Task]) -> Result<String, SpecError> {
         const HEADER: &str =
             "| ID | Title | Requirement | Effort | Priority | Status | Dependencies |";
@@ -235,6 +238,7 @@ impl SpecManager {
         let mut out: Vec<String> = Vec::new();
         let mut in_task_section = false;
         let mut saw_task_section = false;
+        let mut header_seen = false;
         let mut after_header = false;
         for line in plan_md.lines() {
             let trimmed = line.trim();
@@ -248,28 +252,30 @@ impl SpecManager {
             if in_task_section && trimmed.starts_with("## ") {
                 in_task_section = false;
             }
+            let was_after_header = std::mem::take(&mut after_header);
             if !in_task_section || !trimmed.starts_with('|') {
-                after_header = false;
                 out.push(line.to_string());
                 continue;
             }
-            let first_cell = trimmed
-                .trim_start_matches('|')
-                .split('|')
-                .next()
-                .unwrap_or("");
-            let first_cell = first_cell.trim();
-            if first_cell == "ID" && trimmed.contains("Title") {
-                after_header = true;
-                out.push(HEADER.to_string());
-            } else if after_header && trimmed.chars().all(|c| matches!(c, '|' | '-' | ':' | ' ')) {
-                after_header = false;
+            let cells = PlanParser::split_row(trimmed);
+            if !header_seen && PlanParser::is_task_header(trimmed) {
+                header_seen = true;
+                if cells.len() >= PlanParser::MIN_TASK_CELLS {
+                    after_header = true;
+                    out.push(HEADER.to_string());
+                } else {
+                    out.push(line.to_string());
+                }
+            } else if was_after_header
+                && trimmed.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
+            {
                 out.push(SEPARATOR.to_string());
-            } else if let Some(task) = by_id.get(first_cell) {
-                after_header = false;
+            } else if let Some(task) = by_id
+                .get(cells.first().copied().unwrap_or(""))
+                .filter(|_| header_seen && cells.len() >= PlanParser::MIN_TASK_CELLS)
+            {
                 out.push(task.table_row());
             } else {
-                after_header = false;
                 out.push(line.to_string());
             }
         }
@@ -453,8 +459,7 @@ fn update_frontmatter(
     // custom metadata...) so a status change never drops frontmatter.
     let mut skipping = false;
     for line in old_fm.lines() {
-        let is_top_level = !line.starts_with([' ', '\t', '-']) && !line.trim().is_empty();
-        if is_top_level {
+        if crate::io::is_frontmatter_key_line(line) {
             let key = line.split(':').next().unwrap_or("").trim();
             skipping = matches!(key, "status" | "audit" | "reviewers");
         }

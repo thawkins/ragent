@@ -424,7 +424,7 @@ impl PlanParser {
             }
 
             // Parse header row to detect column layout
-            if !header_seen && trimmed.contains("ID") && trimmed.contains("Title") {
+            if !header_seen && Self::is_task_header(trimmed) {
                 header_seen = true;
                 let cells: Vec<&str> = trimmed
                     .split('|')
@@ -453,7 +453,7 @@ impl PlanParser {
 
             // Need at least 6 columns: ID, Title, Requirement, Effort, Priority, Dependencies
             // With Status column: 7 columns: ID, Title, Requirement, Effort, Priority, Status, Dependencies
-            if cells.len() < 6 {
+            if cells.len() < Self::MIN_TASK_CELLS {
                 tracing::warn!("Skipping malformed task row: not enough columns");
                 continue;
             }
@@ -541,11 +541,22 @@ impl PlanParser {
     /// Split a markdown table row into trimmed cells, preserving empty cells.
     ///
     /// Only the single outer pipe on each side is stripped.
-    fn split_row(row: &str) -> Vec<&str> {
+    pub(crate) fn split_row(row: &str) -> Vec<&str> {
         let inner = row.strip_prefix('|').unwrap_or(row);
         let inner = inner.strip_suffix('|').unwrap_or(inner);
         inner.split('|').map(str::trim).collect()
     }
+
+    /// Returns `true` for a task-table header row (it names an `ID` and a
+    /// `Title` column, e.g. `| ID | Title |` or `| Task ID | Title |`).
+    /// Only the first such row in the Tasks section is the task header.
+    pub(crate) fn is_task_header(row: &str) -> bool {
+        row.contains("ID") && row.contains("Title")
+    }
+
+    /// Minimum cell count for a data row to be read as a task (ID, Title,
+    /// Requirement, Effort, Priority, Dependencies).
+    pub(crate) const MIN_TASK_CELLS: usize = 6;
 
     /// Returns `true` for an empty table cell or a dash placeholder
     /// (`-`, en dash, em dash). [`crate::spec::Task::table_row`] writes an
