@@ -252,7 +252,7 @@ fn parse_store_launch(rest: &str) -> (String, CategoryFilter, bool) {
 ///
 /// Returns an `[ok]`/`[x]`-prefixed feedback line for the panel's feedback row.
 #[must_use]
-pub(crate) fn toggle_plugin_enabled(
+pub fn toggle_plugin_enabled(
     app: &mut crate::app::App,
     plugin_id: &str,
     currently_enabled: bool,

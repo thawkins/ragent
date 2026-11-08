@@ -8,7 +8,7 @@ use std::borrow::Cow;
 // reason: retained for the `tests/` integration suite; the lib itself scores
 // through `contains_term` with precomputed variants.
 #[allow(dead_code)]
-pub(crate) fn compute_relevance_label(
+pub fn compute_relevance_label(
     query: &str,
     title: &str,
     snippet: &str,
@@ -142,7 +142,7 @@ fn lowercase_cow(s: &str) -> Cow<'_, str> {
 // reason: retained for the `tests/` integration suite; the lib itself scores
 // through `contains_term` with precomputed variants.
 #[allow(dead_code)]
-pub(crate) fn term_matches(term: &str, hay: &str) -> bool {
+pub fn term_matches(term: &str, hay: &str) -> bool {
     contains_term(term, &morph_variants(term), hay)
 }
 
@@ -219,7 +219,7 @@ fn morph_variants(term: &str) -> Vec<String> {
 ///
 /// This is intentionally exposed at module scope so benchmarks and unit tests
 /// can measure it in isolation (Milestone B-003).
-pub(crate) fn normalize_query_terms(query: &str) -> Vec<String> {
+pub fn normalize_query_terms(query: &str) -> Vec<String> {
     let query_lc = query.to_lowercase();
     query_lc
         .split_whitespace()
