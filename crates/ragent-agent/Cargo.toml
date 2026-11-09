@@ -106,6 +106,10 @@ axum = { workspace = true }
 # Captures the FR-010 parallel-dispatch demotion notice from a scoped
 # subscriber (`tests/test_parallel_gate.rs`) instead of asserting on source text.
 tracing-subscriber = { workspace = true }
+# In-memory metric exporter for the profiler -> `ragent.profile.duration` test
+# (`tests/test_profiler.rs`). Same version and `testing` feature the telemetry
+# crate's dev-dependencies already enable.
+opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 
 [[bench]]
 name = "agent_loop"

@@ -105,7 +105,22 @@ struct RuntimeState {
     /// [`TracingLogsLayer`]: crate::logs::TracingLogsLayer
     #[cfg(feature = "telemetry")]
     logs_cell: Option<crate::logs::ExportCell>,
+    /// The [`ProfileRecorder`](crate::recorder::ProfileRecorder) built for the
+    /// provider the `Weak` points at. The agent-loop profiler asks for it on
+    /// every scope, so it is built once per provider rather than per call; a
+    /// reconfigure installs a new provider, which no longer matches the
+    /// `Weak` and triggers a rebuild. The inner `None` caches a disabled
+    /// `ragent.profile.duration` toggle.
+    #[cfg(feature = "telemetry")]
+    profile_cache: Option<ProfileCache>,
 }
+
+/// A cached profile recorder keyed by the provider it was built from.
+#[cfg(feature = "telemetry")]
+type ProfileCache = (
+    std::sync::Weak<SdkMeterProvider>,
+    Option<crate::recorder::ProfileRecorder>,
+);
 
 impl RuntimeState {
     /// Construct a disabled runtime state with the given config.
@@ -122,6 +137,7 @@ impl RuntimeState {
             prometheus_handle: None,
             logger: None,
             logs_cell: None,
+            profile_cache: None,
         }
     }
 
@@ -264,6 +280,7 @@ impl TelemetrySubsystem {
                         prometheus_handle,
                         logger,
                         logs_cell: None,
+                        profile_cache: None,
                     }),
                 })
             }
@@ -309,6 +326,7 @@ impl TelemetrySubsystem {
                 // pipeline too; nothing is exported unless it opts in.
                 logger: None,
                 logs_cell: None,
+                profile_cache: None,
             }),
         }
     }
@@ -443,6 +461,40 @@ impl TelemetrySubsystem {
                 .with_shared_cardinality(guard.cardinality.clone())
                 .with_metric_toggles(guard.config.metrics.clone()),
         )
+    }
+
+    /// Return the recorder for agent-loop profiler samples
+    /// (`ragent.profile.duration`), or `None` when telemetry is disabled or
+    /// the metric is toggled off through `telemetry.otel.metrics`.
+    ///
+    /// The recorder is cached per meter provider, so the profiler can call
+    /// this on every scope without rebuilding the instrument registry.
+    #[must_use]
+    #[cfg(feature = "telemetry")]
+    pub fn profile_recorder(&self) -> Option<crate::recorder::ProfileRecorder> {
+        let mut guard = self.runtime.lock();
+        let Some(provider) = guard.provider.clone() else {
+            guard.profile_cache = None;
+            return None;
+        };
+        if let Some((weak, recorder)) = &guard.profile_cache
+            && std::ptr::eq(weak.as_ptr(), std::sync::Arc::as_ptr(&provider))
+        {
+            return recorder.clone();
+        }
+        let registry = crate::instruments::InstrumentRegistry::from_provider(&provider)
+            .with_shared_cardinality(guard.cardinality.clone())
+            .with_metric_toggles(guard.config.metrics.clone());
+        let recorder = crate::recorder::ProfileRecorder::new(&registry);
+        guard.profile_cache = Some((std::sync::Arc::downgrade(&provider), recorder.clone()));
+        recorder
+    }
+
+    /// Feature-off variant: there is never a live recorder.
+    #[must_use]
+    #[cfg(not(feature = "telemetry"))]
+    pub fn profile_recorder(&self) -> Option<crate::recorder::ProfileRecorder> {
+        None
     }
 
     /// Reconfigure the subsystem at runtime from a new [`OtelConfig`].

@@ -9,6 +9,6 @@
 pub use ragent_telemetry::logs::{ExportCell, TracingLogsLayer};
 pub use ragent_telemetry::shutdown::{ShutdownGuard, flush_on_signal_arc};
 pub use ragent_telemetry::{
-    InstrumentRegistry, LlmRecorder, OtelConfig, OtelProtocol, SessionRecorder, TelemetryConfig,
-    TelemetryState, TelemetrySubsystem, ToolRecorder,
+    InstrumentRegistry, LlmRecorder, OtelConfig, OtelProtocol, ProfileRecorder, SessionRecorder,
+    TelemetryConfig, TelemetryState, TelemetrySubsystem, ToolRecorder,
 };

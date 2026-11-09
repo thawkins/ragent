@@ -158,13 +158,25 @@ requirements that reference it.
 
 | Metric Name | Type | Unit | Source |
 |---|---|---|---|
-| `ragent.llm.duration` | Histogram (by `model`, `provider`) | `ms` | LLM call timing |
-| `ragent.llm.time_to_first_token` | Histogram (by `model`) | `ms` | Stream first delta |
-| `ragent.tool.duration` | Histogram (by `tool.name`) | `ms` | Tool execution timing |
+| `ragent.llm.duration` | Histogram (by `model`, `provider`, `profile.bucket=loop.llm.total`) | `ms` | LLM call timing |
+| `ragent.llm.time_to_first_token` | Histogram (by `model`, `profile.bucket=loop.llm.first_event_wait`) | `ms` | Stream first delta |
+| `ragent.tool.duration` | Histogram (by `tool.name`, `profile.bucket=tool.total`) | `ms` | Tool execution timing |
 | `ragent.agent_loop.duration` | Histogram | `ms` | AgentLoopProfiler label `agent_loop` |
 | `ragent.agent_loop.iterations` | Histogram | `{iteration}` | Session loop iteration count |
 | `ragent.session.duration` | Histogram | `ms` | Session start to close |
 | `ragent.tool.permission_wait` | Histogram | `ms` | Permission request to resolution |
+| `ragent.profile.duration` | Histogram (by `profile.operation`, `profile.group`, `tool.name` for `tool.*:<tool>` labels) | `ms` | Every AgentLoopProfiler scope |
+
+`ragent.profile.duration` carries one series per profiler bucket: each
+AgentLoopProfiler scope (`loop.llm.stream`, `loop.tool_phase.total`,
+`tool.total:bash`, ...) is recorded with `profile.operation` set to the label
+and `profile.group` set to the label minus its last dot segment and any
+`:<tool>` suffix (`loop.llm`, `tool`). It is recorded whenever OTel export is
+enabled, independent of the `/profile` panel, and can be switched off with
+`"ragent.profile.duration": false` in `telemetry.otel.metrics`. The
+`profile.bucket` attribute on `ragent.llm.duration`,
+`ragent.llm.time_to_first_token` and `ragent.tool.duration` names the profiler
+bucket each of those metrics measures, so the two can be joined in a dashboard.
 
 ### Cost Metrics
 

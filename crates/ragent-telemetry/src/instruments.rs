@@ -59,6 +59,11 @@ pub mod names {
     pub const SESSION_DURATION: &str = "ragent.session.duration";
     /// Metric name for tool permission wait time (`ragent.tool.permission_wait`).
     pub const TOOL_PERMISSION_WAIT: &str = "ragent.tool.permission_wait";
+    /// Metric name for agent-loop profiler samples (`ragent.profile.duration`).
+    ///
+    /// Every profiler scope (e.g. `loop.llm.stream`, `tool.total:bash`) is
+    /// recorded here tagged with `profile.operation` and `profile.group`.
+    pub const PROFILE_DURATION: &str = "ragent.profile.duration";
 
     // -- Cost metrics ----------------------------------------------------
     /// Metric name for input tokens (`ragent.tokens.input`).
@@ -99,6 +104,17 @@ pub mod names {
     pub const RETRIES_LLM: &str = "ragent.retries.llm";
     /// Metric name for snapshot restores (`ragent.snapshot.restores`).
     pub const SNAPSHOT_RESTORES: &str = "ragent.snapshot.restores";
+}
+
+/// Profiler bucket labels attached as `profile.bucket` to metrics that
+/// measure the same span as an agent-loop profiler scope.
+pub mod profile_buckets {
+    /// `ragent.llm.duration` covers the profiler's `loop.llm.total` scope.
+    pub const LLM_TOTAL: &str = "loop.llm.total";
+    /// `ragent.llm.time_to_first_token` covers `loop.llm.first_event_wait`.
+    pub const LLM_FIRST_EVENT_WAIT: &str = "loop.llm.first_event_wait";
+    /// `ragent.tool.duration` covers the profiler's `tool.total:<tool>` scopes.
+    pub const TOOL_TOTAL: &str = "tool.total";
 }
 
 /// A registry of all OTEL instruments defined in the otel spec Metric Catalog.
@@ -168,6 +184,9 @@ pub struct InstrumentRegistry {
     pub session_duration: opentelemetry::metrics::Histogram<f64>,
     /// Time spent waiting for user permission on a tool call in ms (`ragent.tool.permission_wait`).
     pub tool_permission_wait: opentelemetry::metrics::Histogram<f64>,
+    /// Agent-loop profiler scope duration in ms, tagged by `profile.operation`
+    /// and `profile.group` (`ragent.profile.duration`).
+    pub profile_duration: opentelemetry::metrics::Histogram<f64>,
 
     // -- Cost: counters ------------------------------------------------
     /// Input/prompt tokens consumed, tagged by model (`ragent.tokens.input`).
@@ -277,6 +296,12 @@ impl InstrumentRegistry {
         self
     }
 
+    /// The cardinality cache this registry resolves attributes through, for
+    /// recorders that keep a single instrument rather than the whole registry.
+    pub(crate) fn shared_cardinality(&self) -> std::sync::Arc<CardinalityCache> {
+        std::sync::Arc::clone(&self.cardinality)
+    }
+
     /// Sets the per-metric enable/disable toggles for this registry (FR-027).
     ///
     /// The map is keyed by instrument name (e.g. `"ragent.llm.requests"`).
@@ -334,11 +359,11 @@ impl InstrumentRegistry {
             AGENT_LOOP_DURATION, AGENT_LOOP_ITERATIONS, AGENTS_ACTIVE, AGENTS_COMPLETED,
             CONTEXT_COMPRESSION_RATIO, CONTEXT_COMPRESSIONS, COST_ESTIMATED, COST_SESSION,
             ERRORS_TOTAL, LLM_DURATION, LLM_REQUESTS, LLM_TTFT, MESSAGES_USER, PERMISSION_APPROVED,
-            PERMISSION_DENIED, RATE_LIMIT_REQUESTS_PCT, RATE_LIMIT_TOKENS_PCT, RETRIES_LLM,
-            SESSION_DURATION, SESSIONS_ACTIVE, SESSIONS_TOTAL, SNAPSHOT_RESTORES, SUBAGENT_SPAWNS,
-            TASK_COMPLETIONS, TEAM_MEMBERS, TIMEOUTS_TOTAL, TOKENS_CACHE_READ, TOKENS_CACHE_WRITE,
-            TOKENS_INPUT, TOKENS_OUTPUT, TOOL_CALLS_PER_SESSION, TOOL_DURATION, TOOL_INVOCATIONS,
-            TOOL_PERMISSION_WAIT,
+            PERMISSION_DENIED, PROFILE_DURATION, RATE_LIMIT_REQUESTS_PCT, RATE_LIMIT_TOKENS_PCT,
+            RETRIES_LLM, SESSION_DURATION, SESSIONS_ACTIVE, SESSIONS_TOTAL, SNAPSHOT_RESTORES,
+            SUBAGENT_SPAWNS, TASK_COMPLETIONS, TEAM_MEMBERS, TIMEOUTS_TOTAL, TOKENS_CACHE_READ,
+            TOKENS_CACHE_WRITE, TOKENS_INPUT, TOKENS_OUTPUT, TOOL_CALLS_PER_SESSION, TOOL_DURATION,
+            TOOL_INVOCATIONS, TOOL_PERMISSION_WAIT,
         };
 
         // The metric toggles map defaults to empty (all metrics enabled).
@@ -461,6 +486,12 @@ impl InstrumentRegistry {
             TOOL_PERMISSION_WAIT,
             "ms",
             "Time spent waiting for user permission on a tool call"
+        );
+        let profile_duration = instrument!(
+            f64_histogram,
+            PROFILE_DURATION,
+            "ms",
+            "Agent-loop profiler scope duration, tagged by profile.operation and profile.group"
         );
 
         // -- Cost: counters -------------------------------------------
@@ -600,6 +631,7 @@ impl InstrumentRegistry {
             agent_loop_iterations,
             session_duration,
             tool_permission_wait,
+            profile_duration,
             tokens_input,
             tokens_output,
             tokens_cache_read,
@@ -667,6 +699,55 @@ impl InstrumentRegistry {
     #[must_use]
     pub fn attr_component(name: &str) -> KeyValue {
         Self::sanitized_attr("component", name)
+    }
+
+    /// Returns the `profile.bucket` attribute naming the profiler bucket a
+    /// non-profiler metric corresponds to (e.g. `ragent.llm.duration` ->
+    /// `loop.llm.total`), so the two can be correlated in a dashboard.
+    ///
+    /// `bucket` is always one of the static [`profile_buckets`] constants, so
+    /// no sanitisation is needed.
+    #[must_use]
+    pub fn attr_profile_bucket(bucket: &'static str) -> KeyValue {
+        KeyValue::new("profile.bucket", bucket)
+    }
+
+    /// Returns the attributes for one profiler sample on
+    /// `ragent.profile.duration`.
+    ///
+    /// * `profile.operation` - the full profiler label, with any `:<tool>`
+    ///   suffix passed through [`crate::sensitive::sanitize_tool_name`]
+    ///   (e.g. `tool.total:bash`).
+    /// * `profile.group` - the label minus its last dot segment and any
+    ///   `:<tool>` suffix (e.g. `loop.llm.stream` -> `loop.llm`,
+    ///   `tool.total:bash` -> `tool`).
+    /// * `tool.name` - present only when the label carries a `:<tool>` suffix.
+    ///
+    /// # Arguments
+    ///
+    /// * `label` - The profiler operation label.
+    #[must_use]
+    pub fn profile_attrs(label: &str) -> Vec<KeyValue> {
+        let (base, tool) = match label.split_once(':') {
+            Some((base, tool)) => (base, Some(crate::sensitive::sanitize_tool_name(tool))),
+            None => (label, None),
+        };
+        let base = crate::sensitive::sanitize_attr_value(base);
+        let group = base
+            .rsplit_once('.')
+            .map_or_else(|| base.clone(), |(group, _)| group.to_string());
+        let operation = match &tool {
+            Some(tool) => format!("{base}:{tool}"),
+            None => base,
+        };
+        let mut attrs = vec![
+            KeyValue::new("profile.operation", operation),
+            KeyValue::new("profile.group", group),
+        ];
+        if let Some(tool) = tool {
+            attrs.push(KeyValue::new("tool.name", tool));
+        }
+        attrs
     }
 
     /// Returns the [`KeyValue`] attribute for a session ID (FR-025).
