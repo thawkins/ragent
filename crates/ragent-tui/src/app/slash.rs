@@ -417,6 +417,35 @@ impl App {
         self.govcreate_running
     }
 
+    /// Report an invalid `/spec` ID in both the message window and the
+    /// status line (NFR-005: never by the status line alone).
+    fn report_invalid_spec_id(&mut self, spec_id: &str) {
+        self.append_assistant_text(&format!(
+            "From: /spec\n\n**Error:** invalid spec ID `{spec_id}` - use only ASCII letters, \
+             digits, `-` and `_`."
+        ));
+        self.status = format!("spec: invalid spec ID: {spec_id}");
+    }
+
+    /// Clear the active spec on the app and the session processor, and drop
+    /// the cached system-prompt spec section.
+    ///
+    /// Returns the previously active spec ID, if any.
+    fn clear_active_spec(&mut self) -> Option<String> {
+        let prev = self.active_spec.take()?;
+        self.spec_manager = None;
+        let rt = tokio::runtime::Handle::current();
+        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
+        let _ = tokio::task::block_in_place(|| {
+            // INTENTIONAL: the value is the previous spec id, not an error
+            rt.block_on(async { self.session_processor.active_spec.write().await.take() })
+        });
+        self.session_processor
+            .system_prompt_cache()
+            .invalidate_spec_cache();
+        Some(prev)
+    }
+
     /// Replace the active govcreate progress message in place with the
     /// current rendered panel text (T-013).
     ///
@@ -8700,7 +8729,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                             Ok(spec) => vec![spec],
                                             Err(e) => {
                                                 return Err(format!(
-                                                    "spec: failed to read {}: {}",
+                                                    "failed to read {}: {}",
                                                     id_str, e
                                                 ));
                                             }
@@ -8716,7 +8745,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     match mgr.discover_specs().await {
                                         Ok(specs) => specs,
                                         Err(e) => {
-                                            return Err(format!("spec: discovery failed: {}", e));
+                                            return Err(format!("discovery failed: {}", e));
                                         }
                                     }
                                 };
@@ -8749,17 +8778,65 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     SpecCommand::List { args } => {
                         let mgr = spec_manager();
                         let mut filter = SpecFilter::new();
-                        // Parse simple --status and --prefix args
-                        for token in args.split_whitespace() {
-                            if let Some(val) = token.strip_prefix("--status=") {
-                                if let Some(status) = SpecStatus::parse(val) {
-                                    filter = filter.with_status(status);
+                        // Accept both the documented `--status <s>` form and
+                        // `--status=<s>`; reject anything unrecognised rather
+                        // than silently listing every spec.
+                        const USAGE: &str = "Usage: /spec list [--status <status>] \
+                                             [--prefix <prefix>] [--archived]";
+                        let mut arg_error: Option<String> = None;
+                        let mut tokens = args.split_whitespace().peekable();
+                        while let Some(token) = tokens.next() {
+                            let (flag, inline) = match token.split_once('=') {
+                                Some((f, v)) => (f, Some(v)),
+                                None => (token, None),
+                            };
+                            match flag {
+                                "--archived" if inline.is_none() => {
+                                    filter = filter.with_archived();
                                 }
-                            } else if let Some(val) = token.strip_prefix("--prefix=") {
-                                filter = filter.with_id_prefix(val);
-                            } else if token == "--archived" {
-                                filter = filter.with_archived();
+                                "--status" | "--prefix" => {
+                                    // A following option (`--archived`) is not a value:
+                                    // leave it to be parsed as its own flag.
+                                    let Some(val) = inline
+                                        .or_else(|| tokens.next_if(|t| !t.starts_with("--")))
+                                        .filter(|v| !v.is_empty())
+                                    else {
+                                        arg_error = Some(format!("{flag} needs a value. {USAGE}"));
+                                        break;
+                                    };
+                                    if flag == "--prefix" {
+                                        filter = filter.with_id_prefix(val);
+                                    } else if let Some(status) = SpecStatus::parse(val) {
+                                        filter = filter.with_status(status);
+                                        // Listing archived specs by status must
+                                        // not be hidden by the default filter.
+                                        if status == SpecStatus::Archived {
+                                            filter = filter.with_archived();
+                                        }
+                                    } else {
+                                        let valid = SpecStatus::ALL
+                                            .iter()
+                                            .map(|s| s.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ");
+                                        arg_error =
+                                            Some(format!("unknown status '{val}'. Valid: {valid}"));
+                                        break;
+                                    }
+                                }
+                                _ => {
+                                    arg_error =
+                                        Some(format!("unknown argument '{token}'. {USAGE}"));
+                                    break;
+                                }
                             }
+                        }
+                        if let Some(e) = arg_error {
+                            self.append_assistant_text(&format!(
+                                "From: /spec list\n\n**Error:** {e}"
+                            ));
+                            self.status = format!("spec: {e}");
+                            return;
                         }
                         let rt = tokio::runtime::Handle::current();
                         let result: Result<(usize, String), String> =
@@ -8768,11 +8845,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 rt.block_on(async {
                                     let specs = match mgr.list_specs(&filter).await {
                                         Ok(s) => s,
-                                        Err(e) => return Err(format!("spec: list failed: {}", e)),
+                                        Err(e) => return Err(format!("list failed: {}", e)),
                                     };
                                     let count = specs.len();
                                     if specs.is_empty() {
-                                        return Ok((0, "No specs found.".to_string()));
+                                        return Ok((
+                                            0,
+                                            "From: /spec list\n\nNo specs found.".to_string(),
+                                        ));
                                     }
                                     let mut lines =
                                         vec!["From: /spec list".to_string(), String::new()];
@@ -8818,7 +8898,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             rt.block_on(async {
                                 let results = match mgr.search_specs(&query).await {
                                     Ok(r) => r,
-                                    Err(e) => return Err(format!("spec: search failed: {}", e)),
+                                    Err(e) => return Err(format!("search failed: {}", e)),
                                 };
                                 if results.is_empty() {
                                     return Ok(format!("No specs found matching '{}'.", query));
@@ -8855,48 +8935,72 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     } => {
                         let mgr = spec_manager();
                         let Some(id) = parse_spec_id(&spec_id) else {
-                            self.status = format!("spec: invalid spec ID: {}", spec_id);
+                            self.report_invalid_spec_id(&spec_id);
                             return;
                         };
                         let rt = tokio::runtime::Handle::current();
                         // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
-                                                                                                                                                                                                                                                          let mut spec = match mgr.read_spec(&id).await {
-                                                                                                                                                                                                                                                              Ok(s) => s,
-                                                                                                                                                                                                                                                              Err(e) => return Err(format!("spec: failed to read {}: {}", spec_id, e)),
-                                                                                                                                                                                                                                                          };
-                                                                                                                                                                                                                                                          if let Some(new_status_str) = new_status {
-                                                                                                                                                                                                                                                              let new_status = match SpecStatus::parse(&new_status_str) {
-                                                                                                                                                                                                                                                                  Some(s) => s,
-                                                                                                                                                                                                                                                                  None => return Err(format!("spec: unknown status '{}'", new_status_str)),
-                                                                                                                                                                                                                                                              };
-                                                                                                                                                                                                                                                              // FR-019: Gate SDD clarification check via config flags.
-                                                                let sdd_cfg = ragent_agent::Config::load().unwrap_or_default().sdd;
-                                                                let flags = SddFlags::from_bools(
-                                                                    sdd_cfg.clarification_markers,
-                                                                    sdd_cfg.quality_checklists,
-                                                                    sdd_cfg.consistency_checks,
-                                                                    sdd_cfg.phase_minus_one_gates,
-                                                                    sdd_cfg.constitution,
-                                                                    sdd_cfg.feedback_loop,
-                                                                );
-                                                                if let Err(e) = mgr.transition_with_flags(&mut spec, new_status, "user", &flags).await {
-                                                                                                                                                                                                                                                                  return Err(format!("spec: transition failed: {}", e));
-                                                                                                                                                                                                                                                              }
-                                                                                                                                                                                                                                                              Ok(format!(
-                                                                                                                                                                                                                                                                  "From: /spec status\n\n**{}** transitioned from `{}` to `{}`.",
-                                                                                                                                                                                                                                                                  spec.id, spec.status.as_str(), new_status.as_str()
-                                                                                                                                                                                                                                                              ))
-                                                                                                                                                                                                                                                          } else {
-                                                                                                                                                                                                                                                              let next = ragent_specs::manager::next_statuses(spec.status);
-                                                                                                                                                                                                                                                              let next_str = next.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
-                                                                                                                                                                                                                                                              Ok(format!(
-                                                                                                                                                                                                                                                                  "From: /spec status\n\n**{}** - current status: `{}`\nAllowed transitions: {}",
-                                                                                                                                                                                                                                                                  spec.id, spec.status.as_str(), next_str
-                                                                                                                                                                                                                                                              ))
-                                                                                                                                                                                                                                                          }
-                                                                                                                                                                                                                                                      })
+                                let mut spec = match mgr.read_spec(&id).await {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        return Err(format!("failed to read {}: {}", spec_id, e));
+                                    }
+                                };
+                                if let Some(new_status_str) = new_status {
+                                    let new_status = match SpecStatus::parse(&new_status_str) {
+                                        Some(s) => s,
+                                        None => {
+                                            return Err(format!(
+                                                "unknown status '{}'",
+                                                new_status_str
+                                            ));
+                                        }
+                                    };
+                                    // FR-019: Gate SDD clarification check via config flags.
+                                    let sdd_cfg =
+                                        ragent_agent::Config::load().unwrap_or_default().sdd;
+                                    let flags = SddFlags::from_bools(
+                                        sdd_cfg.clarification_markers,
+                                        sdd_cfg.quality_checklists,
+                                        sdd_cfg.consistency_checks,
+                                        sdd_cfg.phase_minus_one_gates,
+                                        sdd_cfg.constitution,
+                                        sdd_cfg.feedback_loop,
+                                    );
+                                    let old_status = spec.status;
+                                    if let Err(e) = mgr
+                                        .transition_with_flags(
+                                            &mut spec, new_status, "user", &flags,
+                                        )
+                                        .await
+                                    {
+                                        return Err(format!("transition failed: {}", e));
+                                    }
+                                    Ok(format!(
+                                        "From: /spec status\n\n\
+                                **{}** transitioned from `{}` to `{}`.",
+                                        spec.id,
+                                        old_status.as_str(),
+                                        new_status.as_str()
+                                    ))
+                                } else {
+                                    let next = ragent_specs::manager::next_statuses(spec.status);
+                                    let next_str = next
+                                        .iter()
+                                        .map(|s| s.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    Ok(format!(
+                                        "From: /spec status\n\n**{}** - current status: `{}`\n\
+                                 Allowed transitions: {}",
+                                        spec.id,
+                                        spec.status.as_str(),
+                                        next_str
+                                    ))
+                                }
+                            })
                         });
                         match result {
                             Ok(output) => {
@@ -8919,73 +9023,118 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     } => {
                         let mgr = spec_manager();
                         let Some(id) = parse_spec_id(&spec_id) else {
-                            self.status = format!("spec: invalid spec ID: {}", spec_id);
+                            self.report_invalid_spec_id(&spec_id);
                             return;
                         };
                         let rt = tokio::runtime::Handle::current();
                         // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
                             rt.block_on(async {
-                                                                                                                                                                                                                                                          let mut spec = match mgr.read_spec(&id).await {
-                                                                                                                                                                                                                                                              Ok(s) => s,
-                                                                                                                                                                                                                                                              Err(e) => return Err(format!("spec: failed to read {}: {}", spec_id, e)),
-                                                                                                                                                                                                                                                          };
-                                                                                                                                                                                                                                                          if let Some(task_id_str) = task_id {
-                                                                                                                                                                                                                                                              if let Some(new_status_str) = new_status {
-                                                                                                                                                                                                                                                                  let new_status = match ragent_specs::spec::TaskStatus::parse(&new_status_str) {
-                                                                                                                                                                                                                                                                      Some(s) => s,
-                                                                                                                                                                                                                                                                      None => return Err(format!("spec: unknown task status '{}'", new_status_str)),
-                                                                                                                                                                                                                                                                  };
-                                                                                                                                                                                                                                                                  if let Err(e) = mgr.update_task_status(&mut spec, &task_id_str, new_status).await {
-                                                                                                                                                                                                                                                                      return Err(format!("spec: task update failed: {}", e));
-                                                                                                                                                                                                                                                                  }
-                                                                                                                                                                                                                                                                  Ok(format!(
-                                                                                                                                                                                                                                                                      "From: /spec task\n\n**{}** task `{}` updated to `{}`.",
-                                                                                                                                                                                                                                                                      spec.id, task_id_str, new_status.as_str()
-                                                                                                                                                                                                                                                                  ))
-                                                                                                                                                                                                                                                              } else {
-                                                                                                                                                                                                                                                                  // Show specific task
-                                                                                                                                                                                                                                                                  let task = spec.tasks.iter().find(|t| t.id == task_id_str);
-                                                                                                                                                                                                                                                                  match task {
-                                                                                                                                                                                                                                                                      Some(t) => {
-                                                                                                                                                                                                                                                                          let mut lines = vec![
-                                                                                                                                                                                                                                                                              format!("From: /spec task\n\n## Task {} - {}", t.id, t.title),
-                                                                                                                                                                                                                                                                              format!("- **Status:** {}", t.status.as_str()),
-                                                                                                                                                                                                                                                                              format!("- **Effort:** {}", t.effort),
-                                                                                                                                                                                                                                                                              format!("- **Priority:** {}", t.priority),
-                                                                                                                                                                                                                                                                          ];
-                                                                                                                                                                                                                                                                          if !t.linked_requirements.is_empty() {
-                                                                                                                                                                                                                                                                              lines.push(format!("- **Requirements:** {}", t.linked_requirements.join(", ")));
-                                                                                                                                                                                                                                                                          }
-                                                                                                                                                                                                                                                                          if !t.dependencies.is_empty() {
-                                                                                                                                                                                                                                                                              lines.push(format!("- **Dependencies:** {}", t.dependencies.join(", ")));
-                                                                                                                                                                                                                                                                          }
-                                                                                                                                                                                                                                                                          if let Some(ts) = t.completed_at {
-                                                                                                                                                                                                                                                                              lines.push(format!("- **Completed:** {}", ts));
-                                                                                                                                                                                                                                                                          }
-                                                                                                                                                                                                                                                                          Ok(lines.join("\n"))
-                                                                                                                                                                                                                                                                      }
-                                                                                                                                                                                                                                                                      None => Err(format!("spec: task {} not found in {}", task_id_str, spec.id)),
-                                                                                                                                                                                                                                                                  }
-                                                                                                                                                                                                                                                              }
-                                                                                                                                                                                                                                                          } else {
-                                                                                                                                                                                                                                                              // List all tasks
-                                                                                                                                                                                                                                                              let mut lines = vec![format!("From: /spec task\n\n## Tasks for **{}**", spec.id)];
-                                                                                                                                                                                                                                                              if spec.tasks.is_empty() {
-                                                                                                                                                                                                                                                                  lines.push("No tasks found.".to_string());
-                                                                                                                                                                                                                                                              } else {
-                                                                                                                                                                                                                                                                  lines.push("| ID | Title | Status | Effort | Priority |".to_string());
-                                                                                                                                                                                                                                                                  lines.push("|----|-------|--------|--------|----------|".to_string());
-                                                                                                                                                                                                                                                                  for t in &spec.tasks {
-                                                                                                                                                                                                                                                                      lines.push(format!(
-                                                                                                                                                                                                                                                                          "| {} | {} | {} | {} | {} |",
-                                                                                                                                                                                                                                                                          t.id, t.title, t.status.as_str(), t.effort, t.priority
-                                                                                                                                                                                                                                                                      ));
-                                                                                                                                                                                                                                                                  }
-                                                                                                                                                                                                                                                              }
-                                                                                                                                                                                                                                                              Ok(lines.join("\n"))
-                                                                                                                                                                                                                                                          }
-                                                                                                                                                                                                                                                      })
+                                let mut spec = match mgr.read_spec(&id).await {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        return Err(format!("failed to read {}: {}", spec_id, e));
+                                    }
+                                };
+                                if let Some(task_id_str) = task_id {
+                                    if let Some(new_status_str) = new_status {
+                                        use ragent_specs::spec::TaskStatus;
+                                        let Some(new_status) = TaskStatus::parse(&new_status_str)
+                                        else {
+                                            return Err(format!(
+                                                "unknown task status '{new_status_str}'"
+                                            ));
+                                        };
+                                        mgr.update_task_status(&mut spec, &task_id_str, new_status)
+                                            .await
+                                            .map_err(|e| format!("task update failed: {e}"))?;
+                                        Ok(format!(
+                                            "From: /spec task\n\n\
+                                **{}** task `{}` updated to `{}`.",
+                                            spec.id,
+                                            task_id_str,
+                                            new_status.as_str()
+                                        ))
+                                    } else {
+                                        // Show specific task
+                                        let task = spec.tasks.iter().find(|t| t.id == task_id_str);
+                                        match task {
+                                            Some(t) => {
+                                                let mut lines = vec![
+                                                    format!(
+                                                        "From: /spec task\n\n## Task {} - {}",
+                                                        t.id, t.title
+                                                    ),
+                                                    format!("- **Status:** {}", t.status.as_str()),
+                                                    format!("- **Effort:** {}", t.effort),
+                                                    format!("- **Priority:** {}", t.priority),
+                                                ];
+                                                if !t.linked_requirements.is_empty() {
+                                                    lines.push(format!(
+                                                        "- **Requirements:** {}",
+                                                        t.linked_requirements.join(", ")
+                                                    ));
+                                                }
+                                                if !t.dependencies.is_empty() {
+                                                    lines.push(format!(
+                                                        "- **Dependencies:** {}",
+                                                        t.dependencies.join(", ")
+                                                    ));
+                                                }
+                                                // Stored as UTC epoch seconds; shown
+                                                // in the user's local time zone.
+                                                let completed = t
+                                                    .completed_at
+                                                    .and_then(|s| i64::try_from(s).ok())
+                                                    .and_then(|s| {
+                                                        chrono::DateTime::from_timestamp(s, 0)
+                                                    })
+                                                    .map(|dt| {
+                                                        dt.with_timezone(&chrono::Local)
+                                                            .format("%Y-%m-%d %H:%M %Z")
+                                                            .to_string()
+                                                    });
+                                                if let Some(when) = completed {
+                                                    lines.push(format!("- **Completed:** {when}"));
+                                                }
+                                                Ok(lines.join("\n"))
+                                            }
+                                            None => Err(format!(
+                                                "task {} not found in {}",
+                                                task_id_str, spec.id
+                                            )),
+                                        }
+                                    }
+                                } else {
+                                    // List all tasks
+                                    let mut lines = vec![format!(
+                                        "From: /spec task\n\n## Tasks for **{}**",
+                                        spec.id
+                                    )];
+                                    if spec.tasks.is_empty() {
+                                        lines.push("No tasks found.".to_string());
+                                    } else {
+                                        lines.extend(
+                                            [
+                                                "| ID | Title | Status | Effort | Priority |",
+                                                "|----|-------|--------|--------|----------|",
+                                            ]
+                                            .map(String::from),
+                                        );
+                                        for t in &spec.tasks {
+                                            lines.push(format!(
+                                                "| {} | {} | {} | {} | {} |",
+                                                t.id,
+                                                t.title,
+                                                t.status.as_str(),
+                                                t.effort,
+                                                t.priority
+                                            ));
+                                        }
+                                    }
+                                    Ok(lines.join("\n"))
+                                }
+                            })
                         });
                         match result {
                             Ok(output) => {
@@ -9004,7 +9153,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     SpecCommand::Activate { spec_id } => {
                         let mgr = spec_manager();
                         let Some(id) = parse_spec_id(&spec_id) else {
-                            self.status = format!("spec: invalid spec ID: {}", spec_id);
+                            self.report_invalid_spec_id(&spec_id);
                             return;
                         };
                         let rt = tokio::runtime::Handle::current();
@@ -9013,9 +9162,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             rt.block_on(async {
                                 match mgr.read_spec(&id).await {
                                     Ok(spec) => Ok(spec),
-                                    Err(e) => {
-                                        Err(format!("spec: failed to read {}: {}", spec_id, e))
-                                    }
+                                    Err(e) => Err(format!("failed to read {}: {}", spec_id, e)),
                                 }
                             })
                         });
@@ -9043,7 +9190,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 self.session_processor
                                     .system_prompt_cache()
                                     .invalidate_spec_cache();
-                                let _ = self // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
+                                let _ = self // INTENTIONAL: in-memory state is authoritative
                                     .session_processor
                                     .spec_manager
                                     // Reuse the manager Arc built above instead of
@@ -9054,14 +9201,21 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                             .clone()
                                             .unwrap_or_else(|| Arc::new(spec_manager())),
                                     );
-                                self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                      "From: /spec activate\n\n[ok] **{}** is now the active spec.\n\n\
-                                                                                                                                                                                                                                                                                                                                                                                       Status: {}\n\
-                                                                                                                                                                                                                                                                                                                                                                                       Title: {}\n\
-                                                                                                                                                                                                                                                                                                                                                                                       Requirements: {}\n\
-                                                                                                                                                                                                                                                                                                                                                                                       Tasks: {}\n\n\
-                                                                                                                                                                                                                                                                                                                                                                                       This spec's requirements and tasks will be injected into the agent's system prompt.",
-                                                                                                                                                                                                                                                                                                                                                                                      spec.id, spec.status.as_str(), spec.title, spec.requirements.len(), spec.tasks.len()
-                                                                                                                                                                                                                                                                                                                                                                                  ));
+                                self.append_assistant_text(&format!(
+                                    "From: /spec activate\n\n\
+                                     [ok] **{}** is now the active spec.\n\n\
+                                     Status: {}\n\
+                                     Title: {}\n\
+                                     Requirements: {}\n\
+                                     Tasks: {}\n\n\
+                                     This spec's requirements and tasks will be injected into the \
+                                     agent's system prompt.",
+                                    spec.id,
+                                    spec.status.as_str(),
+                                    spec.title,
+                                    spec.requirements.len(),
+                                    spec.tasks.len()
+                                ));
                                 self.status = format!("spec: {} activated", spec_id);
                             }
                             Err(e) => {
@@ -9074,22 +9228,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                     SpecCommand::Deactivate => {
-                        if let Some(prev) = self.active_spec.take() {
-                            self.spec_manager = None;
-                            let rt = tokio::runtime::Handle::current();
-                            // `block_in_place` keeps the nested `block_on` off the
-                            // UI runtime's worker, avoiding the deadlock in
-                            // FUNC-015.
-                            // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
-                            let _ = tokio::task::block_in_place(|| {
-                                // INTENTIONAL: bridge to the async spec manager; the value is the spec id, not an error
-                                rt.block_on(async {
-                                    self.session_processor.active_spec.write().await.take()
-                                })
-                            });
-                            self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                  "From: /spec deactivate\n\n[ok] Spec **{}** deactivated. Agent prompts will no longer include spec context.",
-                                                                                                                                                                                                                                                                                                                                                                                  prev
-                                                                                                                                                                                                                                                                                                                                                                              ));
+                        if let Some(prev) = self.clear_active_spec() {
+                            self.append_assistant_text(&format!(
+                                "From: /spec deactivate\n\n[ok] Spec **{prev}** deactivated. \
+                                 Agent prompts will no longer include spec context."
+                            ));
                             self.status = "spec: deactivated".to_string();
                         } else {
                             self.append_assistant_text(
@@ -9100,56 +9243,54 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                     SpecCommand::Delete { spec_id, yes } => {
                         let mgr = spec_manager();
-                        let id = match ragent_specs::spec::SpecId::new(&spec_id) {
-                            Some(id) => id,
-                            None => {
-                                self.status = format!("spec: invalid spec ID: {}", spec_id);
-                                self.append_assistant_text(&format!(
-                                    "From: /spec delete\n\n**Error:** invalid spec ID: {}",
-                                    spec_id
-                                ));
-                                return;
-                            }
+                        let Some(id) = parse_spec_id(&spec_id) else {
+                            self.report_invalid_spec_id(&spec_id);
+                            return;
                         };
                         if !yes {
                             self.append_assistant_text(&format!(
-                                "From: /spec delete\n\nRefusing to delete specs/{} without confirmation. Re-run with `--yes` to skip this prompt.",
-                                spec_id
+                                "From: /spec delete\n\nRefusing to delete specs/{spec_id} without \
+                                 confirmation. Run `/spec delete {spec_id} --yes` to confirm."
                             ));
                             return;
                         }
-                        self.status = format!("spec: deleting '{}'...", spec_id);
-                        let event_bus = self.event_bus.clone();
-                        let session_id = self.session_id.clone().unwrap_or_default();
-                        tokio::spawn(async move {
-                            let session_id_for_notice = session_id.clone();
-                            match mgr.delete_spec(&id).await {
-                                Ok(()) => {
-                                    event_bus.publish(ragent_agent::event::Event::TextDelta {
-                                        session_id,
-                                        text: format!(
-                                            "From: /spec delete\n\n[ok] Deleted specs/{}.",
-                                            spec_id
-                                        ),
-                                    });
-                                    event_bus.publish(ragent_agent::event::Event::AgentNotice {
-                                        session_id: session_id_for_notice,
-                                        message: format!("spec: deleted specs/{}", spec_id),
-                                    });
-                                }
-                                Err(e) => {
-                                    event_bus.publish(ragent_agent::event::Event::TextDelta {
-                                        session_id,
-                                        text: format!("From: /spec delete\n\n**Error:** {}", e),
-                                    });
-                                }
-                            }
+                        let rt = tokio::runtime::Handle::current();
+                        // Run inline (not spawned) so the active spec can be
+                        // cleared only after the directory is really gone.
+                        // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
+                        let result = tokio::task::block_in_place(|| {
+                            rt.block_on(async { mgr.delete_spec(&id).await })
                         });
+                        match result {
+                            Ok(()) => {
+                                // A deleted spec must not stay injected into
+                                // the agent's system prompt.
+                                let was_active = self.active_spec.as_deref() == Some(&spec_id);
+                                if was_active {
+                                    self.clear_active_spec();
+                                }
+                                let note = if was_active {
+                                    " It was the active spec and has been deactivated."
+                                } else {
+                                    ""
+                                };
+                                self.append_assistant_text(&format!(
+                                    "From: /spec delete\n\n[ok] Deleted specs/{spec_id}.{note}"
+                                ));
+                                self.status = format!("spec: deleted specs/{spec_id}");
+                            }
+                            Err(e) => {
+                                self.append_assistant_text(&format!(
+                                    "From: /spec delete\n\n**Error:** {e}"
+                                ));
+                                self.status = format!("spec: delete failed: {e}");
+                            }
+                        }
                     }
                     SpecCommand::Coverage { spec_id } => {
                         let mgr = spec_manager();
                         let Some(id) = parse_spec_id(&spec_id) else {
-                            self.status = format!("spec: invalid spec ID: {}", spec_id);
+                            self.report_invalid_spec_id(&spec_id);
                             return;
                         };
                         let rt = tokio::runtime::Handle::current();
@@ -9159,17 +9300,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 let spec = match mgr.read_spec(&id).await {
                                     Ok(s) => s,
                                     Err(e) => {
-                                        return Err(format!(
-                                            "spec: failed to read {}: {}",
-                                            spec_id, e
-                                        ));
+                                        return Err(format!("failed to read {}: {}", spec_id, e));
                                     }
                                 };
                                 // Rendering lives in `Spec::coverage_report`
                                 // (ragent-specs) so this arm and the
                                 // `spec_coverage` agent tool always agree on
                                 // format and status symbols.
-                                Ok(spec.coverage_report())
+                                Ok(format!(
+                                    "From: /spec coverage\n\n{}",
+                                    spec.coverage_report()
+                                ))
                             })
                         });
                         match result {
@@ -9239,9 +9380,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 available.join("\n")
                             };
                             self.append_assistant_text(&format!(
-                                                                                                      "From: /spec impl\n\n**Error:** Spec `{}` not found.\n\nAvailable specs:\n{}",
-                                                                                                      spec_id, avail_str
-                                                                                                  ));
+                                "From: /spec impl\n\n**Error:** Spec `{}` not found.\n\n\
+                                 Available specs:\n{}",
+                                spec_id, avail_str
+                            ));
                             self.status = format!("spec: spec {} not found", spec_id);
                             return;
                         }
@@ -9253,12 +9395,24 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 ragent_specs::spec::SpecStatus::Implemented
                                     | ragent_specs::spec::SpecStatus::Verified
                             ) {
+                                // Only `implemented` can reopen; a verified spec
+                                // is closed and must be archived and re-drafted.
+                                let hint = if status == ragent_specs::spec::SpecStatus::Implemented
+                                {
+                                    format!(
+                                        "To re-implement, reopen it first: \
+                                         `/spec status {spec_id} in_progress`"
+                                    )
+                                } else {
+                                    "A verified spec cannot be reopened; archive it and start \
+                                     again from `draft`."
+                                        .to_string()
+                                };
                                 self.append_assistant_text(&format!(
-                                                          "From: /spec impl\n\n[warn] Spec **{}** is already marked as **{}**.\n\n\
-                                                           To re-implement, first transition the spec back to `approved` or `in_progress`:\n\
-                                                           `/spec status {} approved`",
-                                                          spec_id, status.as_str(), spec_id
-                                                      ));
+                                    "From: /spec impl\n\n[warn] Spec **{spec_id}** is already \
+                                     marked as **{}**.\n\n{hint}",
+                                    status.as_str()
+                                ));
                                 self.status = format!("spec: {} is {}", spec_id, status.as_str());
                                 return;
                             }
@@ -9272,6 +9426,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         if dry_run {
                             opts = opts.with_dry_run();
                         }
+                        // FR-019: gate the in_progress transition checks with
+                        // the configured SDD flags, as `/spec status` does.
+                        let sdd_cfg = ragent_agent::Config::load().unwrap_or_default().sdd;
+                        opts = opts.with_sdd_flags(SddFlags::from_bools(
+                            sdd_cfg.clarification_markers,
+                            sdd_cfg.quality_checklists,
+                            sdd_cfg.consistency_checks,
+                            sdd_cfg.phase_minus_one_gates,
+                            sdd_cfg.constitution,
+                            sdd_cfg.feedback_loop,
+                        ));
 
                         // Create runner
                         let runner_result: Result<SpecImplRunner, String> =
@@ -9789,11 +9954,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                     Ok(specs) => specs
                                                         .iter()
                                                         .map(|s| {
-                                                            format!(
-                                                                "  - {} ({})",
-                                                                s.id,
-                                                                s.status.as_str()
-                                                            )
+                                format!(
+                                "  - {} ({})",
+                                s.id,
+                                s.status.as_str()
+                                )
                                                         })
                                                         .collect(),
                                                     Err(_) => vec![],
@@ -10112,11 +10277,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                     Ok(specs) => specs
                                                         .iter()
                                                         .map(|s| {
-                                                            format!(
-                                                                "  - {} ({})",
-                                                                s.id,
-                                                                s.status.as_str()
-                                                            )
+                                format!(
+                                "  - {} ({})",
+                                s.id,
+                                s.status.as_str()
+                                )
                                                         })
                                                         .collect(),
                                                     Err(_) => vec![],
@@ -10258,10 +10423,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         .map(|m| format!("{} {}", m.icon(), m.label()))
                         .unwrap_or_else(|| "normal (no role mode active)".to_string());
                     self.append_assistant_text(&format!(
-                                                                      "From: /mode\nCurrent mode: **{current}**\n\n\
-                                                                       Available modes: `architect` `coder` `reviewer` `debugger` `tester`\n\
-                                                                       Use `/mode off` to return to normal mode."
-                                                                  ));
+                                "From: /mode\nCurrent mode: **{current}**\n\n\
+                                Available modes: `architect` `coder` `reviewer` `debugger` `tester`\n\
+                                Use `/mode off` to return to normal mode."
+                                ));
                 } else if sub == "off" || sub == "normal" {
                     self.role_mode = None;
                     self.status = "mode: normal".to_string();
@@ -10275,17 +10440,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     self.role_mode = Some(mode);
                     self.status = format!("{icon} mode: {label}");
                     self.append_assistant_text(&format!(
-                                                                      "From: /mode\n{icon} **{label} mode** activated.\n\
-                                                                       The agent will now focus on {} tasks.",
-                                                                      label
-                                                                  ));
+                        "From: /mode\n{icon} **{label} mode** activated.\n\
+                                The agent will now focus on {} tasks.",
+                        label
+                    ));
                     self.push_log_no_agent(LogLevel::Info, format!("role mode: {label}"));
                 } else {
                     self.append_assistant_text(&format!(
-                                                                      "From: /mode\nUnknown mode '{}'. \
-                                                                       Available: `architect` `coder` `reviewer` `debugger` `tester` `off`",
-                                                                      sub
-                                                                  ));
+                                "From: /mode\nUnknown mode '{}'. \
+                                Available: `architect` `coder` `reviewer` `debugger` `tester` `off`",
+                                sub
+                                ));
                 }
             }
             "memory" => {

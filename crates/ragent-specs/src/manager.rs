@@ -18,7 +18,8 @@ const fn allowed_transitions(from: SpecStatus) -> &'static [SpecStatus] {
         SpecStatus::InReview => &[SpecStatus::Draft, SpecStatus::Approved],
         SpecStatus::Approved => &[SpecStatus::InProgress],
         SpecStatus::InProgress => &[SpecStatus::Implemented],
-        SpecStatus::Implemented => &[SpecStatus::Verified],
+        // `in_progress` reopens an implemented spec for further work.
+        SpecStatus::Implemented => &[SpecStatus::Verified, SpecStatus::InProgress],
         SpecStatus::Verified => &[SpecStatus::Archived],
         SpecStatus::Archived => &[SpecStatus::Draft],
     }
@@ -216,48 +217,79 @@ impl SpecManager {
         self.write_spec(spec).await
     }
 
-    /// Rewrite the task table in PLAN.md with updated task statuses.
+    /// Rewrite the task rows in PLAN.md with updated task statuses.
+    ///
+    /// Rows are replaced in place, so prose, sub-headings and unrelated
+    /// tables inside the `## Tasks` section survive. Only the lines
+    /// [`PlanParser`] itself reads as tasks are touched: the first task
+    /// header in the section (normalised, with its separator, to the
+    /// 7-column layout so legacy 6-column and `Task ID` tables gain a Status
+    /// column) and data rows with at least six cells whose ID is a known
+    /// task. When the plan has no task section a new `## Tasks` table is
+    /// appended.
     fn rewrite_plan_tasks(plan_md: &str, tasks: &[crate::spec::Task]) -> Result<String, SpecError> {
-        let lines: Vec<&str> = plan_md.lines().collect();
+        const HEADER: &str =
+            "| ID | Title | Requirement | Effort | Priority | Status | Dependencies |";
+        const SEPARATOR: &str =
+            "|----|-------|-------------|--------|----------|--------|--------------|";
+        let by_id: std::collections::HashMap<&str, &crate::spec::Task> =
+            tasks.iter().map(|t| (t.id.as_str(), t)).collect();
+
+        let mut out: Vec<String> = Vec::new();
         let mut in_task_section = false;
-        let mut table_start = None;
-        let mut table_end = None;
-        for (i, line) in lines.iter().enumerate() {
+        let mut saw_task_section = false;
+        let mut header_seen = false;
+        let mut after_header = false;
+        for line in plan_md.lines() {
             let trimmed = line.trim();
             if trimmed.eq_ignore_ascii_case("## Tasks") || trimmed.eq_ignore_ascii_case("### Tasks")
             {
                 in_task_section = true;
+                saw_task_section = true;
+                out.push(line.to_string());
                 continue;
             }
-            if in_task_section && trimmed.starts_with("## ") && !trimmed.starts_with("### ") {
-                table_end = Some(i);
-                break;
+            if in_task_section && trimmed.starts_with("## ") {
+                in_task_section = false;
             }
-            if in_task_section && table_start.is_none() && trimmed.starts_with('|') {
-                table_start = Some(i);
+            let was_after_header = std::mem::take(&mut after_header);
+            if !in_task_section || !trimmed.starts_with('|') {
+                out.push(line.to_string());
+                continue;
+            }
+            let cells = PlanParser::split_row(trimmed);
+            if !header_seen && PlanParser::is_task_header(trimmed) {
+                header_seen = true;
+                if cells.len() >= PlanParser::MIN_TASK_CELLS {
+                    after_header = true;
+                    out.push(HEADER.to_string());
+                } else {
+                    out.push(line.to_string());
+                }
+            } else if was_after_header
+                && trimmed.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
+            {
+                out.push(SEPARATOR.to_string());
+            } else if let Some(task) = by_id
+                .get(cells.first().copied().unwrap_or(""))
+                .filter(|_| header_seen && cells.len() >= PlanParser::MIN_TASK_CELLS)
+            {
+                out.push(task.table_row());
+            } else {
+                out.push(line.to_string());
             }
         }
-        let table_start = table_start.unwrap_or(lines.len());
-        let table_end = table_end.unwrap_or(lines.len());
-        let mut new_lines: Vec<String> = lines[..table_start]
-            .iter()
-            .map(std::string::ToString::to_string)
-            .collect();
-        new_lines.push(
-            "| ID | Title | Requirement | Effort | Priority | Status | Dependencies |".to_string(),
-        );
-        new_lines.push(
-            "|----|-------|-------------|--------|----------|--------|--------------|".to_string(),
-        );
-        for task in tasks {
-            new_lines.push(task.table_row());
+        if !saw_task_section && !tasks.is_empty() {
+            out.extend([String::new(), "## Tasks".to_string(), String::new()]);
+            out.push(HEADER.to_string());
+            out.push(SEPARATOR.to_string());
+            out.extend(tasks.iter().map(crate::spec::Task::table_row));
         }
-        new_lines.extend(
-            lines[table_end..]
-                .iter()
-                .map(std::string::ToString::to_string),
-        );
-        Ok(new_lines.join("\n"))
+        let mut result = out.join("\n");
+        if plan_md.ends_with('\n') || !saw_task_section {
+            result.push('\n');
+        }
+        Ok(result)
     }
 
     // -- Listing --
@@ -419,23 +451,22 @@ fn update_frontmatter(
     audit_trail: &[(u64, String, String, String)],
     reviewers: &[String],
 ) -> Result<String, SpecError> {
-    let body_start = if let Some(rest) = content.strip_prefix("---") {
-        if let Some(end) = rest.find("---") {
-            3 + end + 3
-        } else {
-            0
-        }
-    } else {
-        0
-    };
-
-    let body = if body_start > 0 {
-        &content[body_start..]
-    } else {
-        content
-    };
+    let (old_fm, body) = crate::io::split_frontmatter(content).unwrap_or(("", content));
 
     let mut fm_lines = vec!["---".to_string(), format!("status: {}", status.as_str())];
+
+    // Carry over every key this function does not own (research, owner,
+    // custom metadata...) so a status change never drops frontmatter.
+    let mut skipping = false;
+    for line in old_fm.lines() {
+        if crate::io::is_frontmatter_key_line(line) {
+            let key = line.split(':').next().unwrap_or("").trim();
+            skipping = matches!(key, "status" | "audit" | "reviewers");
+        }
+        if !skipping {
+            fm_lines.push(line.to_string());
+        }
+    }
 
     if !audit_trail.is_empty() {
         fm_lines.push("audit:".to_string());

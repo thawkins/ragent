@@ -69,6 +69,115 @@ async fn list_with_one_spec_renders_row() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_rejects_unknown_status_and_flag() {
+    let (_g, _e, _t, mut app) = app_with_spec();
+    app.execute_slash_command("/spec list --status=bogus").await;
+    assert!(
+        app.status.contains("unknown status 'bogus'"),
+        "{}",
+        app.status
+    );
+    assert!(last_message(&app).contains("**Error:**"));
+
+    app.execute_slash_command("/spec list --bogus").await;
+    assert!(
+        app.status.contains("unknown argument '--bogus'"),
+        "{}",
+        app.status
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_status_filter_accepts_documented_space_form() {
+    let (_g, _e, _t, mut app) = app_with_spec();
+    app.execute_slash_command("/spec list --status in_review")
+        .await;
+    assert_eq!(app.status, "spec: 0 spec(s) listed");
+    app.execute_slash_command("/spec list --status draft").await;
+    assert_eq!(app.status, "spec: 1 spec(s) listed");
+    app.execute_slash_command("/spec list --status=draft --prefix sam")
+        .await;
+    assert_eq!(app.status, "spec: 1 spec(s) listed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn impl_on_implemented_spec_suggests_valid_reopen() {
+    let (_g, _e, temp, mut app) = app_with_spec();
+    let spec_md = temp.path().join("specs/sample/SPEC.md");
+    let body = std::fs::read_to_string(&spec_md).unwrap();
+    std::fs::write(
+        &spec_md,
+        body.replace("status: draft", "status: implemented"),
+    )
+    .unwrap();
+
+    app.execute_slash_command("/spec impl sample").await;
+    assert!(last_message(&app).contains("/spec status sample in_progress"));
+
+    // The suggested command must actually work.
+    app.execute_slash_command("/spec status sample in_progress")
+        .await;
+    assert!(
+        last_message(&app).contains("from `implemented` to `in_progress`"),
+        "{}",
+        last_message(&app)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn impl_on_verified_spec_does_not_suggest_reopen() {
+    let (_g, _e, temp, mut app) = app_with_spec();
+    let spec_md = temp.path().join("specs/sample/SPEC.md");
+    let body = std::fs::read_to_string(&spec_md).unwrap();
+    std::fs::write(&spec_md, body.replace("status: draft", "status: verified")).unwrap();
+
+    app.execute_slash_command("/spec impl sample").await;
+    let text = last_message(&app);
+    assert!(!text.contains("in_progress`"), "{text}");
+    assert!(text.contains("cannot be reopened"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_show_includes_persisted_completion_time() {
+    let (_g, _e, _t, mut app) = app_with_spec();
+    app.execute_slash_command("/spec task sample T-001 completed")
+        .await;
+    app.execute_slash_command("/spec task sample T-001").await;
+    let text = last_message(&app);
+    assert!(text.contains("**Completed:** "), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_flag_without_value_does_not_swallow_next_option() {
+    let (_g, _e, _t, mut app) = app_with_spec();
+    app.execute_slash_command("/spec list --prefix --archived")
+        .await;
+    assert!(
+        app.status.contains("--prefix needs a value"),
+        "{}",
+        app.status
+    );
+    app.execute_slash_command("/spec list --status=").await;
+    assert!(
+        app.status.contains("--status needs a value"),
+        "{}",
+        app.status
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn status_transition_reports_previous_status() {
+    let (_g, _e, _t, mut app) = app_with_spec();
+    app.execute_slash_command("/spec status sample in_review")
+        .await;
+    let text = last_message(&app);
+    assert!(
+        text.contains("from `draft` to `in_review`"),
+        "message must name the old status: {text}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_with_prefix_and_archived_filters() {
     let (_g, _e, _t, mut app) = app_with_spec();
     app.execute_slash_command("/spec list --prefix=sample --archived")
@@ -162,7 +271,7 @@ async fn status_transition_succeeds() {
 async fn status_unknown_status_is_rejected() {
     let (_g, _e, _t, mut app) = app_with_spec();
     app.execute_slash_command("/spec status sample bogus").await;
-    assert_eq!(app.status, "spec: spec: unknown status 'bogus'");
+    assert_eq!(app.status, "spec: unknown status 'bogus'");
     assert!(last_message(&app).contains("**Error:**"));
 }
 
@@ -196,7 +305,7 @@ async fn task_update_sets_status() {
 async fn task_unknown_task_is_reported() {
     let (_g, _e, _t, mut app) = app_with_spec();
     app.execute_slash_command("/spec task sample T-999").await;
-    assert_eq!(app.status, "spec: spec: task T-999 not found in sample");
+    assert_eq!(app.status, "spec: task T-999 not found in sample");
     assert!(
         last_message(&app).contains("T-999"),
         "text: {}",
@@ -209,7 +318,7 @@ async fn task_unknown_status_is_rejected() {
     let (_g, _e, _t, mut app) = app_with_spec();
     app.execute_slash_command("/spec task sample T-001 bogus")
         .await;
-    assert_eq!(app.status, "spec: spec: unknown task status 'bogus'");
+    assert_eq!(app.status, "spec: unknown task status 'bogus'");
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +342,7 @@ async fn activate_missing_spec_reports_error() {
     let (_g, _e, _t, mut app) = app_with_spec();
     app.execute_slash_command("/spec activate nope").await;
     assert!(
-        app.status.starts_with("spec: spec: failed to read nope"),
+        app.status.starts_with("spec: failed to read nope"),
         "got {}",
         app.status
     );
@@ -266,15 +375,18 @@ async fn delete_with_yes_removes_directory() {
     let dir = temp.path().join("specs").join("sample");
     assert!(dir.is_dir());
     app.execute_slash_command("/spec delete sample --yes").await;
-    assert_eq!(app.status, "spec: deleting 'sample'...");
-    // The delete runs on a spawned task; poll until the directory is gone.
-    for _ in 0..200 {
-        if !dir.exists() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    assert_eq!(app.status, "spec: deleted specs/sample");
     assert!(!dir.exists(), "spec directory must be deleted");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_active_spec_deactivates_it() {
+    let (_g, _e, _t, mut app) = app_with_spec();
+    app.execute_slash_command("/spec activate sample").await;
+    assert_eq!(app.active_spec.as_deref(), Some("sample"));
+    app.execute_slash_command("/spec delete sample --yes").await;
+    assert_eq!(app.active_spec, None);
+    assert!(last_message(&app).contains("deactivated"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

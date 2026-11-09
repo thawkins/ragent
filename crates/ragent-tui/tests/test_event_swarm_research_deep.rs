@@ -761,6 +761,67 @@ async fn advance_spec_impl_finishes_the_run_and_transitions_the_spec() {
     assert!(joined_text(&app).contains("All 2 tasks completed"));
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn advance_spec_impl_reports_a_failed_implemented_write() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let specs_root = write_spec(temp.path(), "in_progress", PLAN_MD);
+    let runner = ragent_specs::SpecImplRunner::new(
+        "sample",
+        specs_root.clone(),
+        ragent_specs::ImplOptions::default(),
+    )
+    .await
+    .expect("build runner");
+
+    // Both tasks already done, so the only write left is the status
+    // transition; then make the spec directory read-only so it fails.
+    let spec_dir = specs_root.join("sample");
+    std::fs::write(
+        spec_dir.join("PLAN.md"),
+        PLAN_MD
+            .replace(
+                "| Priority | Dependencies |",
+                "| Priority | Status | Dependencies |",
+            )
+            .replace("|---|---|---|---|---|---|", "|---|---|---|---|---|---|---|")
+            .replace("| Critical | - |", "| Critical | completed | - |")
+            .replace("| High | T-001 |", "| High | completed | T-001 |"),
+    )
+    .expect("write completed PLAN.md");
+    std::fs::set_permissions(&spec_dir, std::fs::Permissions::from_mode(0o555)).expect("chmod");
+    if std::fs::write(spec_dir.join(".probe"), "x").is_ok() {
+        // Running with privileges that ignore directory permissions.
+        std::fs::set_permissions(&spec_dir, std::fs::Permissions::from_mode(0o755)).ok();
+        return;
+    }
+
+    let mut app = new_app("s1");
+    app.spec_impl_state = Some(SpecImplState {
+        spec_id: "sample".to_string(),
+        specs_root: specs_root.clone(),
+        task_ids: vec!["T-001".to_string(), "T-002".to_string()],
+        current_rank: 2,
+        total: 2,
+        runner,
+    });
+    app.handle_event(Event::MessageEnd {
+        session_id: "s1".to_string(),
+        message_id: "m-spec-fail".to_string(),
+        reason: FinishReason::Stop,
+    })
+    .await;
+    std::fs::set_permissions(&spec_dir, std::fs::Permissions::from_mode(0o755)).ok();
+
+    assert_eq!(app.status, "spec: sample status update failed");
+    let text = joined_text(&app);
+    assert!(text.contains("failed to set the spec status"), "{text}");
+    assert!(!text.contains("Spec status set to `implemented`"), "{text}");
+    let spec_md = std::fs::read_to_string(spec_dir.join("SPEC.md")).expect("read SPEC.md");
+    assert!(spec_md.contains("status: in_progress"), "{spec_md}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn advance_spec_impl_with_an_invalid_spec_id_stops_the_run() {
     let temp = tempfile::tempdir().expect("tempdir");

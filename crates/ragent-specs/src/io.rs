@@ -88,6 +88,105 @@ fn resolve_spec_dir(specs_root: &Path, dir_name: &str) -> Result<PathBuf, SpecEr
     Ok(dir)
 }
 
+/// Split `content` into its YAML frontmatter and the remaining body.
+///
+/// The frontmatter must open with a `---` line at the very start of the file
+/// and close with a line that is exactly `---`. Returns `None` when there is
+/// no well-formed frontmatter block. A `---` inside a value does not close
+/// the block.
+pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
+    let rest = content
+        .strip_prefix("---\r\n")
+        .or_else(|| content.strip_prefix("---\n"))?;
+    let mut offset = 0;
+    for line in rest.split_inclusive('\n') {
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            return Some((&rest[..offset], &rest[offset + line.len()..]));
+        }
+        offset += line.len();
+    }
+    None
+}
+
+/// Returns `true` when a frontmatter line starts a new top-level key.
+///
+/// Indented lines, `- item` list entries, blank lines and YAML comments
+/// (`# ...`) are not key lines, so a comment inside a list does not end it.
+pub(crate) fn is_frontmatter_key_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    !line.starts_with([' ', '\t', '-']) && !trimmed.is_empty() && !trimmed.starts_with('#')
+}
+
+/// Read a frontmatter list value given as `key: [a, b]` or as a block of
+/// `- item` lines under `key:`. Surrounding quotes are stripped.
+fn frontmatter_list(fm: &str, key: &str) -> Vec<String> {
+    let strip = |v: &str| v.trim().trim_matches(['"', '\'']).to_string();
+    let prefix = format!("{key}:");
+    let mut in_list = false;
+    let mut items = Vec::new();
+    for line in fm.lines() {
+        let trimmed = line.trim();
+        if is_frontmatter_key_line(line) {
+            in_list = false;
+            if let Some(val) = trimmed.strip_prefix(&prefix) {
+                let val = val.trim();
+                if let Some(inner) = val.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
+                    items.extend(inner.split(',').map(strip).filter(|v| !v.is_empty()));
+                } else {
+                    in_list = val.is_empty();
+                }
+            }
+        } else if in_list && let Some(item) = trimmed.strip_prefix("- ") {
+            let item = strip(item);
+            if !item.is_empty() {
+                items.push(item);
+            }
+        }
+    }
+    items
+}
+
+/// Read `key`'s value from a flow-map body such as
+/// `time: 1, from: "a", to: "b", actor: "c"`. Double-quoted values are
+/// unescaped (inverse of `commands::yaml_double_quote`); bare values run to
+/// the next comma.
+fn inline_map_value(body: &str, key: &str) -> Option<String> {
+    let needle = format!("{key}:");
+    let mut search_from = 0;
+    let start = loop {
+        let idx = body[search_from..].find(&needle)? + search_from;
+        // Require a field boundary so `to:` does not match inside `foo_to:`.
+        let at_boundary = body[..idx]
+            .chars()
+            .next_back()
+            .is_none_or(|c| c == ',' || c.is_whitespace());
+        if at_boundary {
+            break idx + needle.len();
+        }
+        search_from = idx + needle.len();
+    };
+    let value = body[start..].trim_start();
+    if let Some(quoted) = value.strip_prefix('"') {
+        let mut out = String::new();
+        let mut chars = quoted.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => return Some(out),
+                '\\' => match chars.next()? {
+                    'n' => out.push('\n'),
+                    'r' => out.push('\r'),
+                    other => out.push(other),
+                },
+                other => out.push(other),
+            }
+        }
+        None
+    } else {
+        let end = value.find(',').unwrap_or(value.len());
+        Some(value[..end].trim().to_string())
+    }
+}
+
 /// I/O helper for spec management.
 pub struct SpecIo;
 
@@ -196,7 +295,14 @@ impl SpecIo {
             let Some(id) = SpecId::new(dir_name) else {
                 continue;
             };
-            specs.push(Self::load_spec_from_dir(&path, id).await?);
+            // One unreadable spec (bad encoding, permissions) must not hide
+            // every other spec from `/spec list`, search and the agent tools.
+            match Self::load_spec_from_dir(&path, id).await {
+                Ok(spec) => specs.push(spec),
+                Err(e) => {
+                    tracing::warn!("skipping unreadable spec at {}: {e}", path.display());
+                }
+            }
         }
         Ok(specs)
     }
@@ -232,8 +338,14 @@ impl SpecIo {
         let status = Self::extract_status(&spec_md).unwrap_or(SpecStatus::Draft);
         let reviewers = Self::extract_reviewers(&spec_md);
         let research = Self::extract_research(&spec_md);
+        let audit_trail = Self::extract_audit(&spec_md);
         let mut spec = Spec::new(id, title);
         spec.status = status;
+        // Keep the persisted history; `Spec::new` only seeds a creation entry
+        // for specs that have never been transitioned.
+        if !audit_trail.is_empty() {
+            spec.audit_trail = audit_trail;
+        }
         spec.tasks = Self::parse_tasks(&plan_md);
         // Build requirements before moving `spec_md` into the struct so no
         // clone of the full text is needed.
@@ -357,11 +469,9 @@ impl SpecIo {
     }
 
     /// Slice the YAML frontmatter block (content between the opening `---`
-    /// line and the closing `---`), excluding both markers.
+    /// line and the closing `---` line), excluding both markers.
     fn frontmatter(content: &str) -> Option<&str> {
-        let rest = content.strip_prefix("---")?;
-        let end = rest.find("---")?;
-        Some(&rest[..end])
+        split_frontmatter(content).map(|(fm, _)| fm)
     }
 
     /// Extract research artifact names from YAML frontmatter.
@@ -369,58 +479,48 @@ impl SpecIo {
     /// Supports `research: [a, b]` inline lists and the multi-line
     /// `research:\n  - name` form, matching [`extract_reviewers`].
     fn extract_research(content: &str) -> Vec<String> {
-        let Some(frontmatter) = Self::frontmatter(content) else {
-            return vec![];
-        };
-        for line in frontmatter.lines() {
-            let trimmed = line.trim();
-            if let Some(val) = trimmed.strip_prefix("research:") {
-                let val = val.trim();
-                if let Some(rest) = val.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                    return rest
-                        .split(',')
-                        .map(|r| r.trim().trim_matches(&['"', '\''][..]).to_string())
-                        .filter(|r| !r.is_empty())
-                        .collect();
-                }
-            }
-        }
-        vec![]
+        Self::frontmatter(content).map_or_else(Vec::new, |fm| frontmatter_list(fm, "research"))
     }
 
     /// Extract reviewers from YAML frontmatter.
     /// Looks for `reviewers: [list]` or `reviewers:\n  - name` format.
     fn extract_reviewers(content: &str) -> Vec<String> {
-        let Some(frontmatter) = Self::frontmatter(content) else {
+        Self::frontmatter(content).map_or_else(Vec::new, |fm| frontmatter_list(fm, "reviewers"))
+    }
+
+    /// Extract the audit trail written by the manager's frontmatter update:
+    /// `audit:` followed by `  - { time: N, from: "a", to: "b", actor: "c" }`
+    /// lines. Entries that do not parse are skipped.
+    fn extract_audit(content: &str) -> Vec<(u64, String, String, String)> {
+        let Some(fm) = Self::frontmatter(content) else {
             return vec![];
         };
-        let mut in_reviewers = false;
-        let mut reviewers = Vec::new();
-        for line in frontmatter.lines() {
-            let trimmed = line.trim();
-            // Check for inline list: reviewers: [a, b]
-            if let Some(val) = trimmed.strip_prefix("reviewers:") {
-                let val = val.trim();
-                if let Some(rest) = val.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                    for r in rest.split(',') {
-                        let name = r.trim().trim_matches(&['"', '\''][..]);
-                        if !name.is_empty() {
-                            reviewers.push(name.to_string());
-                        }
-                    }
-                }
-                // Start of multi-line list
-                in_reviewers = true;
-            } else if in_reviewers {
-                if let Some(name) = trimmed.strip_prefix("- ") {
-                    reviewers.push(name.trim().trim_matches(&['"', '\''][..]).to_string());
-                } else if !trimmed.is_empty() && !trimmed.starts_with('-') {
-                    // No longer in the reviewers list
-                    in_reviewers = false;
-                }
+        let mut in_audit = false;
+        let mut entries = Vec::new();
+        for line in fm.lines() {
+            if is_frontmatter_key_line(line) {
+                in_audit = line.trim() == "audit:";
+                continue;
+            }
+            if !in_audit {
+                continue;
+            }
+            let Some(body) = line
+                .trim()
+                .strip_prefix("- {")
+                .and_then(|b| b.strip_suffix('}'))
+            else {
+                continue;
+            };
+            let time = inline_map_value(body, "time").and_then(|t| t.parse::<u64>().ok());
+            let from = inline_map_value(body, "from");
+            let to = inline_map_value(body, "to");
+            let actor = inline_map_value(body, "actor");
+            if let (Some(time), Some(from), Some(to), Some(actor)) = (time, from, to, actor) {
+                entries.push((time, from, to, actor));
             }
         }
-        reviewers
+        entries
     }
 
     /// Parse tasks from PLAN.md content.
@@ -440,7 +540,9 @@ impl SpecIo {
                 id: task.id,
                 title: task.title,
                 description: String::new(),
-                linked_requirements: if task.requirement.is_empty() || task.requirement == "-" {
+                linked_requirements: if crate::plan_parser::PlanParser::is_placeholder_cell(
+                    &task.requirement,
+                ) {
                     Vec::new()
                 } else {
                     // The parser preserves the raw cell (which may list several
@@ -455,7 +557,7 @@ impl SpecIo {
                 effort: task.effort.as_str().to_string(),
                 priority: task.priority.as_str().to_string(),
                 dependencies: task.dependencies,
-                completed_at: None, // Round-tripped from file; actual timestamp not preserved
+                completed_at: task.completed_at,
             })
             .collect()
     }

@@ -27,6 +27,10 @@ pub struct ImplOptions {
     pub task_id: Option<String>,
     /// Display execution order without actually running tasks.
     pub dry_run: bool,
+    /// SDD capability flags gating the `in_progress` transition checks
+    /// (FR-019). `None` runs every check, matching
+    /// [`crate::manager::SpecManager::transition`].
+    pub sdd_flags: Option<crate::validate::SddFlags>,
 }
 
 impl ImplOptions {
@@ -47,6 +51,14 @@ impl ImplOptions {
     #[must_use]
     pub const fn with_dry_run(mut self) -> Self {
         self.dry_run = true;
+        self
+    }
+
+    /// Gate the `in_progress` transition checks with the configured SDD
+    /// flags instead of running all of them.
+    #[must_use]
+    pub const fn with_sdd_flags(mut self, flags: crate::validate::SddFlags) -> Self {
+        self.sdd_flags = Some(flags);
         self
     }
 }
@@ -339,7 +351,11 @@ impl SpecImplRunner {
         if spec.status == SpecStatus::Approved || spec.status == SpecStatus::Draft {
             // Only transition if not already in_progress
             if is_valid_transition(spec.status, SpecStatus::InProgress) {
-                mgr.transition(&mut spec, SpecStatus::InProgress, "spec-impl")
+                let flags = self
+                    .options
+                    .sdd_flags
+                    .unwrap_or_else(crate::validate::SddFlags::all_enabled);
+                mgr.transition_with_flags(&mut spec, SpecStatus::InProgress, "spec-impl", &flags)
                     .await?;
             }
         }
