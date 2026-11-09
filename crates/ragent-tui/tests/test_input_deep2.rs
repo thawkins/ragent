@@ -1232,6 +1232,16 @@ async fn telemetry_setup_protocol_toggle_swaps_default_port() {
         ("http://localhost:9000", "http://localhost:9000"),
         // Digits in the path are not a port.
         ("http://h/x:4318", "http://h/x:4318"),
+        // The authority ends at a query or fragment, which are preserved.
+        (
+            "http://localhost:4318?tenant=a",
+            "http://localhost:4317?tenant=a",
+        ),
+        ("http://localhost:4318#f", "http://localhost:4317#f"),
+        (
+            "https://collector.example?route=:4318",
+            "https://collector.example?route=:4318",
+        ),
     ];
     for (start, expected) in cases {
         let mut app = support::make_app();

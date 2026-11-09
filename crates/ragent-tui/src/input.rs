@@ -3372,12 +3372,14 @@ fn handle_router_model_picker_key(app: &mut App, key: KeyEvent) {
 /// the transport protocol.
 ///
 /// Returns `None` unless the URL's authority ends in exactly `from_port`, so a
-/// custom port, a host without a port, or a path that happens to contain the
-/// digits is left untouched.
+/// custom port, a host without a port, or a path, query or fragment that
+/// happens to contain the digits is left untouched.
 fn swap_otlp_default_port(endpoint: &str, from_port: &str, to_port: &str) -> Option<String> {
     let after_scheme = endpoint.find("://").map_or(0, |i| i + 3);
+    // The authority ends at the first path, query or fragment delimiter, so
+    // a `:4318` inside a query value is never mistaken for the port.
     let authority_end = endpoint[after_scheme..]
-        .find('/')
+        .find(['/', '?', '#'])
         .map_or(endpoint.len(), |i| after_scheme + i);
     let authority = &endpoint[after_scheme..authority_end];
     let host = authority.strip_suffix(from_port)?;

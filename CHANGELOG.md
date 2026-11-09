@@ -19,13 +19,17 @@
 - `reconfigure()` shuts the retired pipeline down on a background thread
   outside the runtime lock, so `/telemetry off` against a dead collector no
   longer freezes the TUI; `shutdown()` also releases the lock before exporting.
+- A retired pipeline's late export results no longer reset or extend the
+  replacement's failure streak (export-health generations), and `shutdown()`
+  joins outstanding retire threads so an exit right after `/telemetry off`
+  still delivers the final export.
 - A changed `cardinality_limit` applies on reconfigure instead of at restart.
 - The telemetry panel no longer reloads the config from disk every frame and
   now shows export state, log-export state and export health.
 - `/telemetry logs` distinguishes "logs signal disabled" from "not attached"
   and accepts `warning` (stored as `warn`).
 - The setup dialog's protocol toggle follows the default OTLP port
-  (4318/4317); an empty endpoint is reported once; `/telemetry help` lists
+  (4318/4317), matching only the URL authority; an empty endpoint is reported once; `/telemetry help` lists
   `/telemetry_panel`; QUICKSTART no longer says telemetry needs a feature flag.
 
 ## [1.0.168] - 2026-11-09

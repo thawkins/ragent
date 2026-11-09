@@ -51,6 +51,13 @@ pub struct TelemetrySubsystem {
     /// can swap providers through `&self` while the subsystem is shared via
     /// `Arc<TelemetrySubsystem>`.
     runtime: parking_lot::Mutex<RuntimeState>,
+    /// Threads still shutting down pipelines detached by
+    /// [`reconfigure`](Self::reconfigure). [`shutdown`](Self::shutdown) joins
+    /// them so a process exiting right after `/telemetry off` still delivers
+    /// the retired pipeline's final export. Kept outside `runtime` so joining
+    /// never holds the state lock.
+    #[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
+    retiring: parking_lot::Mutex<Vec<std::thread::JoinHandle<()>>>,
 }
 
 /// Mutable runtime state owned by [`TelemetrySubsystem`], held under a mutex.
@@ -163,9 +170,9 @@ impl RetiringPipeline {
     /// the records and metrics recorded up to the detach. Logs go first so a
     /// collector timeline keeps the order events happened in. Errors are
     /// logged only: the pipeline is being discarded regardless.
-    fn retire(self) {
+    fn retire(self) -> Option<std::thread::JoinHandle<()>> {
         if self.logger.is_none() && self.provider.is_none() {
-            return;
+            return None;
         }
         let shutdown = move || {
             if let Some(logger) = self.logger
@@ -184,8 +191,12 @@ impl RetiringPipeline {
         // the providers it owns) is then dropped without the final export,
         // which the warning records.
         let builder = std::thread::Builder::new().name("otel-retire".to_string());
-        if let Err(e) = builder.spawn(shutdown) {
-            tracing::warn!(error = %e, "could not spawn OTEL retire thread; final export skipped");
+        match builder.spawn(shutdown) {
+            Ok(handle) => Some(handle),
+            Err(e) => {
+                tracing::warn!(error = %e, "could not spawn OTEL retire thread; final export skipped");
+                None
+            }
         }
     }
 }
@@ -244,6 +255,7 @@ impl TelemetrySubsystem {
                     config.cardinality_limit,
                 ));
                 Ok(Self {
+                    retiring: parking_lot::Mutex::default(),
                     runtime: parking_lot::Mutex::new(RuntimeState {
                         state: TelemetryState::Enabled,
                         config,
@@ -286,6 +298,7 @@ impl TelemetrySubsystem {
             config.cardinality_limit,
         ));
         Self {
+            retiring: parking_lot::Mutex::default(),
             runtime: parking_lot::Mutex::new(RuntimeState {
                 state: TelemetryState::Enabled,
                 config,
@@ -310,6 +323,7 @@ impl TelemetrySubsystem {
 
     fn disabled_with_config(config: OtelConfig) -> Self {
         Self {
+            retiring: parking_lot::Mutex::default(),
             runtime: parking_lot::Mutex::new(RuntimeState::disabled(config)),
         }
     }
@@ -469,7 +483,11 @@ impl TelemetrySubsystem {
         // the previous streak of export failures no longer describes anything.
         // Clearing also releases a latched auto-disable, which is what lets
         // `/telemetry on` retry an endpoint that previously failed.
-        crate::export_health::export_health().clear();
+        // The new generation also stops the retired pipeline's late results
+        // from being counted against the replacement.
+        let health = crate::export_health::export_health();
+        health.clear();
+        health.begin_generation();
 
         // 1. Detach the existing pipeline. It is shut down below, after the
         // lock is released.
@@ -485,7 +503,11 @@ impl TelemetrySubsystem {
         // status bar reads it each frame), and doing it on the caller's thread
         // froze the TUI on `/telemetry off`; it now runs on its own thread.
         #[cfg(feature = "telemetry")]
-        retiring.retire();
+        if let Some(handle) = retiring.retire() {
+            let mut threads = self.retiring.lock();
+            threads.retain(|t| !t.is_finished());
+            threads.push(handle);
+        }
         result
     }
 
@@ -694,6 +716,14 @@ impl TelemetrySubsystem {
                 first_error.get_or_insert(crate::TelemetryError::ExporterInit(format!(
                     "shutdown failed: {e}"
                 )));
+            }
+            // Wait for pipelines retired by `reconfigure` to finish their final
+            // export. The handles are taken first so the join holds no lock.
+            let retiring = std::mem::take(&mut *self.retiring.lock());
+            for handle in retiring {
+                if handle.join().is_err() {
+                    tracing::warn!("OTEL retire thread panicked");
+                }
             }
             if let Some(e) = first_error {
                 return Err(e);
