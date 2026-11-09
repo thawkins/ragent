@@ -599,6 +599,28 @@ failure count and the masked endpoint, and five consecutive failures switch
 telemetry off (persisting `telemetry.otel.enabled: false`) instead of retrying a
 dead collector forever.
 
+Each failure streak belongs to one export pipeline. A reconfigure - any
+`/telemetry on|off|logs|setup` - starts a new generation, and the retired
+pipeline is shut down on a background thread after the runtime lock is
+released, so `/telemetry off` against a dead collector never freezes the TUI
+for the length of the export timeout. The retired pipeline's own final export
+is forwarded unchanged but no longer resets or extends the live streak, and
+`flush()`/`shutdown()` attempt both signals so an unhealthy log endpoint cannot
+drop the last metric batch.
+
+`/telemetry on|off` report `[err]` with the cause when the stored block is
+invalid, the save fails, or the live subsystem refuses the change - rather than
+printing `[ok]` unconditionally - and saving creates the user-global config
+directory when it does not exist, so a fresh install can configure telemetry at
+all. The switch survives a restart: saving removes the deprecated
+`experimental.open_telemetry` alias that would otherwise re-enable export on the
+next load. `/telemetry setup` merges the dialog onto the block already stored on
+disk (so `service_name`, `resource_attributes`, per-metric toggles and
+`cardinality_limit`, which have no dialog row, are preserved) and its protocol
+toggle follows the transport with the endpoint's OTLP default port - 4318 for
+HTTP, 4317 for gRPC - leaving a custom port alone. A changed
+`cardinality_limit` applies on reconfigure instead of at the next restart.
+
 Inside the TUI you can also run:
 
 ```

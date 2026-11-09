@@ -702,6 +702,11 @@ Feature flags for experimental functionality.
 explicitly enabled but `experimental.open_telemetry` is `true`, telemetry is
 enabled with default settings and a deprecation warning is emitted.
 
+Because the alias is applied **after** the `telemetry` block on every load, a
+`true` here re-enables export no matter what `/telemetry off` wrote. `/telemetry
+on|off` (and the auto-disable after repeated export failures) therefore removes
+the key from the file when it saves, so the switch survives a restart.
+
 ---
 
 ### 7.11 `hooks`
@@ -1156,7 +1161,21 @@ failure is logged at `warn` level and the metric signal keeps running.
 ```
 
 The legacy `experimental.open_telemetry` flag is mapped as a deprecated alias
-via `apply_legacy_flag()`.
+via `apply_legacy_flag()`. A `/telemetry on|off` save deletes that key so the
+explicit block wins on the next start.
+
+`enabled` is validated together with the rest of the block by
+`OtelConfig::validate`, which reports an empty `endpoint` once (the URL shape is
+checked only when the field is non-empty). `/telemetry on` refuses to persist a
+block that fails validation, rather than writing a configuration the next start
+would reject.
+
+Settings are written to the **user-global** `ragent.json`
+(`$XDG_CONFIG_HOME/ragent/ragent.json`); a project `.ragent/ragent.json` cannot
+hold them, because the repo-content guard discards a project overlay's whole
+`telemetry` block so a repository can neither redirect nor enable the export.
+A save creates the user-global config directory when it does not exist yet -
+without it the lock file cannot be created and the save fails.
 
 ---
 

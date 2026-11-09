@@ -28,13 +28,19 @@ records, grouped into tables and followed by the state of the logs signal;
 
 | Form | Description |
 |------|-------------|
-| `help` | Show the subcommand table |
+| `help` | Show the subcommand table (including `/telemetry_panel`) |
 | `on` | Enable OpenTelemetry export (metrics **and** logs) |
 | `off` | Disable OpenTelemetry export (metrics **and** logs) |
 | `setup` | Open the telemetry setup dialog |
 | `counters` | Print the metric counter catalogue and the log-export state |
 | `logs` | Report whether OTLP log export is on, and at which level |
-| `logs <level>` | Set the log-export level (`all`, `trace`, `debug`, `info`, `warn`, `error`) |
+| `logs <level>` | Set the log-export level (`all`, `trace`, `debug`, `info`, `warn`, `error`; `warning` is accepted as a spelling of `warn`) |
+
+`on`, `off` and `logs <level>` report `[err]` with the cause when the stored
+block is invalid, the save fails, or the live subsystem cannot apply the change.
+They used to print `[ok]` unconditionally, which made a failed save (on a fresh
+install the user-global config directory did not exist yet, so the lock file
+could not be created) look like a successful one.
 
 There is no separate switch for the logs signal: `/telemetry on` starts metric
 and log export together and `/telemetry off` stops both. `/telemetry logs on`
@@ -46,6 +52,20 @@ timeout, internal port, and logs level (prefilled with the current level, or
 `info` - an empty field keeps the default rather than turning export off, which
 is what `/telemetry on|off` does). Saving the dialog turns telemetry - and
 therefore log export - on.
+
+The dialog only covers those six fields, and it **merges** onto the block
+already stored on disk rather than rebuilding it. `service_name`,
+`resource_attributes`, the per-metric toggles and `cardinality_limit` have no
+row, so rebuilding reset every one of them to its default on each save; they
+now survive a save, and the dialog is prefilled from that same stored block so
+what you see is what `Enter` keeps. A changed `cardinality_limit` applies on the
+next reconfigure (any `on`/`off`/`setup`/`logs` save) rather than at restart.
+
+`Up`/`Down` on the protocol row swaps `http` and `grpc` and follows the
+transport with the endpoint's port when it is still the OTLP default for the old
+protocol (4318 for HTTP, 4317 for gRPC). A custom port is left alone, and only
+the URL authority is matched - the authority ends at the first `/`, `?` or `#`,
+so a `:4318` inside a path or query is never mistaken for the port.
 
 ## Log export
 
@@ -129,9 +149,20 @@ selected.
   protocol, timeout and TLS rules as the metrics.
 - Bodies are redacted through the shared credential redactor and attributes
   through the metric sensitive-data guard; a body over 16 KiB is truncated.
-- The change is applied to the running process immediately - no restart. If a
-  reconfigure fails, the configuration is still saved and takes effect on the
-  next start.
+- The change is applied to the running process immediately - no restart. A
+  reconfigure detaches the old export pipeline and shuts it down on a background
+  thread once the runtime lock is released, so `/telemetry off` against a dead
+  collector does not freeze the TUI for the length of the export timeout; the
+  retired pipeline's own final export still runs (the subsystem joins those
+  threads on shutdown) but its result no longer resets or extends the live
+  failure streak.
+- `/telemetry off` (and the auto-disable after repeated export failures)
+  survives a restart: saving removes the deprecated
+  `experimental.open_telemetry` alias, which was applied after the `telemetry`
+  block on every load and switched export back on.
+- A save creates the user-global config directory when it does not exist yet.
+  Without it the lock file cannot be created, so on a fresh install every
+  `/telemetry` save failed.
 
 ## Examples
 
@@ -204,8 +235,9 @@ From: /telemetry counters (cost section)
 
 ## Output
 
-`on`/`off` print a one-line confirmation. `setup` opens a dialog whose values
-persist to the config. `counters` prints three grouped metric tables:
+`on`/`off` print a one-line confirmation, or `[err]` with the cause when the
+change could not be made. `setup` opens a dialog whose values persist to the
+config. `counters` prints three grouped metric tables:
 **Usage** (9 metrics: requests, active/total sessions, user messages, tool
 invocations, active/completed agents, subagent spawns, team members),
 **Performance** (7 metrics: LLM duration, time-to-first-token, tool duration,
@@ -216,5 +248,8 @@ level. `logs` prints the state, or the confirmation of the change.
 
 ## Related
 
-- `/telemetry_panel`  -  display-only side panel fed by these counters
+- `/telemetry_panel`  -  display-only side panel fed by these counters; it opens
+  with a `Status` block (export on/off, the log-signal state at its level, and
+  the export-failure streak once any failure has been recorded) and reads the
+  live subsystem rather than reloading the config from disk
 - `/telemetry setup` values persist in the user-global `ragent.json`

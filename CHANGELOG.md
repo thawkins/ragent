@@ -2,37 +2,101 @@
 
 ## [Unreleased]
 
-### Telemetry review
+### Telemetry review (`a861dd14`, `00d75a77`, `4b4302f7`)
 
-#### Fixed
+A review of the OpenTelemetry subsystem - the `/telemetry` slash family, the
+setup dialog, the export-health monitor and the telemetry side panel - fixed
+one silent-failure cluster, one restart-persistence defect, one TUI freeze and
+a set of reporting inaccuracies. No telemetry signal, metric name or config key
+is added or removed; every change makes an existing surface report or behave as
+documented.
+
+#### Fixed - `/telemetry` commands and setup (`a861dd14`)
 
 - `/telemetry setup` no longer resets `service_name`, `resource_attributes`,
-  per-metric toggles and `cardinality_limit` on save; the form is merged onto
-  the stored block and is prefilled from it.
-- `/telemetry on|off` reports `[err]` when the stored config is invalid, the
-  save fails, or the live subsystem cannot apply it, instead of always `[ok]`.
-- Saving telemetry settings creates the user-global config directory when it
-  does not exist yet; on a fresh install every `/telemetry` save failed.
+  the per-metric toggles and `cardinality_limit` on save. The dialog has no rows
+  for those fields, so building a fresh block from the form zeroed every one of
+  them on each save; the form is now merged
+  (`..app.telemetry_config_snapshot()`) onto the block already stored on disk
+  and is prefilled from that same block.
+- `/telemetry on|off` report `[err]` with the cause - an invalid stored block, a
+  failed save, or a live subsystem that cannot apply the change - instead of
+  printing `[ok]` unconditionally. `App::set_telemetry_enabled` now returns
+  `Result<(), String>`, and an enabled block the next start would reject is
+  refused before it is written rather than being persisted as a lie.
 - `/telemetry off` (and the auto-disable after repeated export failures) now
-  survives a restart: saving removes the deprecated
-  `experimental.open_telemetry` alias that re-enabled export on load.
-- `flush()`/`shutdown()` no longer skip the metric signal when the log signal
-  fails.
-- `reconfigure()` shuts the retired pipeline down on a background thread
-  outside the runtime lock, so `/telemetry off` against a dead collector no
-  longer freezes the TUI; `shutdown()` also releases the lock before exporting.
-- A retired pipeline's late export results no longer reset or extend the
-  replacement's failure streak (export-health generations), and `shutdown()`
-  joins outstanding retire threads so an exit right after `/telemetry off`
-  still delivers the final export.
-- A changed `cardinality_limit` applies on reconfigure instead of at restart.
-- The telemetry panel no longer reloads the config from disk every frame and
-  now shows export state, log-export state and export health.
-- `/telemetry logs` distinguishes "logs signal disabled" from "not attached"
-  and accepts `warning` (stored as `warn`).
-- The setup dialog's protocol toggle follows the default OTLP port
-  (4318/4317), matching only the URL authority; an empty endpoint is reported once; `/telemetry help` lists
-  `/telemetry_panel`; QUICKSTART no longer says telemetry needs a feature flag.
+  survives a restart. The deprecated `experimental.open_telemetry` alias is
+  applied after the `telemetry` block on every load and switched export back
+  on, so saving now removes the alias key from the written file.
+- `flush()` and `shutdown()` attempt both signals instead of returning early on
+  the first error, so an unhealthy logs endpoint no longer drops the final
+  metric batch (and vice versa).
+- `/telemetry logs` distinguishes "logs signal disabled" from "configured but
+  not attached" through one shared `App::telemetry_logs_state` helper that the
+  telemetry panel also uses, and accepts `warning` as a spelling of `warn`
+  (stored canonically).
+- The `/telemetry setup` protocol toggle now follows the transport with the
+  endpoint's port, swapping the OTLP default (4318 for HTTP, 4317 for gRPC) and
+  leaving a custom port alone.
+- An empty endpoint is reported once instead of twice
+  (`OtelConfig::validate` chains the URL check under the non-empty check).
+- `/telemetry help` lists `/telemetry_panel`.
+
+#### Fixed - pipeline lifecycle (`a861dd14`, `00d75a77`)
+
+- `reconfigure()` no longer shuts the retired pipeline down while holding the
+  runtime lock. The old providers are detached into a `RetiringPipeline` and
+  shut down on a named background thread (`otel-retire`) after the lock is
+  released, so `/telemetry off` against a dead collector no longer freezes the
+  TUI for the length of the export timeout.
+- A retired pipeline's late export result no longer resets or extends the live
+  pipeline's failure streak. `ExportHealth` gains a pipeline generation
+  (`begin_generation`/`current_generation`), every `ObservedMetricExporter`
+  records the generation it was built in, and a result from an earlier
+  generation is forwarded unchanged but not counted and not queued as a notice.
+- `shutdown()` joins outstanding retire threads - outside any lock - so a
+  process exiting immediately after `/telemetry off` still delivers the retired
+  pipeline's final export.
+- `shutdown()` clones its handles and releases the runtime lock before the
+  blocking export, so state readers are not stalled for its duration.
+- A changed `cardinality_limit` now applies on reconfigure instead of waiting
+  for a restart (the cardinality cache is rebuilt with the new limit).
+
+#### Fixed - telemetry panel (`a861dd14`)
+
+- The panel no longer calls `Config::load()` on every frame: it reads the live
+  subsystem's config, so it describes this run rather than the next start and
+  stops hitting the disk from the UI thread.
+- The panel opens with a `Status` block - whether export is on, the state of
+  the logs signal at its level, and the export-failure streak when any failure
+  has been recorded - matching the order `/telemetry counters` uses.
+
+#### Fixed - fresh installs (`4b4302f7`)
+
+- Saving telemetry settings creates the user-global config directory when it
+  does not exist yet. On a fresh install the directory was absent, so the lock
+  file could not be created and every `/telemetry` save failed; the failure was
+  invisible while `/telemetry on|off` always reported `[ok]`, and CI's
+  `test_slash_deep2::telemetry_off_disables_and_persists` exposed it once the
+  reporting was fixed.
+
+#### Changed - documentation
+
+- `QUICKSTART.md` corrects the build instructions: `ragent-telemetry` enables
+  its `telemetry` Cargo feature **by default**, so a plain
+  `cargo build --release` includes the exporters; only a build that disables
+  that crate's default features compiles telemetry to no-ops. The command list
+  gains `/telemetry_panel`.
+
+#### Tests
+
+- `crates/ragent-tui/tests/test_telemetry_slash.rs` (+109 lines) covers the
+  `on|off|logs|setup|counters|help` replies and the merge-on-save behaviour;
+  `crates/ragent-telemetry/tests/test_subsystem_reconfigure.rs` and
+  `test_export_health.rs` gain reconfigure, retire-join and
+  generation-isolation cases; `crates/ragent-config/tests/test_telemetry_config.rs`
+  gains the endpoint-validation case; `crates/ragent-tui/tests/test_input_deep2.rs`
+  gains the protocol/port-swap cases.
 
 ## [1.0.168] - 2026-11-09
 
