@@ -11,6 +11,8 @@
   the stored block and is prefilled from it.
 - `/telemetry on|off` reports `[err]` when the stored config is invalid, the
   save fails, or the live subsystem cannot apply it, instead of always `[ok]`.
+- Saving telemetry settings creates the user-global config directory when it
+  does not exist yet; on a fresh install every `/telemetry` save failed.
 - `/telemetry off` (and the auto-disable after repeated export failures) now
   survives a restart: saving removes the deprecated
   `experimental.open_telemetry` alias that re-enabled export on load.

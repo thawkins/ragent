@@ -1361,6 +1361,12 @@ impl App {
         let path = self
             .telemetry_config_source_path()
             .ok_or_else(|| "no telemetry config destination found".to_string())?;
+        // The user-global config directory does not exist on a fresh install;
+        // without it the lock file cannot be created and every save failed.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create {}: {e}", parent.display()))?;
+        }
         crate::app::state::atomic_config_update(&path, |json| {
             // Ensure the top-level "telemetry" object exists.
             let obj = json
