@@ -607,17 +607,15 @@ Inside the TUI you can also run:
 /telemetry logs [all|trace|debug|info|warn|error]  # log-export level only
 /telemetry counters                          # counters plus the log-export state
 /telemetry setup                             # dialog, including the Logs level row
+/telemetry_panel                             # toggle the live telemetry side panel
 ```
 
-Telemetry is gated behind the `telemetry` Cargo feature. To build with OTEL
-support:
-
-```bash
-cargo build --release --features ragent-telemetry/telemetry
-```
-
-When the feature is off, the crate compiles to zero-overhead no-ops and pulls
-no OpenTelemetry dependencies.
+OTEL support is built in by default: `ragent-telemetry` enables its
+`telemetry` Cargo feature by default, so a plain `cargo build --release`
+includes the exporters. Only a build that disables that crate's default
+features compiles telemetry to zero-overhead no-ops with no OpenTelemetry
+dependencies; in such a build `/telemetry on` reports that the feature is
+missing.
 
 ---
 

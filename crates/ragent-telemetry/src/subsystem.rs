@@ -129,6 +129,67 @@ impl RuntimeState {
     }
 }
 
+/// A detached export pipeline waiting to be shut down by
+/// [`TelemetrySubsystem::reconfigure`].
+#[cfg(feature = "telemetry")]
+struct RetiringPipeline {
+    logger: Option<crate::logs::LoggerProviderHandle>,
+    provider: Option<std::sync::Arc<opentelemetry_sdk::metrics::SdkMeterProvider>>,
+}
+
+#[cfg(feature = "telemetry")]
+impl RetiringPipeline {
+    /// Detach the live pipeline from `state`: abort the Prometheus server (so
+    /// its port is free for a rebuilt one), stop the logs layer pointing at a
+    /// provider about to be shut down, and take the providers.
+    fn take(state: &mut RuntimeState) -> Self {
+        if let Some(handle) = state.prometheus_handle.take() {
+            handle.abort();
+        }
+        let logger = state.logger.take();
+        if logger.is_some()
+            && let Some(cell) = &state.logs_cell
+        {
+            // A record emitted in between must not reach a dead processor.
+            *cell.write() = None;
+        }
+        Self {
+            logger,
+            provider: state.provider.take(),
+        }
+    }
+
+    /// Shut the detached providers down on a background thread, delivering
+    /// the records and metrics recorded up to the detach. Logs go first so a
+    /// collector timeline keeps the order events happened in. Errors are
+    /// logged only: the pipeline is being discarded regardless.
+    fn retire(self) {
+        if self.logger.is_none() && self.provider.is_none() {
+            return;
+        }
+        let shutdown = move || {
+            if let Some(logger) = self.logger
+                && let Err(e) = logger.shutdown()
+                && !matches!(e, opentelemetry_sdk::error::OTelSdkError::AlreadyShutdown)
+            {
+                tracing::warn!(error = %e, "OTEL log provider shutdown during reconfigure");
+            }
+            if let Some(provider) = self.provider
+                && let Err(e) = provider.shutdown()
+            {
+                tracing::warn!(error = %e, "OTEL meter provider shutdown during reconfigure");
+            }
+        };
+        // `spawn` only fails when the OS refuses a thread. The closure (and
+        // the providers it owns) is then dropped without the final export,
+        // which the warning records.
+        let builder = std::thread::Builder::new().name("otel-retire".to_string());
+        if let Err(e) = builder.spawn(shutdown) {
+            tracing::warn!(error = %e, "could not spawn OTEL retire thread; final export skipped");
+        }
+    }
+}
+
 impl TelemetrySubsystem {
     /// Return a disabled copy of this subsystem with the same config.
     /// Used when the subsystem is shared via `Arc` but a by-value copy is
@@ -373,18 +434,23 @@ impl TelemetrySubsystem {
     /// Reconfigure the subsystem at runtime from a new [`OtelConfig`].
     ///
     /// This is the runtime-toggle entry point used by the `/telemetry on|off`
-    /// slash commands. It atomically (under the runtime mutex):
+    /// slash commands. Under the runtime mutex it:
     ///
-    /// 1. Shuts down the currently live provider (if any), which stops the
-    ///    periodic OTLP reader and therefore the "Failed to export metrics"
-    ///    log noise that would otherwise continue after `/telemetry off`.
-    /// 2. Aborts any Prometheus HTTP server task so its TCP listener is
-    ///    released.
-    /// 3. If the new config is enabled (and the `telemetry` feature is
-    ///    active), builds a fresh provider and Prometheus endpoint.
-    /// 4. Updates the stored state and config so subsequent calls to
+    /// 1. Detaches the currently live provider (if any) and aborts any
+    ///    Prometheus HTTP server task so its TCP listener is released.
+    /// 2. If the new config is enabled (and the `telemetry` feature is
+    ///    active), builds a fresh provider, Prometheus endpoint and
+    ///    cardinality cache.
+    /// 3. Updates the stored state and config so subsequent calls to
     ///    [`is_enabled`](Self::is_enabled), [`config`](Self::config), and
     ///    [`instruments`](Self::instruments) reflect the new state.
+    ///
+    /// The detached provider is then shut down on a background thread, after
+    /// the lock is released: its final export can take up to the export
+    /// timeout, and must stall neither the caller (the TUI event loop) nor
+    /// readers of the subsystem state. Shutting it down stops the periodic
+    /// OTLP reader and therefore the "Failed to export metrics" log noise
+    /// that would otherwise continue after `/telemetry off`.
     ///
     /// When the `telemetry` Cargo feature is off, only the config/state are
     /// updated (there is no provider to shut down or build).
@@ -394,7 +460,7 @@ impl TelemetrySubsystem {
     /// Returns [`TelemetryError::InvalidEndpoint`] or
     /// [`TelemetryError::ExporterInit`] if building a new enabled provider
     /// fails. On such a failure the subsystem is left in the **disabled**
-    /// state (the old provider has already been shut down) so the agent
+    /// state (the old provider has already been detached) so the agent
     /// loop never continues with a half-initialised provider.
     pub fn reconfigure(&self, config: OtelConfig) -> Result<()> {
         let mut guard = self.runtime.lock();
@@ -405,38 +471,27 @@ impl TelemetrySubsystem {
         // `/telemetry on` retry an endpoint that previously failed.
         crate::export_health::export_health().clear();
 
-        // 1. Shut down the existing live provider (stops the periodic reader).
+        // 1. Detach the existing pipeline. It is shut down below, after the
+        // lock is released.
         #[cfg(feature = "telemetry")]
-        {
-            if let Some(handle) = &guard.prometheus_handle {
-                handle.abort();
-            }
-            guard.prometheus_handle = None;
-            // The logs pipeline is torn down with the meter provider so a
-            // reconfigure (or `/telemetry off`) delivers the records emitted up
-            // to that moment instead of leaving them in the batch buffer.
-            if let Some(logger) = guard.logger.take() {
-                // Stop the layer pointing at a provider about to be shut down:
-                // a record emitted in between must not reach a dead processor.
-                if let Some(cell) = &guard.logs_cell {
-                    *cell.write() = None;
-                }
-                if let Err(e) = logger.shutdown()
-                    && !matches!(e, opentelemetry_sdk::error::OTelSdkError::AlreadyShutdown)
-                {
-                    tracing::warn!(error = %e, "OTEL log provider shutdown during reconfigure");
-                }
-            }
-            if let Some(provider) = guard.provider.take() {
-                // `SdkMeterProvider::shutdown` takes `&self`; call it through
-                // the Arc. Errors are logged but non-fatal - the provider is
-                // being discarded regardless.
-                if let Err(e) = provider.shutdown() {
-                    tracing::warn!(error = %e, "OTEL meter provider shutdown during reconfigure");
-                }
-            }
-        }
+        let retiring = RetiringPipeline::take(&mut guard);
 
+        let result = Self::apply_config(&mut guard, config);
+        drop(guard);
+
+        // Shutting the old pipeline down performs its final export, which can
+        // take up to the export timeout against a dead collector. Doing that
+        // under the runtime lock stalled every `is_enabled()` caller (the TUI
+        // status bar reads it each frame), and doing it on the caller's thread
+        // froze the TUI on `/telemetry off`; it now runs on its own thread.
+        #[cfg(feature = "telemetry")]
+        retiring.retire();
+        result
+    }
+
+    /// Steps 2-3 of [`reconfigure`](Self::reconfigure): build the pipeline
+    /// `config` asks for (if any) and point the logs layer at it.
+    fn apply_config(state: &mut RuntimeState, config: OtelConfig) -> Result<()> {
         // 2. Build the new provider if enabled.
         if config.enabled {
             #[cfg(feature = "telemetry")]
@@ -447,21 +502,29 @@ impl TelemetrySubsystem {
                         // endpoint/level takes effect without a restart. A
                         // logs failure leaves metrics running (FR-041).
                         let logger = build_logs_pipeline(&config);
-                        guard.state = TelemetryState::Enabled;
-                        guard.config = config;
-                        guard.provider = Some(std::sync::Arc::new(provider));
-                        guard.prometheus_handle = prometheus_handle;
-                        guard.logger = logger;
+                        state.state = TelemetryState::Enabled;
+                        state.config = config;
+                        state.provider = Some(std::sync::Arc::new(provider));
+                        // A fresh provider starts with no series, so the
+                        // cardinality cap starts over too - and picks up a
+                        // changed `cardinality_limit`, which the old cache
+                        // kept until the next restart.
+                        state.cardinality =
+                            std::sync::Arc::new(crate::cardinality::CardinalityCache::new(
+                                state.config.cardinality_limit,
+                            ));
+                        state.prometheus_handle = prometheus_handle;
+                        state.logger = logger;
                     }
                     Err(e) => {
                         // Building the new provider failed - leave the
                         // subsystem disabled so the agent loop never runs
                         // with a half-initialised provider.
                         tracing::warn!(error = %e, "reconfigure: provider build failed; leaving telemetry disabled");
-                        guard.state = TelemetryState::Disabled;
-                        guard.config = config;
-                        guard.provider = None;
-                        guard.logger = None;
+                        state.state = TelemetryState::Disabled;
+                        state.config = config;
+                        state.provider = None;
+                        state.logger = None;
                         return Err(e);
                     }
                 }
@@ -472,24 +535,24 @@ impl TelemetrySubsystem {
                     "reconfigure: telemetry.otel.enabled is true but the 'telemetry' \
                        Cargo feature is not enabled; remaining in no-op mode."
                 );
-                guard.state = TelemetryState::Disabled;
-                guard.config = config;
+                state.state = TelemetryState::Disabled;
+                state.config = config;
                 return Err(TelemetryError::FeatureNotEnabled);
             }
         } else {
-            guard.state = TelemetryState::Disabled;
-            guard.config = config;
+            state.state = TelemetryState::Disabled;
+            state.config = config;
             #[cfg(feature = "telemetry")]
             {
-                guard.provider = None;
-                guard.logger = None;
+                state.provider = None;
+                state.logger = None;
             }
         }
 
         // 3. Point the installed logs layer at whatever pipeline now exists
         // (or at nothing, when the signal is off).
         #[cfg(feature = "telemetry")]
-        install_logs_cell(&guard);
+        install_logs_cell(state);
         Ok(())
     }
 
@@ -537,6 +600,10 @@ impl TelemetrySubsystem {
                     guard.provider.as_ref().map(std::sync::Arc::clone),
                 )
             };
+            // A failed log flush must not skip the metric flush: the two
+            // signals are independent, and returning early here dropped the
+            // last metric batch whenever the logs endpoint was unhealthy.
+            let mut first_error = None;
             if let Some(logger) = logger
                 && let Err(e) = logger.force_flush()
                 && !matches!(e, opentelemetry_sdk::error::OTelSdkError::AlreadyShutdown)
@@ -546,7 +613,7 @@ impl TelemetrySubsystem {
                     reason = kind.describe(),
                     "OTEL log provider force_flush error: {e}"
                 );
-                return Err(crate::TelemetryError::ExporterInit(format!(
+                first_error = Some(crate::TelemetryError::ExporterInit(format!(
                     "log flush failed: {e}"
                 )));
             }
@@ -561,9 +628,12 @@ impl TelemetrySubsystem {
                     reason = kind.describe(),
                     "OTEL meter provider force_flush error: {e}"
                 );
-                return Err(crate::TelemetryError::ExporterInit(format!(
+                first_error.get_or_insert(crate::TelemetryError::ExporterInit(format!(
                     "flush failed: {e}"
                 )));
+            }
+            if let Some(e) = first_error {
+                return Err(e);
             }
         }
         Ok(())
@@ -591,26 +661,42 @@ impl TelemetrySubsystem {
     pub fn shutdown(&self) -> Result<()> {
         #[cfg(feature = "telemetry")]
         {
-            let guard = self.runtime.lock();
-            if let Some(handle) = &guard.prometheus_handle {
-                handle.abort();
-            }
-            if let Some(logger) = &guard.logger
+            // Clone the handles and release the lock before the blocking
+            // shutdown, as `flush` does, so state readers are not stalled for
+            // the length of the final export.
+            let (logger, provider) = {
+                let guard = self.runtime.lock();
+                if let Some(handle) = &guard.prometheus_handle {
+                    handle.abort();
+                }
+                (
+                    guard.logger.clone(),
+                    guard.provider.as_ref().map(std::sync::Arc::clone),
+                )
+            };
+            // Shut both signals down even when the first fails; returning
+            // early left the meter provider running and its final batch
+            // unexported whenever the log provider reported an error.
+            let mut first_error = None;
+            if let Some(logger) = &logger
                 && let Err(e) = logger.shutdown()
                 && !matches!(e, opentelemetry_sdk::error::OTelSdkError::AlreadyShutdown)
             {
                 tracing::warn!("OTEL log provider shutdown error: {e}");
-                return Err(crate::TelemetryError::ExporterInit(format!(
+                first_error = Some(crate::TelemetryError::ExporterInit(format!(
                     "log shutdown failed: {e}"
                 )));
             }
-            if let Some(provider) = &guard.provider
+            if let Some(provider) = &provider
                 && let Err(e) = provider.shutdown()
             {
                 tracing::warn!("OTEL meter provider shutdown error: {e}");
-                return Err(crate::TelemetryError::ExporterInit(format!(
+                first_error.get_or_insert(crate::TelemetryError::ExporterInit(format!(
                     "shutdown failed: {e}"
                 )));
+            }
+            if let Some(e) = first_error {
+                return Err(e);
             }
         }
         Ok(())

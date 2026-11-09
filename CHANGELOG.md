@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Telemetry review
+
+#### Fixed
+
+- `/telemetry setup` no longer resets `service_name`, `resource_attributes`,
+  per-metric toggles and `cardinality_limit` on save; the form is merged onto
+  the stored block and is prefilled from it.
+- `/telemetry on|off` reports `[err]` when the stored config is invalid, the
+  save fails, or the live subsystem cannot apply it, instead of always `[ok]`.
+- `/telemetry off` (and the auto-disable after repeated export failures) now
+  survives a restart: saving removes the deprecated
+  `experimental.open_telemetry` alias that re-enabled export on load.
+- `flush()`/`shutdown()` no longer skip the metric signal when the log signal
+  fails.
+- `reconfigure()` shuts the retired pipeline down on a background thread
+  outside the runtime lock, so `/telemetry off` against a dead collector no
+  longer freezes the TUI; `shutdown()` also releases the lock before exporting.
+- A changed `cardinality_limit` applies on reconfigure instead of at restart.
+- The telemetry panel no longer reloads the config from disk every frame and
+  now shows export state, log-export state and export health.
+- `/telemetry logs` distinguishes "logs signal disabled" from "not attached"
+  and accepts `warning` (stored as `warn`).
+- The setup dialog's protocol toggle follows the default OTLP port
+  (4318/4317); an empty endpoint is reported once; `/telemetry help` lists
+  `/telemetry_panel`; QUICKSTART no longer says telemetry needs a feature flag.
+
 ## [1.0.168] - 2026-11-09
 
 Spec system repair and documentation release.

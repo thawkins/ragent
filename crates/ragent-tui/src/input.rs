@@ -2419,10 +2419,23 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     };
                 }
                 KeyCode::Up | KeyCode::Down if active_field == 1 => {
-                    protocol = match protocol {
-                        ragent_config::OtelProtocol::Http => ragent_config::OtelProtocol::Grpc,
-                        ragent_config::OtelProtocol::Grpc => ragent_config::OtelProtocol::Http,
+                    let (next, from_port, to_port) = match protocol {
+                        ragent_config::OtelProtocol::Http => {
+                            (ragent_config::OtelProtocol::Grpc, ":4318", ":4317")
+                        }
+                        ragent_config::OtelProtocol::Grpc => {
+                            (ragent_config::OtelProtocol::Http, ":4317", ":4318")
+                        }
                     };
+                    protocol = next;
+                    // Follow the protocol with the endpoint's port when it is
+                    // still the OTLP default for the old protocol (4318 for
+                    // HTTP, 4317 for gRPC); a custom port is left alone.
+                    if let Some(swapped) =
+                        swap_otlp_default_port(endpoint_field.text(), from_port, to_port)
+                    {
+                        endpoint_field = crate::input_field::InputField::with_text(&swapped);
+                    }
                 }
                 KeyCode::Enter => {
                     let endpoint = endpoint_field.text().trim().to_string();
@@ -2469,18 +2482,20 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             logs_str
                         },
                     };
+                    // Merge the form onto the stored block: the dialog has no
+                    // rows for `service_name`, `resource_attributes`, the
+                    // per-metric toggles or `cardinality_limit`, and building
+                    // a fresh block reset all of them to their defaults on
+                    // every save.
                     let draft = ragent_config::OtelConfig {
                         enabled: true,
                         endpoint,
                         protocol,
                         export_interval_seconds: interval,
                         export_timeout_seconds: timeout,
-                        service_name: "ragent".to_string(),
-                        resource_attributes: std::collections::HashMap::new(),
-                        metrics: std::collections::HashMap::new(),
                         internal_port,
-                        cardinality_limit: 1000,
                         logs,
+                        ..app.telemetry_config_snapshot()
                     };
 
                     let problems = draft.validate();
@@ -3350,4 +3365,25 @@ fn handle_router_model_picker_key(app: &mut App, key: KeyEvent) {
             });
         }
     }
+}
+
+/// Swap the OTLP default port in `endpoint` from `from_port` to `to_port`
+/// (each written as `":4318"`), used when the telemetry setup dialog toggles
+/// the transport protocol.
+///
+/// Returns `None` unless the URL's authority ends in exactly `from_port`, so a
+/// custom port, a host without a port, or a path that happens to contain the
+/// digits is left untouched.
+fn swap_otlp_default_port(endpoint: &str, from_port: &str, to_port: &str) -> Option<String> {
+    let after_scheme = endpoint.find("://").map_or(0, |i| i + 3);
+    let authority_end = endpoint[after_scheme..]
+        .find('/')
+        .map_or(endpoint.len(), |i| after_scheme + i);
+    let authority = &endpoint[after_scheme..authority_end];
+    let host = authority.strip_suffix(from_port)?;
+    Some(format!(
+        "{}{host}{to_port}{}",
+        &endpoint[..after_scheme],
+        &endpoint[authority_end..]
+    ))
 }

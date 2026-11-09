@@ -526,6 +526,10 @@ async fn test_telemetry_on_off_switches_metrics_and_logs_together() {
     app.execute_slash_command("/telemetry logs warn").await;
     assert_eq!(read()["telemetry"]["otel"]["logs"]["level"], "warn");
 
+    // `warning` is the config file's alias for `warn`; it is stored canonically.
+    app.execute_slash_command("/telemetry logs warning").await;
+    assert_eq!(read()["telemetry"]["otel"]["logs"]["level"], "warn");
+
     // `all` is an accepted level: it exports every severity the layer observes.
     app.execute_slash_command("/telemetry logs all").await;
     let reply = last_message_text(&app);
@@ -570,4 +574,109 @@ async fn test_telemetry_on_off_switches_metrics_and_logs_together() {
     }
     std::env::set_current_dir(&previous_dir).expect("restore cwd");
     drop(guard);
+}
+
+/// Seed the isolated user-global `ragent.json` with `body` and return its path.
+fn seed_global_config(tag: &str, body: &serde_json::Value) -> std::path::PathBuf {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/temp")
+        .join(tag)
+        .join("xdg/ragent/ragent.json");
+    std::fs::create_dir_all(path.parent().expect("config parent")).expect("create config dir");
+    std::fs::write(&path, body.to_string()).expect("seed config");
+    path
+}
+
+fn read_json(path: &std::path::Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(path).expect("read config"))
+        .expect("config is valid JSON")
+}
+
+/// Regression: saving `/telemetry setup` built a fresh block and reset every
+/// setting the dialog has no row for (service name, resource attributes,
+/// per-metric toggles, cardinality limit) to its default.
+#[tokio::test]
+async fn test_telemetry_setup_save_preserves_unlisted_settings() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let tag = "test_telemetry_setup_preserves_unlisted";
+    let (_guard, _restore) = enter_isolated_project(tag);
+    let path = seed_global_config(
+        tag,
+        &serde_json::json!({"telemetry": {"otel": {
+            "service_name": "my-agent",
+            "resource_attributes": {"team": "infra"},
+            "metrics": {"ragent.llm.requests": false},
+            "cardinality_limit": 42
+        }}}),
+    );
+
+    let mut app = make_app();
+    app.execute_slash_command("/telemetry setup").await;
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    assert!(app.provider_setup.is_none(), "save should close the dialog");
+
+    let otel = &read_json(&path)["telemetry"]["otel"];
+    assert_eq!(otel["service_name"], "my-agent", "{otel}");
+    assert_eq!(otel["resource_attributes"]["team"], "infra", "{otel}");
+    assert_eq!(otel["metrics"]["ragent.llm.requests"], false, "{otel}");
+    assert_eq!(otel["cardinality_limit"], 42, "{otel}");
+    assert_eq!(otel["enabled"], true, "saving the form enables telemetry");
+}
+
+/// Regression: `/telemetry on` printed `[ok] Telemetry enabled` even when the
+/// stored block was invalid and nothing could export. It must refuse, say why,
+/// and leave the file untouched.
+#[tokio::test]
+async fn test_telemetry_on_with_invalid_config_reports_error() {
+    let tag = "test_telemetry_on_invalid_config";
+    let (_guard, _restore) = enter_isolated_project(tag);
+    let path = seed_global_config(
+        tag,
+        &serde_json::json!({"telemetry": {"otel": {"endpoint": "not a url"}}}),
+    );
+
+    let mut app = make_app();
+    app.execute_slash_command("/telemetry on").await;
+    let reply = last_message_text(&app);
+    assert!(
+        reply.contains("[err]"),
+        "invalid config must be reported: {reply}"
+    );
+    assert!(!reply.contains("[ok]"), "must not claim success: {reply}");
+    assert_eq!(app.status, "telemetry: enable failed");
+    assert_ne!(
+        read_json(&path)["telemetry"]["otel"]["enabled"],
+        true,
+        "an invalid block must not be persisted as enabled"
+    );
+}
+
+/// Regression: the deprecated `experimental.open_telemetry` alias is applied
+/// after the `telemetry` block on load, so leaving it in place re-enabled
+/// telemetry on the next start after `/telemetry off`.
+#[tokio::test]
+async fn test_telemetry_off_clears_legacy_open_telemetry_flag() {
+    let tag = "test_telemetry_off_clears_legacy_flag";
+    let (_guard, _restore) = enter_isolated_project(tag);
+    let path = seed_global_config(
+        tag,
+        &serde_json::json!({"experimental": {"open_telemetry": true}}),
+    );
+
+    let mut app = make_app();
+    app.execute_slash_command("/telemetry off").await;
+    let saved = read_json(&path);
+    assert!(
+        saved["experimental"]["open_telemetry"].is_null(),
+        "the legacy alias must be removed: {saved}"
+    );
+    assert_eq!(saved["telemetry"]["otel"]["enabled"], false);
+
+    let loaded = ragent_agent::Config::load().expect("load config");
+    assert!(
+        !loaded.telemetry.otel.enabled,
+        "`/telemetry off` must survive a reload"
+    );
 }
