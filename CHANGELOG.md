@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Security
+
+- Bump `rusqlite` 0.40 -> 0.41 (pulls `libsqlite3-sys` 0.39.1, RUSTSEC-2026-0459)
+  and `rmcp` 3.5.1 -> 3.9.0 (RUSTSEC-2026-0457, -0461, -0462).
+- `test_wal_warmup` now uses a per-process directory under `target/temp/`
+  instead of a fixed shared temp path that concurrent runs could clobber.
+
 ### Telemetry review (`a861dd14`, `00d75a77`, `4b4302f7`)
 
 A review of the OpenTelemetry subsystem - the `/telemetry` slash family, the

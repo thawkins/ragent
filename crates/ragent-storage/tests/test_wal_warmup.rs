@@ -20,7 +20,12 @@ use ragent_types::message::Message;
 
 /// Returns a fresh temp file path for a file-backed database.
 fn temp_db_path(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join("ragent-wal-test");
+    // Per-process directory under the git-ignored `target/temp/`: a fixed
+    // shared path let concurrent runs (another checkout or session) delete
+    // or replace each other's database mid-test.
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/temp/ragent-wal-test")
+        .join(std::process::id().to_string());
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let path = dir.join(name);
     let _ = std::fs::remove_file(&path);
