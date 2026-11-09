@@ -5573,12 +5573,15 @@ fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     app.telemetry_area = area;
 
     // The panel shares the counter catalogue with `/telemetry counters`, so it
-    // also needs the state of the OTLP logs signal (spec `otel` FR-036).
-    let otel = ragent_agent::Config::load()
-        .map(|cfg| cfg.telemetry.otel)
-        .unwrap_or_default();
-    let content =
-        App::telemetry_counters_content(&otel, app.session_processor.telemetry.logs_exporting());
+    // also needs the state of the OTLP logs signal (spec `otel` FR-036). Use
+    // the live subsystem's copy rather than `Config::load()`: this runs every
+    // frame, and reloading the config from disk on the UI thread per frame
+    // was both slow and a description of the next start, not of this one.
+    let telemetry = &app.session_processor.telemetry;
+    let otel = telemetry.config();
+    let exporting = telemetry.is_enabled();
+    let logs_exporting = telemetry.logs_exporting();
+    let content = App::telemetry_counters_content(&otel, logs_exporting);
 
     let header_style = Style::default()
         .fg(Color::LightGreen)
@@ -5590,6 +5593,37 @@ fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         .fg(Color::Blue)
         .add_modifier(Modifier::BOLD);
     let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // Status first, as in `/telemetry counters`: whether anything is leaving
+    // the machine, and the export-failure streak behind the auto-disable.
+    lines.push(Line::from(Span::styled("Status", header_style)));
+    lines.push(Line::from(vec![
+        Span::styled("export ", metric_style),
+        Span::styled(if exporting { "on" } else { "off" }, value_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("logs ", metric_style),
+        Span::styled(
+            App::telemetry_logs_state(&otel, logs_exporting).to_string(),
+            value_style,
+        ),
+        Span::styled(format!(" - level {}", otel.logs.level), desc_style),
+    ]));
+    let health = ragent_telemetry::export_health::export_health();
+    if health.consecutive_failures() > 0 || health.total_failures() > 0 {
+        lines.push(Line::from(vec![
+            Span::styled("export health ", metric_style),
+            Span::styled(
+                format!(
+                    "{} consecutive, {} total failure(s)",
+                    health.consecutive_failures(),
+                    health.total_failures()
+                ),
+                Style::default().fg(Color::LightYellow),
+            ),
+        ]));
+    }
+    lines.push(Line::raw(""));
 
     for (title, group) in [
         ("Usage metrics", &content.usage),

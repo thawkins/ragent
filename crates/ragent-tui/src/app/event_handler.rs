@@ -2961,7 +2961,9 @@ impl App {
             // disable through the normal `/telemetry off` path so the change
             // survives a restart, and reset the monitor so a later
             // `/telemetry on` starts with a clean failure streak.
-            self.set_telemetry_enabled(false);
+            if let Err(e) = self.set_telemetry_enabled(false) {
+                self.push_log_no_agent(LogLevel::Error, format!("telemetry: auto-disable: {e}"));
+            }
             health.clear();
             self.status = "telemetry: disabled after repeated export failures".to_string();
             self.arm_status_expiry();

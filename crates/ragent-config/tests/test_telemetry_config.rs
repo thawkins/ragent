@@ -235,3 +235,18 @@ fn test_otel_config_serde_roundtrip() {
     let back: OtelConfig = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(config, back);
 }
+
+#[test]
+fn test_otel_config_validate_empty_endpoint_reported_once() {
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: String::new(),
+        ..OtelConfig::default()
+    };
+    let problems = config.validate();
+    assert_eq!(
+        problems.iter().filter(|p| p.contains("endpoint")).count(),
+        1,
+        "an empty endpoint should produce one problem, got {problems:?}"
+    );
+}

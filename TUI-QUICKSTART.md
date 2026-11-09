@@ -4,6 +4,36 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.168 + telemetry review)
+
+- **`/telemetry` tells the truth, and `/telemetry off` sticks.** Previously the
+  switch reported `[ok]` whatever happened, so a failed save, an invalid stored
+  block and a rejected reconfigure all looked like success - and the deprecated
+  `experimental.open_telemetry` alias switched export back on at the next start.
+  `on`/`off` now print `[err]` with the cause, saving clears the alias, and a
+  fresh install can save at all: the user-global config directory is created
+  when it does not exist (every save used to fail there, invisibly).
+- **`/telemetry setup` stops clobbering what it cannot show.** The dialog has
+  rows for endpoint, protocol, interval, timeout, internal port and log level -
+  and rebuilt the whole block from them, so `service_name`,
+  `resource_attributes`, the per-metric toggles and `cardinality_limit` were
+  reset on every save. The form is now merged onto the stored block and prefilled
+  from it. The protocol toggle also follows the transport with the endpoint's
+  OTLP default port (4318 HTTP / 4317 gRPC), leaving a custom port alone.
+- **`/telemetry off` no longer freezes the TUI against a dead collector.** The
+  retired pipeline used to be shut down under the runtime lock, which blocks for
+  up to the export timeout. It is now detached and shut down on a background
+  thread (`otel-retire`) after the lock is released, and `shutdown()` joins the
+  outstanding retire threads so the final export still lands on exit.
+- **The Telemetry panel describes this run, not the next start.** It read
+  `Config::load()` from disk on every frame; it now reads the live subsystem,
+  and opens with a `Status` block - export on/off, log-signal state at its
+  level, and the export-failure streak once any failure is recorded.
+- **`/telemetry logs` says which "off" it means.** "logs signal disabled" and
+  "configured but not attached" are now distinct states (shared with the panel
+  through one helper), `warning` is accepted as a spelling of `warn`, and
+  `/telemetry help` lists `/telemetry_panel`.
+
 ## Highlights (v1.0.168 + spec repair)
 
 - **`/spec` tells the truth and stops losing data.** `/spec status` used to

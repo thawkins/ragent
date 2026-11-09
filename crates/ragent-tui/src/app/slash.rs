@@ -1361,11 +1361,26 @@ impl App {
         let path = self
             .telemetry_config_source_path()
             .ok_or_else(|| "no telemetry config destination found".to_string())?;
+        // The user-global config directory does not exist on a fresh install;
+        // without it the lock file cannot be created and every save failed.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create {}: {e}", parent.display()))?;
+        }
         crate::app::state::atomic_config_update(&path, |json| {
             // Ensure the top-level "telemetry" object exists.
             let obj = json
                 .as_object_mut()
                 .ok_or_else(|| "config root is not an object".to_string())?;
+            // The deprecated `experimental.open_telemetry` alias is applied
+            // after the `telemetry` block on every load and switches export
+            // back on, so leaving it in place made `/telemetry off` (and the
+            // auto-disable after repeated export failures) revert at the next
+            // start. Writing the explicit block supersedes the alias.
+            if let Some(experimental) = obj.get_mut("experimental").and_then(|v| v.as_object_mut())
+            {
+                experimental.remove("open_telemetry");
+            }
             if !obj.get("telemetry").map_or(false, |v| v.is_object()) {
                 obj.insert("telemetry".to_string(), serde_json::json!({}));
             }
@@ -1395,7 +1410,13 @@ impl App {
     /// Also called by
     /// [`poll_telemetry_export_health`](crate::app::App::poll_telemetry_export_health)
     /// to disable telemetry after repeated OTLP export failures.
-    pub fn set_telemetry_enabled(&mut self, enabled: bool) {
+    ///
+    /// # Errors
+    ///
+    /// Returns a user-facing message when enabling an invalid stored block,
+    /// when the file cannot be written, or when the saved block cannot be
+    /// applied to the live subsystem.
+    pub fn set_telemetry_enabled(&mut self, enabled: bool) -> Result<(), String> {
         // Start from the block as it is stored on disk, not from the loaded
         // `Config`: the load path runs the repo-content guard, so a project
         // overlay's `telemetry` block is already gone by the time we get here
@@ -1406,25 +1427,48 @@ impl App {
         // logs signal (at `telemetry.otel.logs.level`, unchanged), and
         // `/telemetry off` stops it. There is no separate logs toggle.
         cfg.logs.enabled = enabled;
-        match self.save_telemetry_otel(&cfg) {
-            Ok(()) => {
-                self.session_processor.invalidate_config_cache();
-                // Reconfigure the live subsystem so the toggle takes effect
-                // immediately (shut down the old provider on `off`, build a
-                // fresh one on `on`) rather than waiting for a restart.
-                if let Err(e) = self.session_processor.telemetry.reconfigure(cfg) {
-                    self.push_log_no_agent(
-                        LogLevel::Error,
-                        format!("telemetry reconfigure failed: {e}"),
-                    );
-                }
-            }
-            Err(e) => {
-                self.push_log_no_agent(
-                    LogLevel::Error,
-                    format!("telemetry enable/disable failed: {e}"),
-                );
-            }
+        // Refuse to persist an enabled block the next start would reject:
+        // otherwise `/telemetry on` reported success while nothing exported.
+        let problems = cfg.validate();
+        if !problems.is_empty() {
+            return Err(format!(
+                "the stored telemetry configuration is invalid: {}. Run `/telemetry setup` \
+                 to fix it.",
+                problems.join("; ")
+            ));
+        }
+        self.save_telemetry_otel(&cfg)
+            .map_err(|e| format!("could not save the telemetry configuration: {e}"))?;
+        self.session_processor.invalidate_config_cache();
+        // Reconfigure the live subsystem so the toggle takes effect
+        // immediately (shut down the old provider on `off`, build a fresh one
+        // on `on`) rather than waiting for a restart.
+        self.session_processor
+            .telemetry
+            .reconfigure(cfg)
+            .map_err(|e| {
+                format!(
+                    "the configuration was saved but could not be applied to the running \
+                     telemetry subsystem: {e}"
+                )
+            })
+    }
+
+    /// Short label for the state of the OTLP logs signal, shared by
+    /// `/telemetry logs` and the telemetry side panel so both describe the
+    /// same four states the `/telemetry counters` output distinguishes.
+    pub(crate) fn telemetry_logs_state(
+        otel: &ragent_config::OtelConfig,
+        logs_exporting: bool,
+    ) -> &'static str {
+        if logs_exporting {
+            "shipping"
+        } else if !otel.enabled {
+            "off (telemetry is disabled)"
+        } else if !otel.logs.enabled {
+            "off (logs signal disabled)"
+        } else {
+            "configured but not attached"
         }
     }
 
@@ -1753,7 +1797,7 @@ impl App {
     ///
     /// A missing, unreadable, or malformed block falls back to the default,
     /// which is also what the next start would do.
-    fn telemetry_config_snapshot(&self) -> ragent_config::OtelConfig {
+    pub(crate) fn telemetry_config_snapshot(&self) -> ragent_config::OtelConfig {
         let Some(path) = self.telemetry_config_source_path() else {
             return ragent_config::OtelConfig::default();
         };
@@ -1784,6 +1828,9 @@ impl App {
     /// wonder why nothing arrives.
     fn handle_telemetry_logs_command(&mut self, arg: &str) {
         const LEVELS: [&str; 6] = ["all", "trace", "debug", "info", "warn", "error"];
+        // `warning` is the alias `telemetry.otel.logs.level` already accepts in
+        // the config file; store it under the canonical spelling.
+        let arg = if arg == "warning" { "warn" } else { arg };
         let requested_level = LEVELS.contains(&arg).then(|| arg.to_string());
 
         let mut cfg = self.telemetry_config_snapshot();
@@ -1791,13 +1838,7 @@ impl App {
 
         let reply = match arg {
             "" => {
-                let state = if exporting {
-                    "shipping"
-                } else if cfg.enabled {
-                    "configured but not attached"
-                } else {
-                    "off (telemetry is disabled)"
-                };
+                let state = Self::telemetry_logs_state(&cfg, exporting);
                 format!(
                     "From: /telemetry logs\n\nOTLP log export is **{state}** at level `{}`.\n\n\
                      Use `/telemetry logs <all|trace|debug|info|warn|error>` to change the level, \
@@ -1888,6 +1929,7 @@ impl App {
 | `/telemetry setup` | Open a TUI dialog to configure endpoint, protocol, interval, timeout, internal port, and log level |
 | `/telemetry counters` | List all available metric counters, grouped by category, plus the log-export state |
 | `/telemetry logs [<level>]` | Show or set the OTLP log-export level |
+| `/telemetry_panel` | Toggle the live telemetry side panel |
 
 `/telemetry on` turns on **both** signals: ragent's `tracing` events are
 batched to the same collector as the metrics, in addition to the local sink
@@ -1904,30 +1946,41 @@ with a clean failure count.",
                 );
                 self.status = "telemetry: help".to_string();
             }
-            "on" => {
-                self.set_telemetry_enabled(true);
-                self.append_assistant_text(
-                    "From: /telemetry on
+            "on" => match self.set_telemetry_enabled(true) {
+                Ok(()) => {
+                    self.append_assistant_text(
+                        "From: /telemetry on
 
 [ok] Telemetry enabled. Metrics and logs are both exported to the collector.
 
 Use `/telemetry logs <all|trace|debug|info|warn|error>` to raise or lower the log
 level.",
-                );
-                self.status = "telemetry: enabled".to_string();
-            }
-            "off" => {
-                self.set_telemetry_enabled(false);
-                self.append_assistant_text(
-                    "From: /telemetry off
+                    );
+                    self.status = "telemetry: enabled".to_string();
+                }
+                Err(e) => {
+                    self.append_assistant_text(&format!("From: /telemetry on\n\n[err] {e}"));
+                    self.status = "telemetry: enable failed".to_string();
+                }
+            },
+            "off" => match self.set_telemetry_enabled(false) {
+                Ok(()) => {
+                    self.append_assistant_text(
+                        "From: /telemetry off
 
 [ok] Telemetry disabled. Metrics and logs both stop.",
-                );
-                self.status = "telemetry: disabled".to_string();
-            }
+                    );
+                    self.status = "telemetry: disabled".to_string();
+                }
+                Err(e) => {
+                    self.append_assistant_text(&format!("From: /telemetry off\n\n[err] {e}"));
+                    self.status = "telemetry: disable failed".to_string();
+                }
+            },
             "setup" => {
-                let cfg = ragent_agent::Config::load().unwrap_or_default();
-                let otel = cfg.telemetry.otel;
+                // Seed from the stored block the save will merge onto, so the
+                // dialog shows exactly what Enter would keep.
+                let otel = self.telemetry_config_snapshot();
                 self.provider_setup = Some(ProviderSetupStep::TelemetrySetup {
                     endpoint_field: crate::input_field::InputField::with_text(&otel.endpoint),
                     protocol: otel.protocol,

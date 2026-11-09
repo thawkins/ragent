@@ -1220,3 +1220,42 @@ fn memory_panel_scrollbar_gutter_click_starts_a_drag() {
     ));
     assert!(app.scrollbar_drag.is_some());
 }
+
+/// Toggling the protocol follows a default OTLP port (4318 HTTP / 4317 gRPC)
+/// in the endpoint, and leaves a custom port alone.
+#[tokio::test]
+async fn telemetry_setup_protocol_toggle_swaps_default_port() {
+    let cases = [
+        ("http://localhost:4318", "http://localhost:4317"),
+        ("https://c.example:4318/otel", "https://c.example:4317/otel"),
+        // A custom port must not change.
+        ("http://localhost:9000", "http://localhost:9000"),
+        // Digits in the path are not a port.
+        ("http://h/x:4318", "http://h/x:4318"),
+        // The authority ends at a query or fragment, which are preserved.
+        (
+            "http://localhost:4318?tenant=a",
+            "http://localhost:4317?tenant=a",
+        ),
+        ("http://localhost:4318#f", "http://localhost:4317#f"),
+        (
+            "https://collector.example?route=:4318",
+            "https://collector.example?route=:4318",
+        ),
+    ];
+    for (start, expected) in cases {
+        let mut app = support::make_app();
+        let mut step = telemetry_setup(1);
+        if let ProviderSetupStep::TelemetrySetup { endpoint_field, .. } = &mut step {
+            *endpoint_field = InputField::with_text(start);
+        }
+        app.provider_setup = Some(step);
+        assert!(handle_key(&mut app, key(KeyCode::Up)).await.is_none());
+        match app.provider_setup.as_ref().expect("setup") {
+            ProviderSetupStep::TelemetrySetup { endpoint_field, .. } => {
+                assert_eq!(endpoint_field.text(), expected, "toggling from {start}");
+            }
+            other => panic!("expected TelemetrySetup, got {other:?}"),
+        }
+    }
+}

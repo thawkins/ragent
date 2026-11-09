@@ -258,3 +258,33 @@ fn test_zero_intervals_are_clamped() {
         rt.block_on(async { TelemetrySubsystem::new(config).expect("zero-interval subsystem") });
     assert_eq!(sub.state(), TelemetryState::Enabled);
 }
+
+/// Regression: `reconfigure` kept the cardinality cache built at startup, so a
+/// changed `cardinality_limit` only took effect after a restart.
+#[cfg(feature = "telemetry")]
+#[test]
+fn test_reconfigure_applies_new_cardinality_limit() {
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    rt.block_on(async {
+        let config = |limit| OtelConfig {
+            enabled: true,
+            endpoint: "http://localhost:4318".to_string(),
+            cardinality_limit: limit,
+            ..Default::default()
+        };
+        let sub = TelemetrySubsystem::new(config(1000)).expect("enabled subsystem");
+        sub.reconfigure(config(1)).expect("reconfigure");
+
+        let registry = sub.instruments().expect("live instruments");
+        let attrs = |v: &str| vec![opentelemetry::KeyValue::new("model", v.to_string())];
+        let first = registry.resolve_attrs("ragent.llm.requests", &attrs("a"));
+        let second = registry.resolve_attrs("ragent.llm.requests", &attrs("b"));
+        assert_eq!(first[0].value.as_str(), "a");
+        assert_eq!(
+            second[0].value.as_str(),
+            "unknown",
+            "the second distinct value must hit the new limit of 1"
+        );
+        sub.reconfigure(OtelConfig::default()).expect("disable");
+    });
+}

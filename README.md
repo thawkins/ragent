@@ -164,14 +164,29 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   (success, non-2xx collector response, transport error, export timeout) and a
   failure is reported in the message window as an `Agent Notice` naming the
   consecutive-failure count, the reason (e.g. `HTTP export failed with status
-  code: 503`), and the masked endpoint; a success resets the streak. After
+  code: 503`), and the masked endpoint; a success resets the streak. `/telemetry
+  on|off` report an invalid stored block, a failed save or a live subsystem that
+  refused the change as `[err]` with the cause instead of an unconditional
+  `[ok]`, and saving creates the user-global config directory when it is
+  missing, so a fresh install can configure telemetry at all. After
   **5 consecutive failures** ragent switches telemetry off through the same path
   as `/telemetry off` (persisting `telemetry.otel.enabled: false`), so a dead
   collector stops costing a request per export interval, and the notice says so
-  and names `/telemetry on` as the retry. `/telemetry counters` and the telemetry
+  and names `/telemetry on` as the retry. The switch survives a restart: saving
+  removes the deprecated `experimental.open_telemetry` alias that would
+  otherwise re-enable export on the next load. `/telemetry setup` merges the
+  dialog onto the stored block, so `service_name`, `resource_attributes`, the
+  per-metric toggles and `cardinality_limit` - none of which have a dialog row -
+  survive a save, and its protocol toggle follows the transport with the
+  endpoint's OTLP default port (4318/4317), leaving a custom port alone.
+  `/telemetry counters` and the telemetry
   panel open with an `Export health` line once any failure has been recorded.
   The export result is still forwarded unchanged, so the SDK's own logging is
-  unaffected. `telemetry.otel.endpoint` is a *base* URL: ragent appends the
+  unaffected. Each failure streak belongs to one export pipeline: a
+  reconfigure (any `/telemetry on|off|logs|setup`) starts a new generation, and
+  a retired pipeline's final background export - its own shutdown can take up
+  to the export timeout - is forwarded without resetting or extending the live
+  streak. `telemetry.otel.endpoint` is a *base* URL: ragent appends the
   OTLP/HTTP signal path (`/v1/metrics`, `/v1/logs`) itself, keeps a base path
   (`https://gw.example.com/otel`), and uses a value that already names a signal
   path verbatim, so both documented forms reach a stock collector
@@ -193,9 +208,14 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   `/telemetry on|off`, `/telemetry logs` and `/telemetry setup` re-point the
   layer live without a restart, a log exporter that fails to build leaves the
   metrics untouched, and `/telemetry counters` plus the telemetry panel report
-  the log-export state. The log window itself is an in-memory sink fed by the
-  TUI, so every entry it records - tool call start, tool arguments, tool
-  result, tool failure, warnings and information lines - is also re-emitted as a
+  the log-export state. A reconfigure detaches the old pipeline and shuts it
+  down on a background thread, so `/telemetry off` against a dead collector
+  never freezes the TUI; `flush()` and `shutdown()` attempt both signals
+  independently, so an unhealthy log endpoint cannot drop the final metric
+  batch.
+  The log window itself is an in-memory sink fed by the TUI, so every entry it
+  records - tool call start, tool arguments, tool result, tool failure, warnings
+  and information lines - is also re-emitted as a
   `tracing` event **at the entry's own severity** (carrying `log_window = true`
   and `log_window_level` naming that severity) **whether or not the panel is
   open**. A session normally runs with the panel closed, so the export is not

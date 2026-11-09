@@ -183,6 +183,11 @@ pub struct ExportHealth {
     auto_disabled: AtomicU32,
     /// Notices waiting to be drained by a UI.
     notices: Mutex<Vec<ExportNotice>>,
+    /// Export pipeline generation. Bumped by
+    /// [`begin_generation`](Self::begin_generation) on every reconfigure so
+    /// a retired pipeline's late results (its final export runs on a
+    /// background thread) cannot reset or extend the live pipeline's streak.
+    generation: AtomicU64,
 }
 
 impl ExportHealth {
@@ -194,7 +199,22 @@ impl ExportHealth {
             total_failures: AtomicU64::new(0),
             auto_disabled: AtomicU32::new(0),
             notices: Mutex::new(Vec::new()),
+            generation: AtomicU64::new(0),
         }
+    }
+
+    /// Start a new export pipeline generation and return its number.
+    ///
+    /// Exporters built after this call belong to the new generation; results
+    /// from exporters of any earlier generation are ignored from then on.
+    pub fn begin_generation(&self) -> u64 {
+        self.generation.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    /// The current export pipeline generation.
+    #[must_use]
+    pub fn current_generation(&self) -> u64 {
+        self.generation.load(Ordering::Relaxed)
     }
 
     /// Record a successful export, clearing the consecutive-failure streak.
@@ -335,6 +355,8 @@ pub type WatchedMetricExporter = ObservedMetricExporter<opentelemetry_otlp::Metr
 pub struct ObservedMetricExporter<E> {
     inner: E,
     endpoint: std::sync::Arc<str>,
+    /// The [`ExportHealth`] generation this exporter was built in.
+    generation: u64,
 }
 
 #[cfg(feature = "telemetry")]
@@ -344,10 +366,14 @@ impl<E> ObservedMetricExporter<E> {
     /// The caller is responsible for masking any userinfo out of `endpoint`
     /// first (the subsystem passes the output of
     /// [`mask_endpoint_userinfo`](crate::TelemetrySubsystem::mask_endpoint_userinfo)).
+    ///
+    /// The exporter belongs to the current [`ExportHealth`] generation; once a
+    /// later generation begins, its results are no longer recorded.
     pub fn new(inner: E, endpoint: impl Into<std::sync::Arc<str>>) -> Self {
         Self {
             inner,
             endpoint: endpoint.into(),
+            generation: export_health().current_generation(),
         }
     }
 
@@ -373,6 +399,11 @@ where
         metrics: &opentelemetry_sdk::metrics::data::ResourceMetrics,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
         let result = self.inner.export(metrics).await;
+        if self.generation != export_health().current_generation() {
+            // A retired pipeline (final export after a reconfigure): its
+            // outcome says nothing about the live collector.
+            return result;
+        }
         match &result {
             Ok(()) => export_health().record_success(),
             Err(error) => {

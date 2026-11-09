@@ -305,4 +305,34 @@ mod observed {
         assert_eq!(notices[0].kind, ExportFailureKind::Transport);
         health.clear();
     }
+
+    /// An exporter from a retired pipeline generation (its final export runs
+    /// after `reconfigure`) must neither count failures nor reset the live
+    /// pipeline's streak.
+    #[test]
+    fn test_observed_exporter_ignores_retired_generation() {
+        let _lock = crate::global_env_lock();
+        let health = ragent_telemetry::export_health::export_health();
+        health.clear();
+        let retired_failing = observed(Some("HTTP export failed with status code: 503"));
+        let retired_ok = observed(None);
+        health.begin_generation();
+        let live = observed(Some("HTTP export failed with status code: 503"));
+
+        assert!(run_export(&live).is_err());
+        let total = health.total_failures();
+        assert!(
+            run_export(&retired_failing).is_err(),
+            "the error is still forwarded"
+        );
+        assert!(run_export(&retired_ok).is_ok());
+        assert_eq!(
+            health.consecutive_failures(),
+            1,
+            "retired results must not move the live streak"
+        );
+        assert_eq!(health.total_failures(), total);
+        assert_eq!(health.take_notices().len(), 1);
+        health.clear();
+    }
 }

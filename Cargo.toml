@@ -221,7 +221,7 @@ reqwest = { version = "0.13", features = ["blocking", "json", "stream", "rustls"
 
 # ── Database ─────────────────────────────────────────────────────────────
 # "bundled" compiles SQLite from source — no system libsqlite3 dependency.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 
 # ── CLI ──────────────────────────────────────────────────────────────────
 clap = { version = "4", features = ["derive"] }
@@ -256,7 +256,7 @@ arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # ── Hardware / IPMI ──────────────────────────────────────────────────────
-rmcp = { version = "3.4", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "3.9", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 
 # ── System introspection ─────────────────────────────────────────────────
 # os_info tool (spec `osinfo`): cross-platform OS/CPU/memory/uptime data,
