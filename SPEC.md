@@ -1,9 +1,9 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.167</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.168</p>
         <p style="font-size: 1.1em;">
-          <strong>Date:</strong> 2026-11-08
+          <strong>Date:</strong> 2026-11-09
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -2931,7 +2931,7 @@ graph LR
 | `/spec feedback <spec-id> <note>` | Append a production feedback note to `FEEDBACK.md` |
 | `/spec impl <id>` / `/spec implement <id>` | Transition spec to `in_progress` and generate plan |
 | `/spec jtbd <specname> [--force] [--agent <name>]` | Perform JTBD analysis and write `JTBD.md` in the spec folder |
-| `/spec list [--status <status>] [--prefix <prefix>]` | List specs with optional filtering |
+| `/spec list [--status <status>] [--prefix <prefix>] [--archived]` | List specs with optional filtering; `--status=<s>` is accepted too, and an unknown status or flag, a flag followed by another option, or an empty `--status=` is an error instead of a full listing |
 | `/spec search <query>` | Search specs by keyword |
 | `/spec show <id>` | Read a spec |
 | `/spec validate [specname]` | Validate EARS compliance, clarification markers, and consistency (ambiguity, contradiction, gap detection) |
@@ -3041,6 +3041,37 @@ so 6- and 7-column task tables keep parsing; a bare `completed` (older
 plans) or an unparseable stamp reads as completed with no time. Moving the
 task to any other status drops the stamp. `/spec task <id> <task-id>` shows
 the time in the local time zone; `spec_read` reports it in UTC.
+
+### 10.10f Spec Persistence Guarantees
+
+The `SPEC.md`/`PLAN.md` round-trip preserves everything the writer does not own:
+
+- **Frontmatter.** A comment line (`# ...`) inside a `reviewers`, `research` or
+  `audit` list is not a top-level key, so it no longer truncates the list and
+  the writer no longer copies orphaned items (`io::is_frontmatter_key_line`).
+  The block closes only on a line that is exactly `---`, so a `---` inside a
+  value does not cut it short. Keys the lifecycle manager does not model are
+  kept on every save, the audit trail is read back rather than regenerated, and
+  multi-line `research:` lists parse.
+- **Task table.** Empty cells stay empty, so a blank Requirement cell does not
+  shift the columns after it. The em/en dash placeholders the row formatter
+  writes read back as "none" instead of a requirement or dependency literally
+  named as a dash. A status update rewrites the matching rows in place (the
+  trailing newline preserved) instead of replacing everything between the table
+  and the next heading.
+- **Rewrite scope.** A rewrite touches exactly what `PlanParser` reads as tasks:
+  the first task header in the Tasks section (a legacy `| Task ID | Title |`
+  header is normalised to seven columns) and data rows with at least six cells.
+  An unrelated table that merely mentions a task ID, such as a three-column
+  review table, is left untouched.
+- **Discovery.** One unreadable spec is reported and skipped; it no longer
+  aborts discovery for every other spec.
+- **Status writes.** `/spec impl` reports a failed write to `implemented` as an
+  error and leaves `SPEC.md` at its previous status instead of reading the
+  mutated in-memory status back as success. `/spec status` reports the
+  transition it performed (it previously compared the status against itself),
+  deleting the active spec deactivates it, and `/spec deactivate` invalidates
+  the cached spec section of the system prompt.
 
 ### 10.11 Constitutional Amendment Process
 
@@ -5652,6 +5683,7 @@ The review, the measurement method and the per-crate rollout record live in
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.168 | 2026-11-09 | **Spec system review (`6953c57c`, `9ed32bd8`): `SPEC.md`/`PLAN.md` round-trips repaired, `/spec` UX bugs fixed, task completion times persisted.** Persistence: the task-table parser keeps empty cells (a blank Requirement cell no longer shifts later columns), the em/en dash placeholders read back as none, a status update rewrites rows in place instead of deleting everything between the table and the next heading, the frontmatter audit trail is read back so history survives each save, keys the manager does not own are preserved, frontmatter closes only on a line that is exactly `---`, multi-line `research:` lists parse, one unreadable spec no longer aborts discovery for all specs, `/spec impl` honours `sdd.phase_minus_one_gates`, the new `implemented -> in_progress` transition reopens a spec, and task completion times persist in the PLAN.md Status cell as RFC 3339 UTC (`completed (2026-11-08T10:12:00Z)`, no extra column, so 6- and 7-column tables keep parsing). Frontmatter: YAML comment lines no longer count as top-level keys (`io::is_frontmatter_key_line`), and a `| Task ID | Title |` legacy header is normalised to seven columns while only rows with at least six cells are rewritten, so an unrelated review table that mentions a task ID is untouched. TUI `/spec`: `status` reports the transition it performed, `list` accepts `--status <s>`/`--status=<s>` and rejects an unknown status or flag, a flag followed by another option or an empty `--status=` is a missing-value error, deleting the active spec deactivates it, deactivate invalidates the cached prompt section, `/spec impl` guidance and completion reflect the real status with a failed write reported as an error, and the doubled `spec: spec:` prefix is gone. Docs: SPEC.md lifecycle diagram redrawn to match `allowed_transitions`, plus sections 10.10e (timestamps) and 10.10f (persistence guarantees). Verification: `cargo check --workspace` clean, `cargo audit` exit 0 over 813 dependencies. |
 | v1.0.167 | 2026-11-08 | **CI fix release, on top of `v1.0.166`.** One flaky test in the ACP transport suite is repaired; no production code changes. `test_mcp_acp_more::acp_cancel_flag_aborts_a_stalled_turn` failed intermittently in CI with `left: Exited, right: Protocol`: the four ACP tests in that file all wrote their scripted subprocess to one scratch path (`more_agent.py`), and `write_script` truncates before writing, so under `cargo nextest` - one process per test - a sibling process could hand `python3` a half-written script. The interpreter then died with a `SyntaxError`, which the transport reports as `AcpErrorKind::Exited` rather than the `Protocol` cancellation cause the test asserts. The script path is now per-behaviour (`more_agent_<behavior>.py`), so no two tests write the same file. Verification: `cargo check --workspace` clean, `cargo audit` exit 0 across 813 dependencies, `cargo fmt --check` clean, `cargo clippy -p ragent-agent --all-targets` clean, and the `test_mcp_acp_more` module green over 12 consecutive runs plus the full `ragent-agent` suite (2651 passed, 1 skipped). |
 | v1.0.166 | 2026-11-08 | **Research, teams and agents release, on top of `v1.0.165`.** The `/research` family is repaired end to end: `/research continue <name> <message>` resumes the item instead of printing "Resuming" and doing nothing, `research show` prints each source's own kind and a 1-based id through one shared `show_source_rows` helper, a second run for an item already in progress in the session is refused instead of mixing both runs' progress into one tracker, a failed run no longer strands the status bar on `[wait]`, an unknown `--flag` or a value flag given no value is rejected instead of folded into the item name, missing arguments are reported as "`<verb>` requires ...", `ragent.json` load failures are reported instead of silently falling back to defaults, and `/research list|show|search --json` now emit JSON in the TUI with `research show --json` / `research search --json` in the CLI. One `TaskStatus::is_terminal()` predicate now decides "finished" for the completion drain, result injection, kill refusal, both wait tools and the Agents panel, so `drain_completed` no longer injects a suspended or terminating task as an empty completion and then reaps it (which lost the result and made a later resume fail with "not found"); `kill_task` refuses a `timed_out` task; `suspend_task`/`resume_task` check and set the status under one guard and store the park flag with it; `cancel_all` also cancels suspended tasks; a finished foreground `spawn_sync` entry is reaped instead of living for the process lifetime, and `spawn_sync` returns the snapshot taken under the completion guard; `new_agent` foreground metadata reports the registry status instead of a hard-coded `completed`. `wait_agents` with `task_ids` omitted waits for running background tasks again (it had regressed to a settled-only scan and reported "No running background tasks" while agents were still working), `has_pending_background` is no longer cleared while a background task is live or another session's result is pending, and `Event::SubagentComplete` carries the terminal `status` and `output_file` so the Agents panel renders the real outcome and the durable report path without a registry lookup that could race with the drain. Teammates are woken when they have unread mail or an auto-claimed task (`TeamManager::next_teammate_turn`), and the team runtime is now bound outside the TUI, so `team_spawn` works in `ragent run`, `ragent serve` and ACP mode instead of reporting a teammate as "queued" and never starting it. The team runtime is also rebindable rather than first-team-forever (`TeamManagerSlot`, with `clear_if` unbinding a manager whose team is gone atomically), a manager refuses to spawn into a team it does not drive, and the processor keeps a live manager of another team so concurrent `serve` sessions do not fight over the slot. Every team tool except `team_create` now resolves its caller and refuses lead-only actions from a teammate or a session outside the team (`tool::team_caller`), and every read-modify-write of `config.json` goes through `TeamStore::update`, which holds the exclusive lock from read to write so concurrent status writes are no longer lost. Verification: `cargo check --workspace --all-targets` clean and `cargo audit` exit 0 across 813 dependencies. |
 | v1.0.165 | 2026-11-07 | **Code-audit remediation (rows 1-25 of `docs/reports/code-audit.md`).** Six security, logging and permission findings closed in one pass. (1) **Credential redaction**: `--dry-run`'s config-parse error passed `Problematic line: {problematic_line}` straight to stdout, so a pasted `"tavily_api_key": "…"` was printed verbatim - it now runs through `redact_secrets` like its sister sites; the background-task spawn log and the crawl/fetch/govcreate URL warns gained the same treatment through the new `ragent_types::sanitize::mask_url_credentials`, which strips URL userinfo and the query string (a presigned `?access_token=` is the normal case for an open-access paper). (2) **Redacting `Debug`**: `ragent_hyperresearch::Config` carried `pub provider_keys: Vec<(String, String)>` under a derived `Debug`, and the Copilot `DeviceFlowStart` carried `device_code` - the OAuth credential the workspace treats as secret everywhere else (T-066). Both now hand-write `Debug`; the hyperresearch one routes through `ragent_config::config::render_redacted` (now `pub`) so a newly added secret field is masked automatically. (3) **GitLab instance URL validation**: `GITLAB_HOST`/`GITLAB_URL`, the `ragent.json` value and an explicit `/reverse` host all decide where the `PRIVATE-TOKEN` header is sent. New `ragent_types::url_validation::validate_instance_url` requires an absolute URL with no userinfo, `https` only or `http` on a loopback host; an unparseable or refused value is reported by name rather than silently accepted, and each site falls back to its next configured source. (4) **Prompt-injection fence for the LLM security analyzer**: `tool_name` and `tool_input` are model-authored and were interpolated raw, so a newline in either could forge additional `- tool:` / `- input:` lines and present the analyzer with a second, innocuous action. `fence_value` escapes every control character (via `Debug`, which is total) into one `<value>...</value>` line, and the system prompt states that fenced bytes are data and must never be followed as instructions. (5) **`READ_ONLY_PERMISSION_CATEGORIES` completed**: the list answered "can a run offered this tool mutate the workspace?" but omitted thirteen read categories the registry actually declares (`web:read`, `model:read`, `git:read`, `github:read`, `gitlab:read`, `cron:read`, `agent:read`, `team:read`, `task`, `system`), so a pure inspection sub-agent resolved a non-empty write-capable set and received the automatic YOLO write scope instead of the ordinary prompt policy. An omitted category fails silently toward *more* permission, which is why `tests/test_read_only_permission_categories.rs` asserts the registry's category vocabulary is closed (a typo such as `git:reed` fails loudly) as well as pinning the named read and write surfaces. (6) **`.gitignore` archive rules**: `*.zip`, `*.tar.gz` and `*.tgz` are now ignored with an explicit `!assets/connectors/fixtures/archives/*` negation for the two inert test fixtures, so a credential-bearing archive cannot be committed silently again. Also in this pass: the broken-pipe-safe output helpers moved from the `ragent` binary into `ragent_types::cli_out` so `hyperresearch` uses them too (a closed stdout no longer aborts either CLI with `failed printing to stdout: Broken pipe`); the shared `ragent_types::tool_args::no_parameters_schema()` replaces eight hand-copied `{"type":"object","properties":{},"additionalProperties":false}` bodies; an MCP server entry that omits `"type"` now defaults to `stdio` on every parse path (SPEC 7.2); `unused_async_trait_impl` joins the workspace clippy allow list; and sixteen items that were `pub(crate)` inside private modules are `pub` again because the external `tests/` suites reach them. Verification: `cargo check --workspace` clean, `cargo audit` exit 0 across 858 dependencies with the single allowed `paste` unmaintained notice. |
@@ -6682,7 +6714,7 @@ graph LR
 | `/spec feedback <spec-id> <note>` | Append a production feedback note to `FEEDBACK.md` |
 | `/spec impl <id>` / `/spec implement <id>` | Transition spec to `in_progress` and generate plan |
 | `/spec jtbd <specname> [--force] [--agent <name>]` | Perform JTBD analysis and write `JTBD.md` in the spec folder |
-| `/spec list [--status <status>] [--prefix <prefix>]` | List specs with optional filtering |
+| `/spec list [--status <status>] [--prefix <prefix>] [--archived]` | List specs with optional filtering; `--status=<s>` is accepted too, and an unknown status or flag, a flag followed by another option, or an empty `--status=` is an error instead of a full listing |
 | `/spec search <query>` | Search specs by keyword |
 | `/spec show <id>` | Read a spec |
 | `/spec validate [specname]` | Validate EARS compliance, clarification markers, and consistency (ambiguity, contradiction, gap detection) |
@@ -6792,6 +6824,37 @@ so 6- and 7-column task tables keep parsing; a bare `completed` (older
 plans) or an unparseable stamp reads as completed with no time. Moving the
 task to any other status drops the stamp. `/spec task <id> <task-id>` shows
 the time in the local time zone; `spec_read` reports it in UTC.
+
+### 10.10f Spec Persistence Guarantees
+
+The `SPEC.md`/`PLAN.md` round-trip preserves everything the writer does not own:
+
+- **Frontmatter.** A comment line (`# ...`) inside a `reviewers`, `research` or
+  `audit` list is not a top-level key, so it no longer truncates the list and
+  the writer no longer copies orphaned items (`io::is_frontmatter_key_line`).
+  The block closes only on a line that is exactly `---`, so a `---` inside a
+  value does not cut it short. Keys the lifecycle manager does not model are
+  kept on every save, the audit trail is read back rather than regenerated, and
+  multi-line `research:` lists parse.
+- **Task table.** Empty cells stay empty, so a blank Requirement cell does not
+  shift the columns after it. The em/en dash placeholders the row formatter
+  writes read back as "none" instead of a requirement or dependency literally
+  named as a dash. A status update rewrites the matching rows in place (the
+  trailing newline preserved) instead of replacing everything between the table
+  and the next heading.
+- **Rewrite scope.** A rewrite touches exactly what `PlanParser` reads as tasks:
+  the first task header in the Tasks section (a legacy `| Task ID | Title |`
+  header is normalised to seven columns) and data rows with at least six cells.
+  An unrelated table that merely mentions a task ID, such as a three-column
+  review table, is left untouched.
+- **Discovery.** One unreadable spec is reported and skipped; it no longer
+  aborts discovery for every other spec.
+- **Status writes.** `/spec impl` reports a failed write to `implemented` as an
+  error and leaves `SPEC.md` at its previous status instead of reading the
+  mutated in-memory status back as success. `/spec status` reports the
+  transition it performed (it previously compared the status against itself),
+  deleting the active spec deactivates it, and `/spec deactivate` invalidates
+  the cached spec section of the system prompt.
 
 ### 10.11 Constitutional Amendment Process
 

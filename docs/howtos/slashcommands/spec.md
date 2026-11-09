@@ -22,7 +22,7 @@ reports results in the message window as a table or status block.
 /spec add <name>             # add a spec discovered on disk into the registry
 /spec delete <name>          # delete a spec
 /spec validate <name>        # validate spec structure and requirements
-/spec list [--status <s>] [--prefix <p>]
+/spec list [--status <s>] [--prefix <p>] [--archived]
 /spec search <query>         # keyword search across spec titles and content
 /spec status <name> [<new-status>]
 /spec task <name>            # task operations for a spec
@@ -49,7 +49,7 @@ reports results in the message window as a table or status block.
 | `/spec add <name>` | Registers an existing spec folder found on disk. |
 | `/spec delete <name>` | Removes the spec from the registry and disk. |
 | `/spec validate <name>` | Checks structure, requirement IDs, and task links. |
-| `/spec list [--status <s>] [--prefix <p>]` | Lists specs, filtered by status or name prefix. |
+| `/spec list [--status <s>] [--prefix <p>] [--archived]` | Lists specs, filtered by status or name prefix. `--status=<s>` is accepted too. An unknown status or flag, a flag followed by another option, and an empty `--status=` are errors naming the valid values, not a silent full listing. `--archived` (or its `--all` synonym) includes archived specs. |
 | `/spec search <query>` | Keyword search across titles and content. |
 | `/spec status <name>` | Shows the spec's lifecycle status. |
 | `/spec status <name> <s>` | Transitions the status (draft, in_review, approved, in_progress, implemented, verified, archived). |
@@ -156,7 +156,12 @@ Reads the local Markdown design document and creates the draft spec plus an axum
 - Coverage reports use `[ok]` (requirement covered by completed tasks),
   `[wait]` (tasks pending), `[sync]` (drift between spec and tracker), and
   `[stop]` (blocked) task-status symbols.
-- Lifecycle transitions print a confirmation with the old and new status.
+- Lifecycle transitions print a confirmation with the transition performed
+  (once reading the status after the change made it print `from X to X`).
+- Task completion is timestamped in the PLAN.md Status cell as RFC 3339 UTC,
+  e.g. `completed (2026-11-08T10:12:00Z)`. No column is added, so 6- and
+  7-column task tables keep parsing; moving the task to another status drops
+  the stamp.
 - Validation failures list each problem with a pointer to the offending
   requirement or task ID.
 - Spec file writes are atomic (temp file plus rename). Writing an empty
@@ -169,4 +174,7 @@ Reads the local Markdown design document and creates the draft spec plus an axum
 - `ragent-specs` crate implements the lifecycle engine behind every form.
 - specs/<name>/SPEC.md is the source of truth; PLAN.md and TESTPLAN.md are
   derived artifacts.
+- `/spec list` argument handling and the transition table mirror
+  `ragent_specs::manager`; the round-trip guarantees are documented in
+  `docs/howtos/spec.md` section 7.
 - See docs/howtos/ for the spec system manual and JTBD analysis guide.

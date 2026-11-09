@@ -324,7 +324,27 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
 - **Memory system** — structured SQLite store with full-text (FTS5) recall,
   automatic extraction, decay, compression, and knowledge graph support
 - **Spec management** — `/spec` slash commands for creating, listing, searching,
-  validating, and tracking specification lifecycles; `/spec jtbd` performs
+  validating, and tracking specification lifecycles. The `SPEC.md`/`PLAN.md`
+  round-trip is lossless for everything the lifecycle writer does not own: blank
+  Requirement cells keep their column position, the writer's own dash
+  placeholders read back as "none" instead of a requirement or dependency named
+  `-`, a task-status update rewrites its rows in place instead of deleting the
+  section after the task table, the frontmatter audit trail is read back rather
+  than regenerated, keys the manager does not model (`research:`, custom keys)
+  survive a save, a `#` comment inside a `reviewers`/`research`/`audit` list no
+  longer truncates it, the block closes only on a line that is exactly `---`,
+  multi-line `research:` lists parse, one unreadable spec no longer hides every
+  other spec from discovery, and a rewrite is scoped to what the plan parser
+  reads as tasks (the first task header in the Tasks section and rows with six
+  or more cells), so an unrelated review table that merely mentions a task ID is
+  left alone. Task completion times persist in the PLAN.md Status cell as RFC
+  3339 UTC (`completed (2026-11-08T10:12:00Z)`) without adding a column, and
+  `implemented -> in_progress` reopens a finished spec. `/spec list` accepts
+  `--status <s>` and `--status=<s>` and rejects an unknown status or flag, a
+  flag followed by another option, and an empty `--status=` rather than
+  silently listing everything; `/spec status` reports the transition it
+  performed; deleting the active spec deactivates it and `/spec deactivate`
+  invalidates the cached prompt section. `/spec jtbd` performs
   Jobs-To-Be-Done analysis on existing specs; `/spec update` regenerates
   `PLAN.md` and `TESTPLAN.md` from an edited `SPEC.md`; `/spec create` also emits a
   manual `TESTPLAN.md` test-plan artifact; `/spec govcreate` turns a system

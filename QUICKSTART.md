@@ -2340,6 +2340,45 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.168 + spec repair
+
+Two things landed after the 1.0.166 release cut: the 1.0.167 CI fix, and a
+full review of the spec system.
+
+- **Spec round-trips no longer lose data.** `SPEC.md`/`PLAN.md` were being
+  rewritten lossily on every save. Fixed: a blank Requirement cell shifted the
+  columns after it; the em/en dash placeholders the writer emits read back as a
+  requirement or dependency literally named `-`; a task-status update deleted
+  everything between the task table and the next heading; the frontmatter audit
+  trail was regenerated empty on every save; a `#` comment inside a
+  `reviewers`/`research`/`audit` list truncated the list; a `---` inside a value
+  ended the frontmatter block early; frontmatter keys the manager does not own
+  (`research:`, custom keys) were dropped; multi-line `research:` lists did not
+  parse; and one unreadable spec aborted discovery for every spec. A PLAN.md
+  rewrite is now scoped to what the plan parser actually reads - the first task
+  header in the Tasks section and rows with six or more cells - so an unrelated
+  review table that merely mentions a task ID is left alone.
+- **Task completion times persist.** Marking a task `completed` writes an
+  RFC 3339 UTC stamp into the PLAN.md Status cell, e.g.
+  `completed (2026-11-08T10:12:00Z)`. No extra column is added, so 6- and
+  7-column task tables keep parsing; moving the task to any other status drops
+  the stamp. `/spec task <id> <task-id>` shows it in local time,
+  `spec_read` reports UTC.
+- **`/spec` command bugs fixed.** `/spec status` printed `from X to X` (it read
+  the status after transitioning); it now reports the transition. `/spec list`
+  accepts the documented `--status <s>` (and `--status=<s>`) and rejects an
+  unknown status or flag instead of listing everything; a flag followed by
+  another option or an empty `--status=` is a missing-value error. Deleting the
+  active spec deactivates it, and `/spec deactivate` invalidates the cached
+  spec section of the system prompt. `/spec impl` guidance and its completion
+  message reflect the real status, a failed write to `implemented` is reported
+  as an error rather than read back as success, the doubled `spec: spec:`
+  prefix is gone, and an invalid spec ID is explained in the message window.
+- **Spec lifecycle gained a reopen edge.** `implemented -> in_progress` is now
+  a valid transition, so an implemented spec can go back to work. The `SPEC.md`
+  lifecycle diagram and section 10.10e/10.10f document the graph and the
+  persistence guarantees.
+
 ## Version 1.0.167
 
 CI fix release. No production behaviour changes: one flaky test in the ACP

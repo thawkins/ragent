@@ -56,6 +56,12 @@ semantic).
 
 Update a task's status within a spec; mirrors the session task tracker.
 
+Marking a task `completed` writes an RFC 3339 UTC completion stamp into the
+`PLAN.md` Status cell (`completed (2026-11-08T10:12:00Z)`) without adding a
+column, so both 6- and 7-column task tables keep parsing. Moving the task to
+any other status removes the stamp. If the write fails, the tool reports the
+error rather than the new status.
+
 **Arguments**
 
 | Argument | Type | Required | Description | Typical value |

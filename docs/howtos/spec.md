@@ -354,7 +354,8 @@ Filters:
 - `--status <status>` — filter by lifecycle status (draft, in_review,
   approved, in_progress, implemented, verified, archived)
 - `--prefix <prefix>` — filter by spec ID prefix (case-insensitive)
-- `--all` — include archived specs (excluded by default)
+- `--archived` — include archived specs (excluded by default); `--all` is
+  accepted as a synonym
 
 By default, specs are sorted by most recently modified. Other sort options:
 by status (lifecycle order), by ID (alphanumeric), or by title.
@@ -362,9 +363,16 @@ by status (lifecycle order), by ID (alphanumeric), or by title.
 ```text
 /spec list
 /spec list --status approved
+/spec list --status=approved
 /spec list --prefix auth
-/spec list --all
+/spec list --archived
 ```
+
+The `--status <s>` and `--status=<s>` forms behave identically. Argument
+handling is strict: an unknown status or flag is rejected with the valid
+status list, a flag followed by another option (`--prefix --archived`) or an
+empty `--status=` is reported as a missing value, and neither case falls back
+to listing every spec.
 
 ### 5.9 `/spec search <query>`
 
@@ -631,9 +639,12 @@ you cannot skip stages.
 
 ```
 draft → in_review → approved → in_progress → implemented → verified → archived
-         ↑                                                        |
-         └────────────────────────────────────────────────────────┘
-                              (archived → draft)
+   ↑        ↓  ↑                                ↑    ↓                        |
+   |        |  |                                |    |                        |
+   |        |  +--------------------------------+----+  (implemented → in_progress)
+   |        +-- changes requested                    (reopen for further work)
+   |                                              (archived → draft)
+   +--------------------------------------------------+
 ```
 
 | From | Allowed transitions |
@@ -642,12 +653,15 @@ draft → in_review → approved → in_progress → implemented → verified �
 | `in_review` | `draft`, `approved` |
 | `approved` | `in_progress` |
 | `in_progress` | `implemented` |
-| `implemented` | `verified` |
+| `implemented` | `verified`, `in_progress` (reopen) |
 | `verified` | `archived` |
 | `archived` | `draft` (reactivate) |
 
 Note: `in_review` can go back to `draft` (changes requested) or forward to
-`approved` (sign-off). Archived specs can be reactivated back to `draft`.
+`approved` (sign-off). Archived specs can be reactivated back to `draft`, and
+`implemented → in_progress` reopens an implemented spec for further work. The
+table is exactly what `SpecManager::allowed_transitions` permits; any other
+pair is refused by name before the file is touched (`invalid transition`).
 
 ### Transition gating
 
@@ -730,6 +744,64 @@ OUTSIDE the spec directory (docs, scratch files, snapshots) never complete
 spec tasks, so editing unrelated files cannot silently corrupt `PLAN.md`. To
 mark tasks complete explicitly — or to mark a task done whose file lives
 outside the spec directory — use `/spec task <spec-id> <task-id> completed`.
+
+### Task completion timestamps
+
+When a task is marked `completed` (via `/spec task` or `spec_task_update`), its
+completion time is written into the `PLAN.md` Status cell as RFC 3339 UTC, e.g.
+`| completed (2026-11-08T10:12:00Z) |`. No extra column is added, so 6- and
+7-column task tables keep parsing; a bare `completed` (older plans) or an
+unparseable stamp reads as completed with no time. Moving the task to any other
+status drops the stamp. `/spec task <spec-id> <task-id>` shows the time in the
+local time zone; the `spec_read` tool reports it in UTC.
+
+### Persistence guarantees
+
+The `SPEC.md`/`PLAN.md` round-trip preserves everything the writer does not own.
+The defects below were found in a full review of the spec system and are fixed;
+they are listed because each one silently rewrote part of a spec file.
+
+**Frontmatter**
+
+- A comment line (`# ...`) inside a `reviewers`, `research` or `audit` list is
+  not a top-level key, so it no longer truncates the list, and the writer no
+  longer copies the orphaned items into the regenerated block
+  (`io::is_frontmatter_key_line`).
+- The block closes only on a line that is exactly `---`, so a `---` inside a
+  value does not cut it short.
+- Keys the lifecycle manager does not model (`research:` linkage, custom keys)
+  are preserved on every save, the audit trail is read back rather than
+  regenerated empty, and multi-line `research:` lists parse.
+
+**Task table**
+
+- Empty cells stay empty, so a blank Requirement cell does not shift the
+  columns after it.
+- The em/en dash placeholders the row formatter writes read back as "none".
+  Before, every task update gave an unlinked task a requirement and a
+  dependency literally named with a dash.
+- A status update rewrites the matching rows in place, preserving the trailing
+  newline, instead of replacing everything between the task table and the next
+  heading.
+- A rewrite touches exactly what the plan parser reads as tasks: the first task
+  header in the Tasks section (a legacy `| Task ID | Title |` header is
+  normalised to seven columns) and data rows with at least six cells. An
+  unrelated table that merely mentions a task ID, such as a three-column review
+  table, is left untouched.
+
+**Status writes and discovery**
+
+- `/spec impl` reports a failed write to `implemented` as an error and leaves
+  `SPEC.md` at its previous status, instead of reading the mutated in-memory
+  status back as success.
+- `/spec status` reports the transition it performed. It previously read the
+  status after the transition and printed `from X to X`.
+- Deleting the active spec deactivates it, and `/spec deactivate` invalidates
+  the cached spec section of the system prompt.
+- One unreadable spec is reported and skipped; it no longer aborts discovery
+  for every other spec.
+- `/spec impl` honours `sdd.phase_minus_one_gates` when moving a spec to
+  `in_progress`.
 
 ---
 
@@ -1246,7 +1318,10 @@ coding agent can read and track specs without slash commands:
 |---------|--------------|------------|
 | `unknown subcommand` | Typo or missing arguments | Run `/spec help` for the command reference |
 | Spec not found | Invalid spec ID or spec doesn't exist | Run `/spec list` to see available specs |
-| `invalid transition` | Trying to skip a lifecycle stage | Follow the transition graph in section 6 |
+| `invalid transition` | Trying to skip a lifecycle stage (or reopen a spec from a status that does not allow it) | Follow the transition graph in section 6; `implemented` may reopen to `in_progress` |
+| `/spec list` prints every spec | An unknown flag or status used to be ignored | Fixed: an unknown flag or status is an error naming the valid values. Check the spelling |
+| `/spec status` printed `from X to X` | The status was read after the transition | Fixed: it now reports the transition performed |
+| A requirement or dependency named `-` | Older ragent wrote dash placeholders that read back as names | Fixed: dash placeholders read back as "none". Update the task once to rewrite the row |
 | `blocked by clarification markers` | Unresolved `[NEEDS CLARIFICATION]` markers | Edit `SPEC.md` to resolve markers, then re-validate |
 | `blocked by unchecked gates` | Phase -1 gate checkboxes not checked | Edit `PLAN.md` to check all gate checkboxes |
 | `no tasks found` | `PLAN.md` missing or has no task table | Run `/spec plan` or `/spec create` to generate a plan |

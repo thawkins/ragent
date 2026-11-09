@@ -4,8 +4,37 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.167)
+## Highlights (v1.0.168 + spec repair)
 
+- **`/spec` tells the truth and stops losing data.** `/spec status` used to
+  print `from draft to draft` because it read the status after transitioning;
+  it now reports the transition it performed. `/spec list` accepts the
+  documented `--status <s>` (and `--status=<s>`) and rejects an unknown status
+  or flag instead of quietly listing everything; a flag followed by another
+  option (`--prefix --archived`) or an empty `--status=` is a missing-value
+  error. Deleting the active spec now deactivates it, and `/spec deactivate`
+  invalidates the cached spec section of the system prompt, so a deleted or
+  deactivated spec stops leaking into the agent's next prompt.
+- **Task completion times are visible and durable.** Completing a task writes
+  an RFC 3339 UTC stamp into the PLAN.md Status cell
+  (`completed (2026-11-08T10:12:00Z)`). `/spec task <id> <task-id>` renders it
+  in your local time zone, and `/spec tasks` shows the current statuses in the
+  same table the agent writes.
+- **Spec files survive a round-trip.** The writer no longer shifts columns on a
+  blank Requirement cell, no longer invents a requirement or dependency named
+  `-` from its own dash placeholders, no longer wipes the section after the
+  task table on a single status change, and no longer regenerates the
+  frontmatter audit trail empty. A `#` comment inside a `reviewers`/`research`
+  list, a `---` inside a value, a multi-line `research:` list and keys the
+  manager does not model all survive a save, and one unreadable spec no longer
+  hides every other spec from `/spec list`.
+- **An implemented spec can be reopened.** `implemented -> in_progress` is a
+  valid transition, so `/spec status <id> in_progress` puts a completed spec
+  back into work with its history intact.
+- **Specs that outlive the session.** Because a spec keeps its completion
+  stamps and audit trail, `/spec status <id> in_review` followed by a restart
+  resumes exactly where it left off, and `/spec coverage <id>` counts completed
+  tasks from the file rather than from memory.
 - **A flaky ACP transport test is fixed.** The four ACP tests in
   `test_mcp_acp_more` shared one scratch script path and each rewrote it, so a
   parallel `cargo nextest` process could hand `python3` a half-written script

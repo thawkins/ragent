@@ -2,6 +2,182 @@
 
 ## [Unreleased]
 
+## [1.0.168] - 2026-11-09
+
+Spec system repair and documentation release.
+
+Ten commits since the `1.0.165` documentation pass, of which only the spec
+repair pair (`6953c57c`, `9ed32bd8`) changes production code after `1.0.167`.
+The rest are the `1.0.166` research/teams/agents release, its review follow-up,
+the `1.0.167` CI fix and the documentation passes. Each commit is listed below
+with its hash.
+
+### Spec system repair (`6953c57c`, `9ed32bd8`)
+
+A review of the whole spec system - `ragent-specs`, the `spec_*` agent tools and
+the TUI `/spec` handlers - repaired the `SPEC.md`/`PLAN.md` round-trips and a
+set of `/spec` command defects, and made task completion times durable.
+
+#### Fixed - persistence (`ragent-specs`)
+
+- The PLAN.md task table parser no longer keeps empty cells, so a blank
+  Requirement cell no longer shifts every later column of that row.
+- The em/en dash placeholders the task-row formatter writes now read back as
+  "none". Before, every task update gave an unlinked task a requirement and a
+  dependency literally named `-`.
+- A task-status update rewrites the matching rows in place instead of deleting
+  everything between the task table and the next heading, and the trailing
+  newline is preserved.
+- The frontmatter audit trail is read back, so history survives each save
+  instead of being regenerated empty.
+- A status change keeps the frontmatter keys it does not own (`research`,
+  custom keys).
+- Frontmatter closes only on a line that is exactly `---`, so a `---` inside a
+  value no longer truncates the block.
+- Multi-line `research:` lists are parsed.
+- One unreadable spec no longer aborts discovery for every other spec.
+- `/spec impl` honours `sdd.phase_minus_one_gates` when moving a spec to
+  `in_progress`.
+- A new `implemented -> in_progress` transition reopens an implemented spec for
+  further work.
+- Task completion times are persisted in the PLAN.md Status cell as RFC 3339
+  UTC, e.g. `completed (2026-11-08T10:12:00Z)`; no extra column is added, so 6-
+  and 7-column task tables keep parsing.
+- YAML comment lines no longer count as top-level frontmatter keys, so a comment
+  inside a `reviewers`/`research`/`audit` list does not truncate it and the
+  writer no longer copies orphaned list items (`io::is_frontmatter_key_line`).
+- The PLAN.md task rewrite now touches exactly what the plan parser reads as
+  tasks: the first task header in the Tasks section (a legacy
+  `| Task ID | Title |` header is normalised to seven columns too) and data rows
+  with at least six cells. An unrelated table that merely mentions a task ID,
+  such as a three-column review table, is left untouched.
+
+#### Fixed - `/spec` commands (TUI)
+
+- `/spec status` reported "from X to X" because it read the status before the
+  transition; it now reports the transition it performed.
+- `/spec list` accepts the documented `--status <s>` form and rejects an
+  unknown status or flag instead of listing everything.
+- A flag followed by another option (`--prefix --archived`) or an empty
+  `--status=` is a missing-value error instead of swallowing the next token.
+- Deleting the active spec deactivates it, and `/spec deactivate` invalidates
+  the cached spec section of the system prompt.
+- `/spec impl` guidance and its completion message reflect the real status, and
+  a failed write to `implemented` is reported as an error (SPEC.md keeps its old
+  status) instead of being read back from the mutated in-memory status as
+  success.
+- Status lines no longer carry a doubled `spec: spec:` prefix, and an invalid
+  spec ID is explained in the message window.
+- The `/spec status`, `/spec task` and `/spec activate` handlers are
+  rustfmt-formatted again.
+
+#### Changed - documentation
+
+- `SPEC.md` redraws the spec lifecycle diagram to match
+  `SpecManager::allowed_transitions` and adds section 10.10e (task completion
+  timestamps).
+
+#### Tests
+
+- `crates/ragent-specs/tests/test_spec_roundtrip.rs` (round-trip and
+  frontmatter cases), `crates/ragent-tui/tests/test_slash_spec_deep.rs`,
+  `crates/ragent-tui/tests/test_event_swarm_research_deep.rs`, plus additions
+  to `test_manager`, `test_spec_impl` and the inline `plan_parser`,
+  `impl_runner` and `manager` modules.
+
+### `161a5f47` - merge pull request #11 (`fix/spec-review`)
+
+Merge of the spec repair pair above; no additional change.
+
+### `1e1d33a8` - Version: 1.0.167
+
+CI fix release; no production code change.
+
+- `test_mcp_acp_more::acp_cancel_flag_aborts_a_stalled_turn` no longer fails
+  intermittently with `left: Exited, right: Protocol`. The four ACP tests in
+  that file shared one scratch script path (`more_agent.py`), and
+  `write_script` truncates before writing, so under `cargo nextest` - one
+  process per test - a sibling could hand `python3` a half-written script. The
+  interpreter then died with a `SyntaxError`, which the transport reports as
+  `AcpErrorKind::Exited` instead of the `Protocol` cause the test asserts. The
+  script path is now per-behaviour (`more_agent_<behavior>.py`).
+
+### `a5fb4289` - Version: 1.0.166
+
+Research, teams and agents release.
+
+- `/research` repaired end to end: `continue` resumes instead of printing
+  "Resuming", `show` prints each source's own kind and a 1-based id through one
+  shared `show_source_rows` helper, a second run for an in-progress item is
+  refused instead of mixing two runs' progress, a failed run no longer strands
+  the status bar on `[wait]`, an unknown `--flag` or a value flag given no value
+  is rejected instead of being folded into the item name, undated progress text
+  is no longer erased by the next refresh, and `ragent.json` load failures are
+  reported.
+- Teams: the runtime is bound in every entry point (TUI, `ragent run`,
+  `ragent serve`, ACP) rather than only the TUI and is rebindable
+  (`TeamManagerSlot` / `clear_if`); every team tool except `team_create`
+  resolves its caller and refuses lead-only actions; the mailbox poll loop peeks
+  instead of marking messages read; an idle teammate is woken on mail,
+  auto-claimed work, resume and shutdown; every `config.json` read-modify-write
+  goes through `TeamStore::update` under one lock.
+- Agents: `wait_agents` waits on running background tasks again (regressed in
+  `1.0.153`), and one `TaskStatus::is_terminal()` predicate decides "finished"
+  on every path.
+
+### `b732a3a5` - docs: sub-agent lifecycle, team runtime binding and v1.0.165 stats
+
+Documented the ten commits since `v1.0.165` across `QUICKSTART.md`,
+`TUI-QUICKSTART.md`, `README.md`, `SPEC.md` and `STATS.md`, updated
+`docs/howtos/tools/sub-agents.md` (wait seeding, one definition of "finished")
+and `docs/howtos/teams.md` (6.6.2 caller resolution, lead-only tools, runtime
+binding, rebindable `TeamManagerSlot`, atomic `TeamStore::update`), and
+regenerated 130 tracked howto PDFs.
+
+### `e02d2678` - merge pull request #10 (`fix/subagent-lifecycle`)
+
+Merge of `77826b3b`, `fe4f0b46` and `ad52c257`; no additional change.
+
+### `ad52c257` - fix(agents): address review - drain flag, suspend races, event payload
+
+Review follow-up on the sub-agent lifecycle work.
+
+- `spawn_sync` returns the task snapshot taken under the completion guard, so a
+  concurrent drain reaping the newly reported entry cannot turn a successful run
+  into "vanished after completion".
+- `suspend_task`/`resume_task` store the park flag under the task guard, so an
+  interleaved suspend/resume cannot leave a running task parked.
+- `has_pending_background` is no longer cleared while any background task is
+  live or another parent has a pending result, and each background completion
+  re-arms it.
+- `SubagentComplete` carries the terminal status and `output_file`, so the TUI
+  no longer needs a registry lookup that could race with reaping.
+- Reconciliation increments the active-agents gauge when it re-adds a row, and
+  `note_subagent_cancelled` records `Cancelled`, not `Terminating`.
+- Two older tests that asserted the buggy behaviour were updated.
+
+### `fe4f0b46` - docs(changelog): sub-agent lifecycle fixes
+
+CHANGELOG-only commit recording the `77826b3b` fixes.
+
+### `77826b3b` - fix(agents): sub-agent lifecycle, wait_agents and Agents panel bugs
+
+- Task registry: adds `TaskStatus::is_terminal()`; `drain_completed` no longer
+  injects and reaps suspended/terminating tasks; `kill_task` refuses a
+  `timed_out` task; `suspend_task`/`resume_task` check and set status under one
+  guard; `cancel_all` also cancels suspended tasks; finished foreground
+  (`spawn_sync`) entries are marked reported and reaped by the next drain.
+- Tools: `wait_agents` with `task_ids` omitted waits for running background
+  tasks again; `new_agent` foreground metadata reports the registry status
+  instead of a hard-coded `completed`.
+- TUI Agents panel: history records failed/timed-out runs with their real status
+  and the durable `output_file`; a plain kill keeps the row `terminating` while
+  a force-kill records a failed history row and decrements the active-agents
+  gauge; reconciliation keeps terminating rows and retires finished ones into
+  history; a failed completion logs `[err] Task failed`.
+- Tests: `test_subagent_lifecycle_review` in `ragent-agent` (8 cases) and
+  `ragent-tui` (5 cases).
+
 ## [1.0.167] - 2026-11-08
 
 CI fix release. One flaky test in the ACP transport suite is repaired; no
