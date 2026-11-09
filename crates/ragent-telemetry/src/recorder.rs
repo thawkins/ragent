@@ -23,6 +23,7 @@
 //! | [`LlmRecorder`] | [`record_duration`](LlmRecorder::record_duration) | `ragent.llm.duration` | FR-007 |
 //! | [`LlmRecorder`] | [`record_ttft`](LlmRecorder::record_ttft) | `ragent.llm.time_to_first_token` | FR-007 |
 //! | [`SnapshotRecorder`] | [`record_restore`](SnapshotRecorder::record_restore) | `ragent.snapshot.restores` | FR-029 |
+//! | [`ProfileRecorder`] | [`record`](ProfileRecorder::record) | `ragent.profile.duration` | - |
 
 //! # In-memory counter mirrors (ANTIPAT M4.5/MEDIUM-8)
 //!
@@ -39,6 +40,8 @@
 use crate::instruments::InstrumentRegistry;
 #[cfg(feature = "telemetry")]
 use crate::instruments::names;
+#[cfg(feature = "telemetry")]
+use crate::instruments::profile_buckets;
 
 /// Number of tokens in one million, used to convert per-million-token model
 /// pricing into a per-call USD cost (LOW-2).
@@ -213,6 +216,7 @@ impl LlmRecorder {
             let attrs = [
                 InstrumentRegistry::attr_model(model),
                 InstrumentRegistry::attr_provider(provider),
+                InstrumentRegistry::attr_profile_bucket(profile_buckets::LLM_TOTAL),
             ];
             let resolved = reg.resolve_attrs(names::LLM_DURATION, &attrs);
             reg.llm_duration.record(duration_ms, &resolved);
@@ -232,7 +236,10 @@ impl LlmRecorder {
             if !reg.is_metric_enabled(names::LLM_TTFT) {
                 return;
             }
-            let attrs = [InstrumentRegistry::attr_model(model)];
+            let attrs = [
+                InstrumentRegistry::attr_model(model),
+                InstrumentRegistry::attr_profile_bucket(profile_buckets::LLM_FIRST_EVENT_WAIT),
+            ];
             let resolved = reg.resolve_attrs(names::LLM_TTFT, &attrs);
             reg.llm_ttft.record(ttft_ms, &resolved);
             crate::counters::set_llm_ttft_last(ttft_ms);
@@ -464,7 +471,10 @@ impl ToolRecorder {
             if !reg.is_metric_enabled(names::TOOL_DURATION) {
                 return;
             }
-            let attrs = [InstrumentRegistry::attr_tool(tool_name)];
+            let attrs = [
+                InstrumentRegistry::attr_tool(tool_name),
+                InstrumentRegistry::attr_profile_bucket(profile_buckets::TOOL_TOTAL),
+            ];
             let resolved = reg.resolve_attrs(names::TOOL_DURATION, &attrs);
             reg.tool_duration.record(duration_ms, &resolved);
             crate::counters::set_tool_duration_last(duration_ms);
@@ -503,6 +513,69 @@ impl Default for ToolRecorder {
     fn default() -> Self {
         Self::disabled()
     }
+}
+
+// -- Profile recorder -----------------------------------------------------
+
+/// Recorder for agent-loop profiler samples (`ragent.profile.duration`).
+///
+/// Holds only the one histogram and the shared cardinality cache, so a clone
+/// costs two `Arc` increments; the agent-loop profiler takes one per scope.
+/// Each sample is tagged by [`InstrumentRegistry::profile_attrs`] so the
+/// exported series say which profiler bucket they belong to.
+#[cfg(feature = "telemetry")]
+#[derive(Clone)]
+pub struct ProfileRecorder {
+    histogram: opentelemetry::metrics::Histogram<f64>,
+    cardinality: std::sync::Arc<crate::cardinality::CardinalityCache>,
+}
+
+/// No-op profile recorder used when the `telemetry` feature is off.
+#[cfg(not(feature = "telemetry"))]
+#[derive(Clone, Copy, Debug)]
+pub struct ProfileRecorder;
+
+#[cfg(feature = "telemetry")]
+impl std::fmt::Debug for ProfileRecorder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProfileRecorder").finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "telemetry")]
+impl ProfileRecorder {
+    /// Build a recorder from a live registry.
+    ///
+    /// Returns `None` when `ragent.profile.duration` is disabled through
+    /// `telemetry.otel.metrics` (FR-027), so callers skip timing entirely.
+    #[must_use]
+    pub fn new(registry: &InstrumentRegistry) -> Option<Self> {
+        if !registry.is_metric_enabled(names::PROFILE_DURATION) {
+            return None;
+        }
+        Some(Self {
+            histogram: registry.profile_duration.clone(),
+            cardinality: registry.shared_cardinality(),
+        })
+    }
+
+    /// Record one profiler sample of `duration_ms` for operation `label`.
+    ///
+    /// # Arguments
+    ///
+    /// * `label` - Profiler operation label (e.g. `loop.llm.stream`).
+    /// * `duration_ms` - Elapsed time in milliseconds.
+    pub fn record(&self, label: &str, duration_ms: f64) {
+        let attrs = InstrumentRegistry::profile_attrs(label);
+        let resolved = self.cardinality.resolve(names::PROFILE_DURATION, &attrs);
+        self.histogram.record(duration_ms, &resolved);
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+impl ProfileRecorder {
+    /// No-op: record a profiler sample.
+    pub fn record(&self, _label: &str, _duration_ms: f64) {}
 }
 
 // -- Session recorder -----------------------------------------------------

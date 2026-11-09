@@ -53,6 +53,8 @@ mod test_mock_session_metrics;
 mod test_nonblocking;
 #[path = "test_otlp_http_endpoint.rs"]
 mod test_otlp_http_endpoint;
+#[path = "test_profile_duration_export.rs"]
+mod test_profile_duration_export;
 #[path = "test_prometheus_render.rs"]
 mod test_prometheus_render;
 #[path = "test_recorder_constructors.rs"]

@@ -208,3 +208,96 @@ fn test_scope_disabled_then_enabled_records() {
 const fn _unused_mutex_anchor() -> Mutex<usize> {
     Mutex::new(0)
 }
+
+/// Build an enabled telemetry subsystem over an in-memory exporter.
+fn otel_subsystem() -> (
+    Arc<ragent_agent::telemetry::TelemetrySubsystem>,
+    opentelemetry_sdk::metrics::InMemoryMetricExporter,
+) {
+    let exporter = opentelemetry_sdk::metrics::InMemoryMetricExporter::default();
+    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter.clone())
+        .with_interval(std::time::Duration::from_hours(1))
+        .build();
+    let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+        .with_reader(reader)
+        .build();
+    let sub = ragent_agent::telemetry::TelemetrySubsystem::from_provider(
+        ragent_agent::telemetry::OtelConfig::default(),
+        provider,
+    );
+    (Arc::new(sub), exporter)
+}
+
+/// `profile.operation` values exported on `ragent.profile.duration`.
+fn exported_operations(
+    sub: &ragent_agent::telemetry::TelemetrySubsystem,
+    exporter: &opentelemetry_sdk::metrics::InMemoryMetricExporter,
+) -> Vec<String> {
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    sub.provider()
+        .expect("provider")
+        .force_flush()
+        .expect("flush");
+    let mut ops = Vec::new();
+    for rm in exporter.get_finished_metrics().unwrap_or_default() {
+        for sm in rm.scope_metrics() {
+            for metric in sm
+                .metrics()
+                .filter(|m| m.name() == "ragent.profile.duration")
+            {
+                if let AggregatedMetrics::F64(MetricData::Histogram(hist)) = metric.data() {
+                    for point in hist.data_points() {
+                        ops.extend(
+                            point
+                                .attributes()
+                                .filter(|kv| kv.key.as_str() == "profile.operation")
+                                .map(|kv| kv.value.to_string()),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    ops.sort();
+    ops
+}
+
+#[test]
+fn test_profiler_exports_to_otel_with_panel_disabled() {
+    let (sub, exporter) = otel_subsystem();
+    let profiler = Arc::new(AgentLoopProfiler::new());
+    profiler.attach_telemetry(Arc::clone(&sub));
+    assert!(!profiler.is_enabled());
+
+    drop(profiler.scope("loop.llm.stream"));
+    drop(profiler.scope_with(|| "tool.total:bash".to_string()));
+    profiler.record_duration(
+        "loop.llm.first_event_wait",
+        std::time::Duration::from_millis(3),
+    );
+
+    assert_eq!(
+        exported_operations(&sub, &exporter),
+        vec![
+            "loop.llm.first_event_wait",
+            "loop.llm.stream",
+            "tool.total:bash"
+        ]
+    );
+    // The panel stays off: OTel export does not populate it.
+    assert_eq!(profiler.snapshot().total_samples, 0);
+}
+
+#[test]
+fn test_profiler_skips_otel_when_telemetry_disabled() {
+    let profiler = Arc::new(AgentLoopProfiler::new());
+    profiler.attach_telemetry(Arc::new(
+        ragent_agent::telemetry::TelemetrySubsystem::disabled(),
+    ));
+    let label_built = AtomicUsize::new(0);
+    drop(profiler.scope_with(|| {
+        label_built.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        "never".to_string()
+    }));
+    assert_eq!(label_built.load(std::sync::atomic::Ordering::Relaxed), 0);
+}

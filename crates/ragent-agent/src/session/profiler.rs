@@ -3,6 +3,11 @@
 //! Tracks per-operation counters and timing aggregates for the main session
 //! processor so the TUI can render a live profiling panel while the profiler is
 //! enabled.
+//!
+//! When a telemetry subsystem is attached with
+//! [`AgentLoopProfiler::attach_telemetry`] and OTel export is enabled, every
+//! scope is also recorded to `ragent.profile.duration`, tagged with its
+//! `profile.operation` and `profile.group`, whether or not the panel is on.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,6 +15,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use crate::perf;
+use crate::telemetry::{ProfileRecorder, TelemetrySubsystem};
 
 /// Aggregated timing statistics for one profiled operation.
 #[derive(Debug, Clone, Default)]
@@ -54,11 +60,22 @@ pub struct ProfileSnapshot {
 }
 
 /// Shared profiler used by the session processor and TUI.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct AgentLoopProfiler {
     enabled: AtomicBool,
     started_at: RwLock<Option<Instant>>,
     stats: RwLock<HashMap<String, ProfileOperationStats>>,
+    /// Telemetry subsystem that receives every sample as
+    /// `ragent.profile.duration` while OTel export is enabled.
+    telemetry: RwLock<Option<Arc<TelemetrySubsystem>>>,
+}
+
+impl std::fmt::Debug for AgentLoopProfiler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentLoopProfiler")
+            .field("enabled", &self.is_enabled())
+            .finish_non_exhaustive()
+    }
 }
 
 impl AgentLoopProfiler {
@@ -93,6 +110,30 @@ impl AgentLoopProfiler {
         }
     }
 
+    /// Export every profiler sample to `telemetry` while it is enabled.
+    ///
+    /// The subsystem is consulted per scope, so `/telemetry on|off` takes
+    /// effect without re-attaching.
+    ///
+    /// # Arguments
+    ///
+    /// * `telemetry` - The process telemetry subsystem.
+    pub fn attach_telemetry(&self, telemetry: Arc<TelemetrySubsystem>) {
+        if let Ok(mut slot) = self.telemetry.write() {
+            *slot = Some(telemetry);
+        }
+    }
+
+    /// The OTel recorder for profiler samples, when telemetry is attached and
+    /// exporting.
+    fn otel_recorder(&self) -> Option<ProfileRecorder> {
+        self.telemetry
+            .read()
+            .ok()?
+            .as_ref()
+            .and_then(|telemetry| telemetry.profile_recorder())
+    }
+
     /// Clear all accumulated samples while preserving the enabled flag.
     pub fn reset(&self) {
         if let Ok(mut stats) = self.stats.write() {
@@ -109,10 +150,11 @@ impl AgentLoopProfiler {
     /// disabled and the scope would be discarded immediately.
     #[must_use]
     pub fn scope(self: &Arc<Self>, label: &'static str) -> ProfileScope {
-        if !self.is_enabled() {
+        let otel = self.otel_recorder();
+        if !self.is_enabled() && otel.is_none() {
             return ProfileScope::disabled();
         }
-        self.scope_owned(label.to_string())
+        self.start_scope(label.to_string(), otel)
     }
 
     /// Start a profiling scope for a dynamically generated operation label.
@@ -126,20 +168,29 @@ impl AgentLoopProfiler {
     where
         F: FnOnce() -> String,
     {
-        if !self.is_enabled() {
+        let otel = self.otel_recorder();
+        if !self.is_enabled() && otel.is_none() {
             return ProfileScope::disabled();
         }
-        self.scope_owned(label_fn())
+        self.start_scope(label_fn(), otel)
     }
 
     /// Start a profiling scope for an owned operation label.
     #[must_use]
     pub fn scope_owned(self: &Arc<Self>, label: String) -> ProfileScope {
-        if !self.is_enabled() {
+        let otel = self.otel_recorder();
+        if !self.is_enabled() && otel.is_none() {
             return ProfileScope::disabled();
         }
+        self.start_scope(label, otel)
+    }
+
+    /// Build an active scope; the caller has checked that the panel or OTel
+    /// export wants the sample.
+    fn start_scope(self: &Arc<Self>, label: String, otel: Option<ProfileRecorder>) -> ProfileScope {
         ProfileScope {
             profiler: Some(self.clone()),
+            otel,
             label,
             started_at: Instant::now(),
             // FR-002: Only emit per-scope log lines when the
@@ -152,8 +203,17 @@ impl AgentLoopProfiler {
         }
     }
 
-    /// Record one completed operation duration.
+    /// Record one completed operation duration to the panel (when enabled)
+    /// and to `ragent.profile.duration` (when OTel export is enabled).
     pub fn record_duration(&self, label: &str, duration: Duration) {
+        if let Some(otel) = self.otel_recorder() {
+            otel.record(label, duration_ms(duration));
+        }
+        self.record_panel(label, duration);
+    }
+
+    /// Accumulate one sample into the panel statistics.
+    fn record_panel(&self, label: &str, duration: Duration) {
         if !self.is_enabled() {
             return;
         }
@@ -312,6 +372,8 @@ fn inferred_child_total_micros(
 #[derive(Debug)]
 pub struct ProfileScope {
     profiler: Option<Arc<AgentLoopProfiler>>,
+    /// OTel recorder captured at scope start, when export is enabled.
+    otel: Option<ProfileRecorder>,
     label: String,
     started_at: Instant,
     /// Whether this scope should emit a `tracing::info!` log line on drop.
@@ -322,6 +384,7 @@ impl ProfileScope {
     fn disabled() -> Self {
         Self {
             profiler: None,
+            otel: None,
             label: String::new(),
             started_at: Instant::now(),
             log_on_drop: false,
@@ -333,7 +396,10 @@ impl Drop for ProfileScope {
     fn drop(&mut self) {
         if let Some(profiler) = &self.profiler {
             let elapsed = self.started_at.elapsed();
-            profiler.record_duration(&self.label, elapsed);
+            if let Some(otel) = &self.otel {
+                otel.record(&self.label, duration_ms(elapsed));
+            }
+            profiler.record_panel(&self.label, elapsed);
             // FR-002: When `RAGENT_AGENT_PERF=1` is set, emit a
             // per-scope `info!` line so operators can see live timings
             // without having to attach a debugger.
@@ -346,6 +412,11 @@ impl Drop for ProfileScope {
             }
         }
     }
+}
+
+/// Convert a duration to fractional milliseconds for the OTel histogram.
+fn duration_ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
 }
 
 static AGENT_LOOP_PROFILER: OnceLock<Arc<AgentLoopProfiler>> = OnceLock::new();

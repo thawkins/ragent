@@ -4954,6 +4954,7 @@ dependencies = [
  "ignore",
  "libc",
  "num_cpus",
+ "opentelemetry_sdk",
  "parking_lot",
  "process-wrap",
  "ragent-codeindex",

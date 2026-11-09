@@ -929,6 +929,9 @@ async fn async_main() -> Result<()> {
     // also wired into the session processor below, the shared-instance guard
     // flushes the actual provider rather than a disabled clone.
     let _telemetry_guard = ShutdownGuard::new(Arc::clone(&telemetry));
+    // Export every agent-loop profiler scope as `ragent.profile.duration`
+    // (tagged with its profiler bucket) while OTel export is enabled.
+    ragent_agent::session::profiler::agent_loop_profiler().attach_telemetry(Arc::clone(&telemetry));
     startup.record("Telemetry init", t0.elapsed());
 
     // Create session manager and processor

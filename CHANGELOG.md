@@ -9,6 +9,19 @@
 - `test_wal_warmup` now uses a per-process directory under `target/temp/`
   instead of a fixed shared temp path that concurrent runs could clobber.
 
+### Added - profiler buckets on OpenTelemetry metrics
+
+- New `ragent.profile.duration` histogram (ms): every agent-loop profiler scope
+  is exported tagged with `profile.operation` (the profiler label, e.g.
+  `loop.llm.stream`, `tool.total:bash`), `profile.group` (`loop.llm`, `tool`)
+  and, for per-tool labels, `tool.name`. Recorded whenever OTel export is
+  enabled, whether or not the `/profile` panel is on; disable it with
+  `"ragent.profile.duration": false` under `telemetry.otel.metrics`.
+- `ragent.llm.duration`, `ragent.llm.time_to_first_token` and
+  `ragent.tool.duration` now carry a `profile.bucket` attribute
+  (`loop.llm.total`, `loop.llm.first_event_wait`, `tool.total`) naming the
+  profiler bucket each one measures.
+
 ### Telemetry review (`a861dd14`, `00d75a77`, `4b4302f7`)
 
 A review of the OpenTelemetry subsystem - the `/telemetry` slash family, the
