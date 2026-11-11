@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed - CLI handlers honour `--config`
+
+- `ragent research` (`create`, `continue`, `update`, `deck`) and
+  `ragent automation` (`list`, `run`) now use the configuration loaded from
+  `--config <file>` instead of reloading the default `ragent.json` chain, so
+  research limits, models and automation settings in that file apply (#57).
+
 ### Added - `ragent spec status`
 
 - `ragent spec status <id> [<status>]` shows a spec's status and allowed
