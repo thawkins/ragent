@@ -2,7 +2,7 @@
 description: "Update all the Major DOC file"
 user-invocable: true
 disable-model-invocation: true
-arguments: true
+argument-hint: "[N | uncommitted]"
 allowed-tools:
  - any
 ---
