@@ -9,7 +9,7 @@ An AI coding agent for the terminal, built in Rust.
 ragent is a Rust coding agent inspired by RooCode, Claude Code, Copilot CLI and
 OpenCode. It provides multi-provider LLM orchestration, a comprehensive built-in
 tool system, a terminal UI, and a client/server architecture — all compiled into a
-single statically-linked binary with zero runtime dependencies.
+single binary that links only against the system C runtime (libc, libm, libgcc_s).
 
 It is implemented in Rust as a learning exercise for the author.
 
@@ -632,7 +632,7 @@ CLI presentation binary.
 
 Every crate builds **one** integration-test binary from its `tests/` tree
 (`autotests = false` plus a single `[[test]] name = "all"` that `#[path]`-includes
-each `tests/test_*.rs` file), so a full run links 19 targets instead of ~950.
+each `tests/test_*.rs` file), so a full run links 20 targets (19 crates plus the root package) instead of ~950.
 Tests run under [cargo-nextest](https://nexte.st) (`.config/nextest.toml`): every
 test gets its own process, so a wedged test cannot block its neighbours. Run one
 file by filter:
@@ -700,7 +700,7 @@ Commands:
   orchestrate  Run a small orchestration example (demonstrates multi-agent coordinator)
   session      Manage sessions (list, resume, export-archive, import)
   db           Inspect and compact the session database (prune)
-  memory       Manage persistent memory (export, import, list)
+  memory       Manage persistent memory (list)
   auth         Configure provider authentication
   models       List available models
   config       Show resolved configuration (show, check)
@@ -731,12 +731,12 @@ Options:
 
 `ragent run --dry-run` is the fastest way to confirm a machine is set up: it loads
 config, resolves the provider, lists the registered skills and tools by category, and
-connects MCP servers, then prints a `READY` / `NOT READY` verdict.
+connects MCP servers, then prints a `READY` / `WARNING` / `BLOCKED` verdict.
 
 ## Configuration
 
-ragent reads configuration from `ragent.json` (or `ragent.jsonc`) in the `.ragent/`
-directory, with fallback to `~/.config/ragent/ragent.json`.
+ragent reads configuration from `ragent.json` in the `.ragent/` directory, layered
+over `~/.config/ragent/ragent.json`.
 
 A repository's `.ragent/ragent.json` is untrusted input, so `Config::merge_project`
 strips the privileged keys a project may not set: `yolo`, permission allow-rules,
@@ -759,7 +759,7 @@ live in the user-global config. Rejected keys are logged at `warn!`.
     }
   },
   "defaultAgent": "general",
-  "permissions": [
+  "permission": [
     { "permission": "file:write", "pattern": "src/**", "action": "allow" }
   ],
   "memory": {
@@ -932,8 +932,8 @@ Docs and examples:
 
 - Guide: [`docs/userdocs/TEAMS.md`](docs/userdocs/TEAMS.md)
 - How-to manual: [`docs/howtos/teams.md`](docs/howtos/teams.md)
-- Example blueprints: [`.ragent/blueprints/teams/`](.ragent/blueprints/teams/)
-  (`code-review`, `parallel-feature`, `debate`)
+- Blueprints: [`docs/howtos/slashcommands/blueprints.md`](docs/howtos/slashcommands/blueprints.md)
+  (`/blueprints list` shows the team blueprints installed locally)
 
 ## Architecture
 

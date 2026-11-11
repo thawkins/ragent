@@ -485,45 +485,52 @@ below documents the current state of all subsystems.
 
 ### Part I: Foundation & Basics
 
-1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Core Features](#core-features)
-4. [Security & Permissions](#security-permissions)
-5. [Configuration](#configuration)
+- [1. Overview](#1-overview)
+- [2. Architecture](#2-architecture)
+- [3. Core Features](#3-core-features)
+- [4. Security & Permissions](#4-security--permissions)
+- [5. Configuration](#5-configuration)
 
 ### Part II: User Interface & API
 
-6. [Terminal User Interface (TUI)](#terminal-user-interface-tui)
-7. [HTTP Server & API](#http-server-api)
+- [6. Terminal User Interface (TUI)](#6-terminal-user-interface-tui)
+- [7. HTTP Server & API](#7-http-server--api)
 
 ### Part III: Data & Knowledge Systems
 
-8. [Code Index](#code-index)
-9. [Memory System](#memory-system)
-10. [Spec Management](#spec-management)
-11. [Research System](#research-system)
-11A. [Project Scaffolding (`/new`)](#11a-project-scaffolding-new)
+- [8. Code Index](#8-code-index)
+- [9. Memory System](#9-memory-system)
+- [10. Spec Management](#10-spec-management)
+- [11. Research System](#11-research-system)
+- [11A. Project Scaffolding (`/new`)](#11a-project-scaffolding-new)
 
 ### Part IV: Agent Customization & Extension
 
-11. [Custom Agents](#custom-agents)
-12. [Skills System](#skills-system)
+- [11. Custom Agents](#11-custom-agents)
+- [12. Skills System](#12-skills-system)
 
 ### Part V: Multi-Agent Coordination
 
-14. [Teams](#teams)
-15. [Swarm Mode](#swarm-mode)
-16. [Autopilot Mode](#autopilot-mode)
-17. [Orchestrator & Multi-Agent Coordination](#orchestrator-multi-agent-coordination)
+- [14. Teams](#14-teams)
+- [15. Swarm Mode](#15-swarm-mode)
+- [16. Autopilot Mode](#16-autopilot-mode)
+- [16A. Cron Scheduling](#16a-cron-scheduling)
+- [17. Orchestrator & Multi-Agent Coordination](#17-orchestrator--multi-agent-coordination)
 
 ### Part VI: External Integrations
 
-18. [GitHub & GitLab Integration](#18-github--gitlab-integration)
-19. [MCP Integration (Model Context Protocol)](#mcp-integration-model-context-protocol)
+- [18. GitHub & GitLab Integration](#18-github--gitlab-integration)
+- [19. MCP Integration (Model Context Protocol)](#19-mcp-integration-model-context-protocol)
+- [19B. Durable Initiatives & Skill Management](#19b-durable-initiatives--skill-management)
+- [19C. Connector System (Claude-Connector-Equivalent Integrations over MCP)](#19c-connector-system-claude-connector-equivalent-integrations-over-mcp)
+- [19D. Execution Backends (`local` / `docker` / `podman` / `remote`)](#19d-execution-backends-local--docker--podman--remote)
+- [19E. Agent Client Protocol (`ragent-agent/src/acp/`)](#19e-agent-client-protocol-ragent-agentsrcacp)
+- [19F. Automation Service (`ragent-agent/src/automation/`)](#19f-automation-service-ragent-agentsrcautomation)
 
 ### Part VII: Operations & Reference
 
-20. [Auto-Update Mechanism](#auto-update-mechanism)
+- [20. Auto-Update Mechanism](#20-auto-update-mechanism)
+- [21. Harness Enhancements](#21-harness-enhancements)
 
 **Appendices**
 
@@ -544,9 +551,9 @@ below documents the current state of all subsystems.
 | 4 | [Event Bus Flow](#23-event-bus-flow) | Architecture | Internal pub/sub message routing |
 | 5 | [Session & Tool Execution Flow](#35-session--tool-execution-flow) | Core Features | LLM call → permission → tool dispatch loop |
 | 6 | [Provider Selection Flow](#36-provider-selection-flow) | Core Features | Multi-provider routing and health checks |
-| 7 | [TUI Component Architecture](#44-tui-component-architecture) | Terminal User Interface | UI layout and event wiring |
-| 8 | [HTTP API Request Flow](#54-http-api-request-flow) | HTTP Server & API | REST + SSE lifecycle |
-| 9 | [Code Index Pipeline](#62-architecture) | Code Index | File scan → parse → index → search |
+| 7 | [TUI Component Architecture](#63-tui-component-architecture) | Terminal User Interface | UI layout and event wiring |
+| 8 | [HTTP API Request Flow](#75-http-api-request-flow) | HTTP Server & API | REST + SSE lifecycle |
+| 9 | [Code Index Pipeline](#83-architecture) | Code Index | File scan → parse → index → search |
 | 10 | [Permission Security Layers](#41-permission-security-layers) | Security & Permissions | 5-layer defense-in-depth |
 | 11 | [Bash Security — 7 Layers](#42-bash-security--7-layers) | Security & Permissions | Bash command defense flow |
 | 12 | [Permission Request Flow](#43-permission-request-flow) | Security & Permissions | From tool call to user decision |
@@ -657,25 +664,27 @@ graph TB
 
 ### 2.1 Workspace Crates
 
-| Crate | Responsibility | Approx. Lines |
+| Crate | Responsibility | Approx. `src/` Lines |
 |-------|----------------|---------------|
-| `ragent-types` | Shared IDs, events, messages, errors, sanitisation | ~2,700 |
-| `ragent-config` | Configuration loading, defaults, permission rules | ~1,850 |
-| `ragent-connectors` | Connector descriptors, store/ledger, catalogue providers, MCP bridge, `/connectors` surface | ~16,400 |
-| `ragent-storage` | SQLite persistence, snapshots, encrypted credentials | ~2,800 |
-| `ragent-llm` | Provider clients and model/provider registry | ~6,700 |
-| `ragent-tools-core` | File, shell, search, and utility tools | ~4,100 |
-| `ragent-tools-extended` | Memory, code index, PDF, web tools | ~4,300 |
-| `ragent-tools-vcs` | GitHub and GitLab tool surface | ~5,200 |
-| `ragent-agent` | Session processor, agent resolution, tool registry, memory, MCP; team runtime + 20 team tools (former `ragent-team` shim folded in) | ~12,500 |
-| `ragent-codeindex` | Tree-sitter parsing, SQLite/Tantivy index, file watcher | ~4,000 |
-| `ragent-server` | Axum HTTP routes and SSE streaming | ~2,400 |
-| `ragent-tui` | Ratatui terminal interface | ~8,900 |
-| `ragent-bench` | Criterion benchmarks shared between TUI and CLI | ~900 |
-| `ragent-specs` | Spec lifecycle management, SDD artifact generation, consistency validation, constitution parsing | ~3,200 |
-| `ragent-research` | Research types, gatherers, and plan-dep parser | ~1,600 |
-| `ragent-plugins` | Plugin discovery, dialect manifests, sandboxed JS runtime, lifecycle, skills/MCP/commands/agents/hooks bridges, `/plugins` surface | ~6,200 |
-| `ragent-surface` | Shared surface helpers for the plugin/connector families: attribution, subcommand tokeniser, store-dir resolution, harness step model, schema samples | ~440 |
+| `ragent-types` | Shared IDs, events, messages, errors, sanitisation | ~8,000 |
+| `ragent-config` | Configuration loading, defaults, permission rules | ~8,900 |
+| `ragent-connectors` | Connector descriptors, store/ledger, catalogue providers, MCP bridge, `/connectors` surface | ~10,500 |
+| `ragent-storage` | SQLite persistence, snapshots, encrypted credentials | ~7,700 |
+| `ragent-llm` | Provider clients and model/provider registry | ~18,800 |
+| `ragent-tools-core` | File, shell, search, and utility tools | ~12,300 |
+| `ragent-tools-extended` | Memory, code index, PDF, web tools | ~29,900 |
+| `ragent-tools-vcs` | GitHub and GitLab tool surface | ~9,000 |
+| `ragent-agent` | Session processor, agent resolution, tool registry, memory, MCP; team runtime + 20 team tools (former `ragent-team` shim folded in) | ~77,300 |
+| `ragent-codeindex` | Tree-sitter parsing, SQLite/Tantivy index, file watcher | ~14,200 |
+| `ragent-server` | Axum HTTP routes and SSE streaming | ~6,100 |
+| `ragent-tui` | Ratatui terminal interface | ~72,300 |
+| `ragent-bench` | Criterion benchmarks shared between TUI and CLI | ~6,800 |
+| `ragent-specs` | Spec lifecycle management, SDD artifact generation, consistency validation, constitution parsing | ~9,100 |
+| `ragent-research` | Research types, gatherers, and plan-dep parser | ~39,000 |
+| `ragent-plugins` | Plugin discovery, dialect manifests, sandboxed JS runtime, lifecycle, skills/MCP/commands/agents/hooks bridges, `/plugins` surface | ~11,400 |
+| `ragent-surface` | Shared surface helpers for the plugin/connector families: attribution, subcommand tokeniser, store-dir resolution, harness step model, schema samples | ~1,200 |
+| `ragent-telemetry` | OpenTelemetry metrics export subsystem | ~6,400 |
+| `ragent-hyperresearch` | Deep-research engine: persistent vault, fetch/scholarly providers, claims, graph, MCP and HTTP surfaces | ~1,200 |
 
 ### 2.2 Crate Dependency Graph
 
@@ -1260,16 +1269,18 @@ call's output, not a refusal.
 
 | Agent | Role |
 |-------|------|
-| `general` | General-purpose assistant |
-| `coder` / `rust-coder` / `python-coder` / `go-coder` / `typescript-coder` | Code specialist |
-| `architect` | High-level design |
-| `ask` | Question-answering |
-| `debug` | Debugging assistant |
-| `code-review` | Review-focused |
-| `orchestrator` | Multi-agent coordination |
-| `plan` | Planning and decomposition |
-| `explore` | Codebase exploration |
-| `title` / `summary` | Short-lived helper agents |
+| `ask` | Quick Q&A - answers questions without tools |
+| `general` | General-purpose coding agent |
+| `build` | Build and test agent with full tool access |
+| `plan` | Planning agent that creates implementation plans |
+| `explore` | Exploration agent for understanding codebases |
+| `rust-coder` / `python-coder` / `typescript-coder` | Language coding specialists |
+| `fastapi-agent` | FastAPI project specialist |
+| `security-auditor` | Security code reviewer (OWASP Top 10, CWE) |
+| `test-writer` | Test generation specialist |
+| `documenter` | Documentation specialist |
+| `devops-agent` / `database-agent` / `frontend-agent` | DevOps, database and frontend specialists |
+| `title` / `summary` | Hidden helper agents (session titles, summaries) |
 
 #### Agent Features
 
@@ -1934,10 +1945,12 @@ is a per-turn function of the run's own tool surface.
 
 Ragent loads configuration from (highest priority first):
 
-1. `--config <PATH>` CLI argument
-2. `.ragent/ragent.json` (or `ragent.jsonc`) in the working directory
-3. `~/.config/ragent/config.json`
-4. Built-in defaults
+1. `--config <PATH>` CLI argument (replaces the layered load below with that single file)
+2. `RAGENT_CONFIG_CONTENT` environment variable (inline JSON)
+3. `RAGENT_CONFIG` environment variable (path to a config file)
+4. `.ragent/ragent.json` in the working directory
+5. `~/.config/ragent/ragent.json`
+6. Built-in defaults
 
 The format is compatible with OpenCode's `opencode.json`.
 
@@ -1947,7 +1960,7 @@ privileged keys before the merge and logs each rejected key at `warn!`:
 
 | Rejected project key | Reason |
 |---|---|
-| `yolo`, `permissions` allow-rules, bash/dirs lists | would auto-approve or widen the sandbox |
+| `yolo`, `permission` allow-rules, bash/dirs lists | would auto-approve or widen the sandbox |
 | `telemetry` | could point the OTLP endpoint at an attacker host |
 | `hooks` | runs `sh -c` outside the permission system |
 | `openai` | enables the inbound OpenAI-compatible surface |
@@ -1980,13 +1993,11 @@ provider entry (`thinking`, `env`, `models`) still merges.
         "COMPLEX": { "models": [{"provider": "openai", "model": "gpt-4o"}] },
         "REASONING": { "models": [{"provider": "anthropic", "model": "claude-opus-4-20250514"}] }
       }
-    },
-    "azure_resource": {
-      "env": ["AZURE_RESOURCE_API_KEY"]
     }
+    // azure_resource: keys come from each entry's `api_key_env` in azureresources.json
   },
-  "defaultAgent": "coder",
-  "permissions": [
+  "defaultAgent": "general",
+  "permission": [
     { "permission": "file:write", "pattern": "src/**", "action": "allow" }
   ],
   "memory": {
@@ -2023,14 +2034,6 @@ provider entry (`thinking`, `env`, `models`) still merges.
       "enabled": false,
       "message_days": 14
     }
-  },
-  // Deprecated legacy Headroom compression block. Still parsed for
-  // one-release migration: `compression.enabled` maps to
-  // `compaction.auto` when `compaction.auto` is not set explicitly.
-  "compression": {
-    "enabled": true,
-    "mode": "default",
-    "auto_threshold": 0.80
   },
   // Tool-name alias resolution (spec `uniformtools` FR-015). `aliases: true`
   // enables the built-in table of provider spellings; an object adds explicit
@@ -2114,10 +2117,9 @@ provider entry (`thinking`, `env`, `models`) still merges.
 | `GEMINI_API_KEY` | Google Gemini |
 | `HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN` | Hugging Face |
 | `AZURE_AI_FOUNDRY_API_KEY`, `AZURE_AI_FOUNDRY_BASE` | Azure AI Foundry |
-| `AZURE_RESOURCE_API_KEY` | Azure Resource |
+| per-entry `api_key_env` (in `azureresources.json`) | Azure Resource |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_REGION` | Amazon Bedrock |
 | `XAI_API_KEY` | xAI Grok |
-| `RAGENT_FOUNDRY_LOCAL_FORCE_WEB` | Force Foundry Local web-service path |
 | `LANGSEARCH_API_KEY` | Web search (LangSearch) |
 | `TAVILY_API_KEY` | Web search (Tavily) |
 
@@ -2192,10 +2194,9 @@ the override model instead of reusing the session's primary model. The
 pre-send auto-compaction path always uses the session's primary model and
 publishes an `AgentNotice` when an override is configured.
 
-The legacy `compression` block (`compression.enabled`, `compression.mode`,
-`compression.auto_threshold`) is still parsed for one-release migration:
-`compression.enabled` is treated as `compaction.auto` when `compaction.auto` is
-not set explicitly. New configurations should use `compaction`.
+The legacy Headroom `compression` block (`compression.enabled`,
+`compression.mode`, `compression.auto_threshold`) is no longer parsed: `Config`
+has no `compression` field, so the key is silently ignored. Use `compaction`.
 
 Trigger the one-shot compaction manually with the `/compact` slash command
 (`/compress` is a deprecated alias — FR-009).
@@ -2404,7 +2405,7 @@ The TUI is a ratatui full-screen interface with these panels:
 
 | Command | Description |
 |---------|-------------|
-| `/quit` / `/q` | Exit ragent |
+| `/quit` / `/exit` | Exit ragent |
 | `/provider` | Open provider setup dialog (always allows editing the stored key) |
 | `/model` | Select model (jumps to model list when a provider is already configured) |
 | `/agent` | Select agent |
@@ -2421,7 +2422,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/memory` | Structured-memory panel and summary: `/memory` / `/memory show` (same), `/memory clear` (a `Yes`/`No` dialog clears this project's memories), `/memory help` |
 | `/db` | Session database: `/db prune [--days N] [--dry-run]` deletes messages older than the retention window (the session row is kept; a real prune arms a `Yes`/`No` dialog that opens on `No`), `/db help` (also the bare form) |
 | `/yolo` | Toggle YOLO mode (`on`/`off` set and persist the state, `status` reports it, a bare `/yolo` toggles; the toggle writes the user-global config, or the `--config` file when one was loaded) |
-| `/todo` `/task` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
+| `/task` | Toggle the TASKS side panel (also Alt+T); `/task list`, `/task help` |
 | `/team create <name>` | Create a team |
 | `/team open <name>` | Re-open existing team |
 | `/team close` | Close current team |
@@ -2600,7 +2601,7 @@ The permission dialog displays a live countdown:
 ### 7.1 Starting the Server
 
 ```bash
-ragent serve --port 9100 --host 127.0.0.1
+ragent serve --addr 127.0.0.1:3000   # --addr defaults to 127.0.0.1:3000
 ```
 
 ### 7.2 REST Endpoints
@@ -2613,10 +2614,8 @@ ragent serve --port 9100 --host 127.0.0.1
 | GET | `/sessions` | List sessions |
 | GET | `/sessions/{id}` | Get session details |
 | POST | `/sessions/{id}/messages` | Send a message (returns SSE stream) |
-| GET | `/sessions/{id}/events` | SSE event stream |
-| GET | `/models` | List available models |
+| GET | `/events` | SSE event stream |
 | GET | `/providers` | List providers |
-| GET | `/agents` | List agents |
 | GET | `/v1/models` | OpenAI-compatible model list (spec `openhands` FR-003) |
 | POST | `/v1/chat/completions` | OpenAI-compatible chat completion; `stream:false` returns JSON, `stream:true` returns `chat.completion.chunk` SSE (spec `openhands` FR-003, FR-011, FR-012) |
 | POST | `/auto/{id}` | Public automation webhook ingress: enqueue a run with the request body as context (spec `openhands` FR-013) |
@@ -3636,14 +3635,24 @@ Custom agents can be defined in JSON using the Open Agentic Schema Framework
 {
   "name": "rust-reviewer",
   "description": "Reviews Rust code for idioms and safety",
-  "model": "anthropic/claude-sonnet-4-20250514",
-  "system_prompt": "You are a meticulous Rust reviewer...",
-  "tools": ["read", "Edit", "Bash", "codeindex_search"],
-  "permissions": [
-    { "permission": "file:write", "pattern": "crates/**", "action": "allow" }
-  ]
+  "version": "1.0.0",
+  "schema_version": "0.7.0",
+  "modules": [{
+    "type": "ragent/agent/v1",
+    "payload": {
+      "system_prompt": "You are a meticulous Rust reviewer...",
+      "model": "anthropic:claude-sonnet-4-20250514",
+      "permissions": [
+        { "permission": "edit", "pattern": "crates/**", "action": "allow" }
+      ]
+    }
+  }]
 }
 ```
+
+`version` and `schema_version` are required, and the record must carry exactly
+one `ragent/agent/v1` module whose `payload` holds the agent definition
+(`system_prompt`, `mode`, `max_steps`, `model`, `skills`, `permissions`, ...).
 
 ### 11.3 Template Variables
 
@@ -6017,23 +6026,10 @@ honours several optional `ragent.json` keys under a top-level `research` object.
 All are opt-in and default to the legacy behaviour, so existing
 configurations continue to work unchanged.
 
-### `research.few_shot` (boolean, default `false`)
-
-When `true`, the synthesis prompt appends up to two short exemplar findings
-after the output-template instructions so the model can calibrate the exact
-label structure, `[#N]` citations, and **Sources Cited / Date Spread**
-paragraph. Exemplars are format-calibration only — the prompt instructs the
-model not to copy their content into its answer and to derive findings from
-the supplied sources. Keep this `false` on small-context models to avoid
-consuming the context window.
-
-### `research.analysis_persona` (string, optional)
-
-When present, replaces the default `system` message persona
-(`"You are a careful research analyst. ..."`) verbatim. Use this to tailor
-voice, audience, and domain framing, e.g.
-`"You are a senior security research analyst for a venture-capital audience."`.
-When absent, the default analyst persona is used.
+The synthesis prompt builder also has few-shot exemplar and persona knobs
+(`SynthesisPromptConfig.few_shot_examples`, `SynthesisPromptConfig.persona`),
+but these are not `ragent.json` keys: `ResearchConfig` has no `few_shot` or
+`analysis_persona` field, so such keys are ignored.
 
 ### `research.models.*` (string, optional)
 
@@ -6043,7 +6039,10 @@ phase falls back to the configured default model.
 - `research_model` — model used by research agents / sub-topic workers.
 - `compression_model` — model used to compress or summarise intermediate findings.
 - `final_report_model` — model used to write the final report.
-- `summarization_model` — lightweight model used for per-page webpage summaries (FR-002).
+
+There is no `summarization_model` config key; the per-page summarization model
+is set per run with `--summarization-model` on the TUI `/research create`
+command (FR-002).
 
 ### `research.supervisor.max_concurrent_research_units` (integer, default 5)
 
@@ -6054,17 +6053,15 @@ and `competitive` modes (FR-012).
 
 When `true`, every research run appends a deterministic quality scorecard to
 the assembled `RESEARCH.md` (FR-015). This is equivalent to passing
-`--evaluate` on every `/research create` or `ragent research create` call.
+`--evaluate` on every TUI `/research create` call (the `ragent research create`
+CLI has no `--evaluate` flag).
 
 ### Example stanza
 
 ```jsonc
 {
   "research": {
-    "few_shot": true,
-    "analysis_persona": "You are a senior research analyst for a venture-capital audience. Read the provided sources and produce a structured markdown analysis. Use only the evidence in the sources; do not invent facts.",
     "models": {
-      "summarization_model": "ollama:phi4",
       "compression_model": "ollama:phi4",
       "research_model": "openrouter/anthropic/claude-sonnet-4-20250514",
       "final_report_model": "openrouter/anthropic/claude-sonnet-4-20250514"

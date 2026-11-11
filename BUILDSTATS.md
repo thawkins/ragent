@@ -120,9 +120,10 @@ test result: ok. 427 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fi
 
 Summed over **all 40 test binaries**: **15,240 tests passed, 0 failed, 16 ignored**.
 
-`--all-targets` excludes doctests. CI additionally runs `cargo test --workspace`,
-which *includes* doctests, so the CI pass count is higher than this figure by the
-workspace's doctest count.
+`--all-targets` excludes doctests. CI does not run `cargo test --workspace`: it runs
+`cargo nextest run --workspace --features ragent-tools-extended/test-ssrf-bypass
+--profile ci --no-fail-fast` plus `cargo test --workspace --doc` for the doctests
+(nextest does not run them), so the CI pass count differs from this figure.
 
 ## Defects fixed during measurement
 
