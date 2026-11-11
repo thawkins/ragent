@@ -1,67 +1,13 @@
 # Rust-Specific Project Guidelines
 
-When loaded, first say: "Rust language instructions loaded."
-
 ## MANDATORY: Run `cargo fmt` After EVERY Rust File Edit
 
-**THIS IS THE MOST IMPORTANT RULE IN THIS FILE. READ IT TWICE.**
-
-Rust is NOT Python, NOT JavaScript, NOT Go. Rust files have strict, non-negotiable
-formatting rules enforced by `rustfmt`. If you try to hand-format a Rust file the way
-you would format Python (indentation, brace placement, spacing), you WILL get it wrong
-and break the build with `cargo fmt --check` failures.
-
-**You MUST run `cargo fmt` after writing or editing ANY `.rs` file. No exceptions.**
-
-### The Rule
-
-After you create, edit, or append to ANY Rust source file (`.rs`), you MUST run:
-
-```bash
-cargo fmt
-```
-
-BEFORE you do anything else. Do this for every single file you touch. Do not batch
-it. Do not skip it because "the edit looked small." Do not skip it because "I already
-know rustfmt style." YOU DO NOT. RUN IT.
-
-### Why This Is Non-Negotiable
-
-1. **You will get indentation wrong.** Rust uses 4 spaces, no tabs. Python-trained
-   models frequently emit 2-space or tab-indented Rust. `cargo fmt` fixes this
-   automatically.
-2. **You will get brace and parenthesis spacing wrong.** `rustfmt` has specific rules
-   for spacing inside `fn(...)`, `match { ... }`, struct literals, etc. that differ
-   from Python/JS conventions. You cannot reproduce these by hand reliably.
-3. **You will get import ordering wrong.** `rustfmt` reorders `use` statements.
-   Hand-ordering them will fail `cargo fmt --check`.
-4. **`cargo fmt --check` is enforced.** A file that does not pass `cargo fmt --check`
-   is a broken file, period. It does not matter if the code compiles.
-5. **Broken formatting wastes review cycles.** Every time you submit a Rust file that
-   fails `cargo fmt --check`, a human or CI must fix your mistake. This is
-   unacceptable.
-
-### Enforcement Procedure
-
-For every Rust file you edit, the workflow is:
-
-```
-edit/create the .rs file  →  run `cargo fmt`  →  verify `cargo fmt --check` passes
-```
-
-If you edit three Rust files, you run `cargo fmt` three times (or at minimum once at
-the end before you finish). NEVER mark a task complete if any edited `.rs` file has
-not been formatted with `cargo fmt`.
-
-**If you are unsure whether a file is formatted correctly, run `cargo fmt`. It is
-always safe — `rustfmt` is idempotent and will only fix formatting, never change
-semantics.**
-
-### What This Replaces
-
-Do NOT attempt to format Rust code by hand to "match existing style." Do NOT copy
-indentation from a Python file. Do NOT guess at `rustfmt` rules. The ONLY reliable
-source of truth for Rust formatting is the `cargo fmt` command itself. Use it.
+After you create, edit, or append to ANY `.rs` file, run `cargo fmt` before you do
+anything else, and make sure `cargo fmt --check` passes before you finish. Do not
+hand-format Rust (indentation, brace spacing, import order): `rustfmt` is the only
+source of truth, and it is idempotent and safe to run any time. CI enforces
+`cargo fmt --check`; an unformatted file is a build failure, even if it compiles.
+NEVER mark a task complete while an edited `.rs` file is unformatted.
 
 ## Technology Stack
 
@@ -119,7 +65,7 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 - Use `#[test]` for sync tests and `#[tokio::test]` for async tests.
 - Import from the relevant public crate for the crate under test rather than assuming a single `ragent` crate path.
 - Organize related tests together.
-- Follow the naming convention: `test_<component>_<scenario>` (e.g. `test_jog_x_positive`).
+- Follow the naming convention: `test_<component>_<scenario>` (e.g. `test_bash_reset_removes_existing_state_file`).
 - For each project crate, migrate related tests into suitable subfolders within that crate's `tests/` directory. Review both inline and external tests for migration candidates, and relocate inline tests from `.rs` files into separate files under the appropriate `tests/` subfolder where practical.
 - **Migration strategies** (see `docs/reports/testconsolidation-review.md` for the migration review and plan):
   - **Public-API tests**: use `use ragent_<crate>::module::Item;` — no source changes needed.
@@ -187,6 +133,37 @@ Rules for this model:
   `global_env_lock()` — never by weakening an assertion or by splitting into more
   targets just to regain isolation. Prefer giving a test its own directory (a
   per-test temp dir or a `target/temp/<unique-name>` path) over serialising.
+- **One binary-wide lock per crate, and every mutating test takes the SAME one.**
+  A crate that needs a shared lock defines it in its `tests/all.rs`:
+
+  ```rust
+  pub fn global_env_mutex() -> &'static std::sync::Mutex<()> { /* OnceLock */ }
+  pub fn global_env_lock() -> std::sync::MutexGuard<'static, ()> { /* poison-tolerant */ }
+  ```
+
+  A test that mutates or observes a process-global (cwd, `XDG_CONFIG_HOME`,
+  `HOME`, `PATH`, a `static` registry) takes `crate::global_env_lock()` for as
+  long as it needs the value stable — never a file-local mutex, which only
+  serialises the children that happen to share that file. `#[serial]` remains
+  fine for globals that need no value control; the shared lock is preferred where
+  the test must also *force* a value (`HOME`, the SSRF bypass, an API-key
+  variable) while it runs. Two tests that each hold a *different* private mutex
+  — or one `#[serial]` and one file-local mutex — do not exclude each other; that
+  is how a `set_var("RAGENT_CONFIG", …)` in one child file came to be observed by
+  a `Config::load()` in another (roughly one failure per 40 unsharded
+  `ragent-config` runs). `scripts/check-test-env-isolation.sh` enforces the rule:
+  a test that calls `set_var` / `remove_var` / `set_current_dir` must carry
+  `#[serial]`, take a `MutexGuard` (preferably `crate::global_env_lock()`), or —
+  when a shared helper already holds the lock for it — say so with a
+  `// env-isolation: <reason>` marker. A crate that mixes `#[serial]` with
+  file-local mutexes and declares no `global_env_lock` in `tests/all.rs` is
+  rejected outright; that is the only case where declaring the lock is required.
+  Do not hold `crate::global_env_lock()` twice in one test: `std::sync::Mutex`
+  is not reentrant and the second acquisition self-deadlocks the whole test
+  binary (74 `/slash` cases in `test_slash_arms_deep.rs` did exactly that by
+  taking the lock and then calling a harness that takes it). A test whose helper
+  already returns the guard must NOT take it again; the script rejects the
+  re-acquisition.
 - **`#[serial]` orders one process; nextest runs one process per test.** Where a
   test's exclusion must hold across *processes* — a fixture written into the
   repository, a shared `target/temp/` path, a scan of the checked-in tree — a
@@ -199,6 +176,8 @@ Rules for this model:
   twin) whose `filter` selects the tests. `test_tool_rename_guard` is the worked
   example (`tool-rename-guard` group). A file-local `Mutex` is still correct for
   an in-process run (`cargo test`), which is why it stays alongside the group.
+  The same applies to a shared *directory*: first choice is a directory of the
+  test's own, the lock is the fallback.
 - **Do not weaken an assertion to make a consolidated build pass.** A cross-file
   failure is a real test-isolation bug; mark `#[serial]` or fix the shared state.
 - **`crate::` in a `#[path]`-included source module resolves at the target root.**
@@ -207,7 +186,9 @@ Rules for this model:
   as a child module of `all` those paths resolve against `all`'s root, not the
   crate under test. Provide the shim (`pub use ragent_<crate>::<x>;`) at the top
   of `all.rs` — a `tests/all_prelude.rs` inlined there is the convention — or
-  rewrite the reference to the crate-absolute path (`ragent_<crate>::<x>`).
+  rewrite the reference to the crate-absolute path (`ragent_<crate>::<x>`). See the
+  shims at the top of `crates/ragent-agent/tests/all.rs`; do not add a second copy
+  of the module inside the child.
 - **Expect a narrow `#[allow(clippy::duplicate_mod)]` on `all.rs`.** When two
   child files each declare the same `#[path = "support/mod.rs"] mod support;`,
   the shared helper is loaded as a module of several children; clippy's
@@ -224,8 +205,7 @@ Rules for this model:
 Use the `Bash` tool to run the following cargo commands:
 
 - `cargo clippy` — Run linter with clippy
-- `cargo fmt` — Format code with rustfmt. **MANDATORY** to run after editing any `.rs` file. See the top of this file for the full procedure.
-- `cargo fmt --check` — Check formatting without changes. Fails if any file is unformatted. This is the CI gate.
+- `cargo fmt` / `cargo fmt --check` — see "MANDATORY: Run `cargo fmt`" at the top of this file.
 
 ## Workspace Layout
 
@@ -261,7 +241,6 @@ Use the `Bash` tool to run the following cargo commands:
   globs (both are idiomatic and allowed). Treat cognitive complexity ≤30 and
   missing docs warnings as review targets rather than guaranteed
   compiler-enforced limits.
-- **Best Practices**: Read the best practices at https://www.djamware.com/post/68b2c7c451ce620c6f5efc56/rust-project-structure-and-best-practices-for-clean-scalable-code and apply them to the project where relevant.
 
 ### Core Code Rules
 
@@ -297,7 +276,7 @@ Use the `Bash` tool to run the following cargo commands:
 
 * **Zero Warnings Policy:** Generated code must compile cleanly without warnings under standard compiler checks.
 * **Clippy Compliance:** Run and pass `cargo clippy` with standard lints on all proposed changes.
-* **Automated Formatting Check (MANDATORY):** You MUST run `cargo fmt` on every Rust file you edit before finishing. See the "MANDATORY: Run `cargo fmt`" section at the top of this file for the full procedure. `cargo fmt` is idempotent and safe — run it freely. A task is NOT complete if any edited `.rs` file has not been formatted with `cargo fmt`. This is enforced by `cargo fmt --check` in CI; unformatted files are build failures.
+* **Formatting (MANDATORY):** see "MANDATORY: Run `cargo fmt`" at the top of this file.
 
 ## Idiomatic Rust Practices
 
