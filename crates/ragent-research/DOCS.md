@@ -1,27 +1,26 @@
 # ragent-research
 
 Structured research system for ragent — orchestrates web + local evidence
-gathering, synthesis, critique, and `RESEARCH.md` document assembly. Provides
-40 modules covering gathering, analysis, session orchestration, document
-assembly, and CLI.
+gathering, synthesis, critique, and `RESEARCH.md` document assembly. Its
+modules cover gathering, analysis, session orchestration, document assembly,
+and CLI.
 
 ## Workspace Dependencies
 
 - ragent-types
 - ragent-config
 - ragent-llm
-- ragent-storage
 - ragent-tools-extended
 
 ## External Dependencies
 
 - async-trait, futures, tokio
-- chrono, serde, serde_json, thiserror, anyhow
+- chrono, serde, serde_json, thiserror, anyhow, tracing
 - url, uuid, blake3, rusqlite
 - reqwest (OA recovery)
-- similar, regex
+- regex, rustc-hash
 
-Dev-dependencies: tempfile, criterion, proptest, ragent-specs.
+Dev-dependencies: tempfile, criterion, proptest, async-trait, ragent-specs.
 
 ## Public API (crate root re-exports)
 
@@ -92,5 +91,4 @@ Dev-dependencies: tempfile, criterion, proptest, ragent-specs.
 ### CLI
 
 - **ResearchCliCommand** (enum) — Parsed `ragent research` subcommand.
-- **FsLocalTool** (struct) — Filesystem-backed `LocalTool` for CLI.
-- **render_list_output** / **render_show_output** / **render_search_output** / **render_session_event_json** / **session_event_json** / **explain_name_error** (fns) — CLI rendering.
+- **render_list_output** / **render_show_output** / **render_search_output** (and their `_json` variants) / **render_session_event_json** / **session_event_json** / **render_deck_event_json** (fns) — CLI rendering.

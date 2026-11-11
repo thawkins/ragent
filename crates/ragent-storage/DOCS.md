@@ -11,35 +11,38 @@ tool crates.
 
 ## External Dependencies
 
-- rusqlite
+- tokio (async wrappers)
 - serde
 - serde_json
 - anyhow
 - thiserror
 - tracing
+- rusqlite
 - chrono
+- similar (snapshot diffs)
+- blake3 (credential key derivation)
+- base64
+- chacha20poly1305 (credential encryption)
 - uuid
-- sha2 (credential encryption)
-- tokio (async wrappers)
-- parking_lot
+- rand
+- dirs
 
 ## Public API (crate root)
 
 ### Modules
 
 - **activity_log** — Activity-log event schema and append-only storage (event sourcing for sessions/runs).
+- **snapshot** — File snapshots: `take_snapshot`, `restore_snapshot`, `incremental_save` (`Snapshot`, `IncrementalSnapshot`).
 - **storage** — Core SQLite storage facade (`Storage` struct).
 
 ### Structs
 
-- **Storage** (struct) — Main storage handle wrapping a SQLite connection; provides session, message, memory, snapshot, and credential persistence.
-  - Session/message methods: `create_session`, `get_session`, `list_sessions`, `delete_session`, `add_message`, `get_messages`, `update_message`, `delete_message`.
-  - Structured memory methods: `store_memory`, `get_memory`, `search_memories`, `delete_memory`, `update_memory_access`.
-  - Snapshot methods: `create_snapshot`, `get_snapshot`, `restore_snapshot`, `list_snapshots`.
-  - Credential methods: `store_credential`, `get_credential`, `delete_credential` (encrypted).
-  - Provider auth methods: `store_provider_auth`, `get_provider_auth`, `delete_provider_auth`.
+- **Storage** (struct) — Main storage handle wrapping a SQLite connection; provides session, message, memory, task, and provider-auth persistence.
+  - Session/message methods: `create_session`, `get_session`, `list_sessions`, `update_session`, `archive_session`, `create_message`, `get_messages`, `update_message`, `delete_messages`.
+  - Structured memory methods: `create_memory`, `get_memory`, `search_memories`, `list_memories`, `delete_memory`, `update_memory_content`, `increment_memory_access`.
+  - Provider auth methods: `set_provider_auth`, `get_provider_auth`, `delete_provider_auth` (keys encrypted with `encrypt_key` / `decrypt_key`).
   - Settings methods: `get_setting`, `set_setting`, `delete_setting`.
-  - Schema methods: `schema_version`, `migrate`.
+  - Schema: the `SCHEMA_VERSION` constant; migrations run inside `Storage::open`.
   - Search-index maintenance: `warm_message_search_index` (startup reconcile of
     `messages_fts` against `messages`; diffs the rowid domains via the FTS5
     `messages_fts_content` shadow table rather than joining on the `UNINDEXED`
@@ -52,10 +55,10 @@ execution facts appended before being projected into user-facing state.
 
 - **ActivityLog** (struct) — Append-only event log store.
   - `append(event)` — Append an activity event.
-  - `read_events(run_id)` — Read all events for a run.
-  - `read_events_from(run_id, seq)` — Read events from a sequence number.
-  - `latest_seq(run_id)` — Get the latest sequence number for a run.
-  - `truncate(run_id, seq)` — Truncate events after a sequence number (rollback).
-- **ActivityEvent** (struct) — Re-exported from `ragent_types::activity`.
-- **RunStatus** (enum) — Re-exported from `ragent_types::activity`.
-- **Projection** / **ResumeResult** / **RollbackResult** (structs) — Re-exported projection/replay types.
+  - `read_run(run_id)` — Read all events for a run; `read_run_upto` stops at a sequence number.
+  - `last_seq(run_id)` — Get the latest sequence number for a run.
+  - `rollback_to_seq` / `rollback_to_checkpoint` — Roll a run back.
+  - `resume_run` / `replay_run` — Resume or replay a run from its events.
+- **AppendError** (enum) — Error returned when an append is rejected.
+- `ActivityEvent`, `RunStatus`, `Projection`, `ResumeResult`, `RollbackResult` are defined in
+  `ragent_types::activity` (not re-exported by this crate).

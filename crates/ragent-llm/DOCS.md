@@ -12,9 +12,9 @@ Ollama, HuggingFace, Azure, xAI, and a model router).
 
 ## External Dependencies
 
-- async-trait, tokio, serde, serde_json, anyhow, thiserror, tracing
-- reqwest, futures, async-stream, tokio-util
-- chrono, base64, regex, dirs, sha2, hex
+- async-trait, tokio, serde, serde_json, anyhow, tracing
+- reqwest, bytes, futures, async-stream
+- chrono, regex, dirs, sha2, hex
 
 Dev-dependencies: tempfile.
 

@@ -11,8 +11,8 @@ sensitive-data redaction, Prometheus exposition, and graceful shutdown.
 
 ## External Dependencies
 
-- serde, serde_json, anyhow, thiserror, tracing, tokio, parking_lot
-- opentelemetry, opentelemetry_sdk, opentelemetry-otlp (optional, behind `telemetry` feature)
+- url, serde_json, thiserror, tracing, tracing-subscriber, tokio, parking_lot
+- opentelemetry, opentelemetry_sdk, opentelemetry-otlp (optional, behind the default-on `telemetry` feature)
 
 ## Public API (crate root)
 
@@ -54,7 +54,7 @@ sensitive-data redaction, Prometheus exposition, and graceful shutdown.
 - **CounterSnapshot** (struct) — Live atomic mirror of all counter/gauge/histogram values.
 - **CounterValues** (struct) — Plain snapshot for read-out.
 - **current_values** (fn) — Return current in-memory snapshot.
-- **increment_\* / add_\* / set_\*** (fns, ~30) — Typed update helpers per metric.
+- **increment_\* / add_\* / set_\*** (fns) — Typed update helpers per metric.
 - **TelemetryCountersContent** (struct) — Markdown-renderable counters; method: `markdown`.
 
 ## Module: instruments

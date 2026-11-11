@@ -8,7 +8,6 @@ markdown rendering, tool-call display, permission dialogs, and status bar.
 
 - ragent-agent
 - ragent-bench
-- ragent-team
 - ragent-config
 - ragent-types
 - ragent-storage
@@ -21,15 +20,18 @@ markdown rendering, tool-call display, permission dialogs, and status bar.
 - ragent-specs
 - ragent-research
 - ragent-llm
+- ragent-plugins
+- ragent-connectors
 
 ## External Dependencies
 
-- axum, dirs, tokio, serde, serde_json, anyhow, tracing, tracing-subscriber
-- ratatui, crossterm, tokio-stream, futures
+- dirs, tokio, serde, serde_json, anyhow, tracing, tracing-subscriber
+- ratatui, crossterm, futures
 - chrono, rand, arboard, image
-- html2text, pulldown-cmark, async-trait, fs2, lru, regex, uuid, tempfile
+- html2text, pulldown-cmark, async-trait, fs2, lru, uuid, tempfile
+- unicode-segmentation, unicode-width
 
-Dev-dependencies: tempfile, criterion, parking_lot, filetime.
+Dev-dependencies: tempfile, criterion, parking_lot, filetime, unicode-width.
 Build-dependencies: chrono.
 
 ## Public API (crate root)
@@ -97,7 +99,7 @@ Re-exports from submodules. Notable public items:
 
 ## Module: layout_statusbar
 
-- **StatusBarConfig** (struct) / **ResponsiveMode** (enum) / **render_status_bar_v2** (fn).
+- **StatusBarConfig** (struct) / **ResponsiveMode** (enum) / **render_status_bar** (fn).
 - Sub-modules: `colors`, `indicators`, `spinner`, `abbreviations`.
 
 ## Module: theme

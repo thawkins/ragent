@@ -2,7 +2,7 @@
 
 Essential file, shell, and search tools for the ragent agent framework.
 Provides the core `Tool` trait, `ToolRegistry`, `ToolContext`, path-security
-helpers, and ~25 concrete tool implementations.
+helpers, and the concrete core tool implementations.
 
 ## Workspace Dependencies
 
@@ -12,9 +12,9 @@ helpers, and ~25 concrete tool implementations.
 ## External Dependencies
 
 - tokio, async-trait, serde, serde_json, anyhow, tracing
-- globset, walkdir, similar, lru
-- grep-regex, grep-searcher, ignore, regex, rayon
-- which, chrono, uuid, dirs, rust_xlsxwriter
+- globset, similar, lru
+- grep-regex, grep-searcher, ignore, regex, rayon, same-file
+- which, libc, chrono, dirs, rust_xlsxwriter
 
 Dev-dependencies: tempfile, filetime.
 
@@ -24,19 +24,22 @@ Dev-dependencies: tempfile, filetime.
 
 - **ToolOutput** (struct) — `{ content: String, metadata: Option<Value> }` — returned by every tool.
 - **CanonicalPathCache** (struct) — Per-step cache of `canonicalize()` results; methods: `new`, `get_or_canonicalize`.
-- **ToolContext** (struct) — `{ session_id, working_dir, event_bus, read_timestamps, canonical_cache }` — passed to every `execute()`.
+- **ToolContext** (struct) — `{ session_id, working_dir, event_bus, read_timestamps, canonical_cache, allowed_roots }` — passed to every `execute()`.
 - **Tool** (trait) — `name()`, `description()`, `parameters_schema()`, `permission_category()`, `async execute()`.
-- **ToolRegistry** (struct) — `RwLock<HashMap<String, Arc<dyn Tool>>>` + hidden set; methods: `new`, `register`, `get`, `list`, `contains`, `remove`, `clear`, `set_hidden`, `definitions`.
-- **create_core_registry** (fn) — Registers all core tools (apply_patch, read, Write, create, Edit, multiedit, patch, copy_file, move_file, rm, make_directory, append_to_file, file_info, diff_files, Glob, list, Grep, Bash, bash_reset, open, agent_complete, think, get_env, calculator).
+- **ToolRegistry** (struct) — `RwLock<HashMap<String, Arc<dyn Tool>>>`; methods: `new`, `register`, `get`, `list`, `contains`, `remove`, `clear`, `definitions`.
+- **create_core_registry** (fn) — Registers all core tools (apply_patch, read, Write, create, Edit, multiedit, patch, copy_file, move_file, rm, make_directory, append_to_file, file_info, diff_files, Glob, list, Grep, Bash, bash_reset, open, agent_complete, think, get_env, calculator, DateTime).
 
 ### Path security
 
 - **check_path_within_root** (fn) — Path escape guard; canonicalises + longest-existing-prefix walk.
 - **check_path_within_root_cached** (fn) — Cached variant using `CanonicalPathCache`.
-- **is_path_within** (fn) — Component-equality containment check (no string prefix).
-- **is_alias_within** (fn) — Walks parents comparing dev/inode (bind-mount / symlink detection).
-- **same_file_identity** (fn) — Platform-specific file identity comparison.
-- **CleanPath** (trait + impl) — In-place `.`/`..` cleaning without touching disk.
+- **check_path_within_any_root** / **check_path_within_any_root_cached** (fns) — Accept a path under any of several roots.
+- **check_path_within_allowed_roots_cached** (fn) — Checks against `working_dir` plus `ToolContext::allowed_roots`.
+- Private helpers behind these checks (not exported):
+  - **is_path_within** (fn) — Component-equality containment check (no string prefix).
+  - **is_alias_within** (fn) — Walks parents comparing dev/inode (bind-mount / symlink detection).
+  - **same_file_identity** (fn) — Platform-specific file identity comparison.
+  - **CleanPath** (trait + impl) — In-place `.`/`..` cleaning without touching disk.
 
 ### Argument validation
 
@@ -57,6 +60,7 @@ Dev-dependencies: tempfile, filetime.
 
 - **event** (module) — Re-export of `ragent_types::event::{Event, EventBus}`.
 - **sanitize** (module) — Re-export of `ragent_types::sanitize::*`.
+- **guard** (module) — Re-export of `ragent_types::guard::*`.
 - **resource** (module) — Re-export of `ragent_types::resource`.
 
 ### Modules (tool implementations)
@@ -86,6 +90,7 @@ Dev-dependencies: tempfile, filetime.
 - **think** — `ThinkTool` (`think`).
 - **calculator** — `CalculatorTool` (`calculator`).
 - **get_env** — `GetEnvTool` (`get_env`).
+- **datetime** — `DateTimeTool` (`DateTime`).
 - **replace** — Three-lane match cascade helpers (exact -> whitespace-flexible -> indent-normalised).
 - **path_util** — `resolve_path(working_dir, path_str)`.
 - **edit_common** — Stale-file detection, edit timestamp recording.
