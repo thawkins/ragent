@@ -84,4 +84,4 @@ Diagnostics
 
 - `/agent`  -  open the picker or switch directly to a named agent
 - `/help`  -  list all available slash commands
-- Custom agents are documented in `docs/custom-agents.md`
+- Custom agents are documented in `docs/howtos/custom-agents.md`

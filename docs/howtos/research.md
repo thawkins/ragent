@@ -1507,7 +1507,7 @@ source count, and all session events as a JSON array.
     "topic": "Rust async/await patterns",
     "title": "Optional custom title",
     "from_urls": ["https://example.com/article"],
-    "from_file": "docs/design.md",
+    "from_files": ["docs/design.md"],
     "sources_dir": "docs/architecture",
     "template": "quarterly",
     "use_local": true,
@@ -1653,8 +1653,8 @@ ragent research help
 ragent research create rust-async "Rust async patterns" --tier full --use-local
 ragent research create brief "Vector databases" --max-concepts 3 --max-findings 10
 ragent research create vendors "Managed vector db vendors" --url-cloak
-ragent research create from-url --from-url https://example.com/article
-ragent research create from-doc --from-file docs/design.md --use-local
+ragent research create from-url --from-urls https://example.com/article
+ragent research create from-doc --from-files docs/design.md --use-local
 ragent research create comp "vector db landscape" --mode competitive
 ragent research open rust-async
 ragent research list

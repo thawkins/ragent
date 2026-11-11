@@ -1,6 +1,6 @@
 # /reload
 
-> "Reload configuration, agents, MCP servers, and skills" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
+> "Reload customizations (/reload [all|config|mcp|skills|agents])" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
 
 ## Overview
 

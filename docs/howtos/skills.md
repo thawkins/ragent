@@ -181,7 +181,7 @@ directory `Deploy` is a mistake.
 The pseudo-entry `any` (any case) lifts the restriction entirely. An entry that
 matches no registered tool is reported once per skill and entry, naming the
 skill and the offending entry - a typo does not silently remove a capability
-without telling you. See [tools](../tools/file-operations.md) for the registry
+without telling you. See [tools](tools/file-operations.md) for the registry
 names.
 
 **`user-invocable` and `disable-model-invocation`** are independent. Together

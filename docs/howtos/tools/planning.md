@@ -5,7 +5,7 @@ Delegate read-only analytical work to the plan agent.
 | Tool | Description |
 |------|-------------|
 | `EnterPlanMode` | Delegate to the plan agent for read-only analysis. |
-| `ExitPlanMode` | Exit plan mode. |
+| `ExitPlanMode` | Return the plan result to the previous agent. |
 
 **Visibility switch:** `plan`.
 
@@ -17,21 +17,30 @@ Enter plan mode / delegate analysis to the plan agent. The plan agent is
 read-only: it explores the codebase and produces a structured implementation
 plan without making any changes.
 
-**Arguments:** none required — pass the planning request via the session
-prompt.
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `task` | string | yes | What to plan or analyse |
+| `context` | string | no | Additional background for the plan agent |
 
 ```text
-EnterPlanMode
+EnterPlanMode task="Plan the migration of the config loader to TOML" context="Keep JSON support"
 ```
 
 ---
 
 ## ExitPlanMode
 
-Exit plan mode and return to normal editing.
+Return control from the plan agent to the previous agent. Use it inside a plan
+session once the requested analysis is finished; it does not modify files.
 
-**Arguments:** none.
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `summary` | string | yes | The plan or analysis result to return to the calling agent |
 
 ```text
-ExitPlanMode
+ExitPlanMode summary="Three-step migration plan: ..."
 ```

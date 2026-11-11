@@ -8,7 +8,7 @@
 persisted in session metadata through the storage layer, so it appears in
 session lists and survives restarts and resume operations. Calling `/name`
 with no argument clears the existing name. Use it to label long-running work
-sessions so they are easy to find later in `/session list`.
+sessions so they are easy to find later with the `ragent session list` CLI command.
 
 The handler is the `name` arm in `crates/ragent-tui/src/app/slash.rs`
 (lines 5855-5913).
@@ -100,6 +100,6 @@ empty name argument is the clear path and passes an empty string.
 
 ## Related
 
-- `/session list` - see named sessions in the list
-- `/session resume` - resume a named session by id
+- `ragent session list` (CLI) - see named sessions in the list
+- `ragent session resume <id>` (CLI) - resume a named session by id
 - `/quit` - leave the session (the name persists for next time)

@@ -119,7 +119,7 @@ Get full issue details, or close an issue.
 | Argument | Type | Required | Description | Typical value |
 |----------|------|----------|-------------|---------------|
 | `status` | enum | no (`list`) | `running`, `pending`, `success`, `failed`, `canceled` | `"failed"` |
-| `id` | integer | yes (`get`) | Pipeline ID | — |
+| `pipeline_id` | integer | yes (`get`) | Pipeline ID (the global ID from the pipeline URL, not an IID) | — |
 
 ---
 

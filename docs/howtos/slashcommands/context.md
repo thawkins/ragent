@@ -1,6 +1,6 @@
 # /context
 
-> "Context cache management: /context refresh | /context help" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
+> "Manage context cache: /context refresh | /context help" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
 
 ## Overview
 

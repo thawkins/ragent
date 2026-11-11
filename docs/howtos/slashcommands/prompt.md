@@ -96,7 +96,7 @@ modified, and nothing is persisted.
 ## Related
 
 - Agent presets and custom agents (OASF JSON / Markdown profiles):
-  `docs/custom-agents.md`.
+  `docs/howtos/custom-agents.md`.
 - `/agents` to list loaded agents and diagnostics, `/agent` for the picker.
 - `/system` for a session-scoped system-prompt override.
 - Sub-agent spawning: `new_agent`, `wait_agents`, `agent_complete`.

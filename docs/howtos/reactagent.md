@@ -24,11 +24,11 @@ unrecoverable error).
 
 | Element | Location |
 |---|---|
-| Orchestrator struct | `SessionProcessor` — `crates/ragent-agent/src/session/processor.rs:106` |
-| Public entry (plain text prompt) | `process_message` — `processor.rs:1137` |
-| Public entry (pre-built `Message`, multipart/images) | `process_user_message` — `processor.rs:1164` |
-| **The core loop** | inline `loop { ... }` — `processor.rs:1472`, inside `process_user_message` |
-| Per-step helpers | `crates/ragent-agent/src/session/loop_steps.rs` — `prepare_client` (:121), `build_turn_system_prompt` (:362), `build_turn_chat_messages` (:649), `run_inline_init_acknowledgement` (:739), `call_llm_step` (:857), `finalize_assistant_message` (:1529) |
+| Orchestrator struct | `SessionProcessor` — `crates/ragent-agent/src/session/processor.rs` |
+| Public entry (plain text prompt) | `process_message` — `processor.rs` |
+| Public entry (pre-built `Message`, multipart/images) | `process_user_message` — `processor.rs` |
+| **The core loop** | inline `loop { ... }` inside `process_user_message` (`processor.rs`) |
+| Per-step helpers | `crates/ragent-agent/src/session/loop_steps.rs` — `prepare_client`, `build_turn_system_prompt`, `build_turn_chat_messages`, `run_inline_init_acknowledgement`, `call_llm_step`, `finalize_assistant_message` |
 | Loop-run state machine | `LoopSpec` / `LoopTracker` / `StopCondition` — `crates/ragent-agent/src/session/loop_state.rs` |
 
 `SessionProcessor` orchestrates the loop: it accepts a user message, streams an
@@ -41,7 +41,7 @@ signals completion or the step limit is reached.
 
 ### Phase A — turn setup (before the loop)
 
-Location: `processor.rs:1171-1465`.
+Location: `process_user_message` in `processor.rs`, before the `loop {`.
 
 1. **Telemetry** — an `agent_loop_profiler()` and a `SessionRecorder` are
    created and `record_session_start()` is logged.
@@ -81,7 +81,7 @@ Location: `processor.rs:1171-1465`.
 
 ### Phase B — one ReACT iteration
 
-Each pass of the `loop {` body (`processor.rs:1472+`) runs this guard chain in
+Each pass of the `loop {` body in `process_user_message` runs this guard chain in
 order:
 
 | # | Guard | Behaviour |
@@ -145,7 +145,7 @@ When the model answers **without** tool calls, three sub-paths run (in order):
   the goal was reached -> run ends as `GoalAchieved`.
 
 When tool calls are **non-empty**, one more interrupt safe point runs, then the
-**tool dispatch phase** (`processor.rs:2042+`): text is moved (not cloned) into
+**tool dispatch phase** (later in the same `loop {` body): text is moved (not cloned) into
 a `ContentPart::Text`, `parallel_tool_calls` is read from
 `experimental.parallel_tool_calls`, one `ToolContext` is built per step, and
 per tool call: **permission check -> execution -> result collection -> interim
@@ -166,7 +166,7 @@ persist message -> RunId issued -> prepare_client (fatal on error)
 build system prompt + chat history (cached)
      |
      +--------------------------------------------------+
-     |  loop {  (processor.rs:1472)                     |
+     |  loop {  (process_user_message)                  |
      |    stop-flag? -> break                           |
      |    /loop interrupt (or cancel on loop runs)?     |
      |      -> status interrupted, break                |
@@ -478,4 +478,3 @@ exhausted, or `/autopilot off` is issued.
   wraps this loop with a spec and stop conditions
 - `docs/howtos/office.md` — the PDF tool family this loop can execute
 - `docs/howtos/teams.md` — multi-agent team coordination
-- `docs/performance/benchmark-guide.md` — benchmarking the loop surfaces
