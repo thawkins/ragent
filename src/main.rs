@@ -1794,7 +1794,9 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
             cli::SpecCommands::Status { spec_id, status } => {
                 let cwd =
                     std::env::current_dir().map_err(|e| anyhow::anyhow!("cannot read cwd: {e}"))?;
-                cli::handle_spec_status_command(&cwd, &spec_id, status.as_deref()).await?;
+                // Use the startup config, so `--config <file>` gates apply.
+                let sdd = config.read().await.sdd.clone();
+                cli::handle_spec_status_command(&cwd, &spec_id, status.as_deref(), &sdd).await?;
             }
         },
         Some(Commands::Plugins { args }) => {

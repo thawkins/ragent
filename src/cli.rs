@@ -1821,8 +1821,8 @@ pub enum SpecCommands {
 /// Run `ragent spec status <id> [<status>]` against `<cwd>/specs`.
 ///
 /// Prints the current status and allowed transitions, or performs the
-/// transition with the actor `cli`. The SDD gates come from the loaded
-/// config, exactly as for the TUI `/spec status`.
+/// transition with the actor `cli`. The SDD gates come from `sdd`, the
+/// startup configuration (honouring `--config`), as for the TUI.
 ///
 /// # Errors
 ///
@@ -1833,8 +1833,8 @@ pub async fn handle_spec_status_command(
     cwd: &std::path::Path,
     spec_id: &str,
     new_status: Option<&str>,
+    sdd: &ragent_config::SddConfig,
 ) -> anyhow::Result<()> {
-    let sdd = ragent_config::Config::load().unwrap_or_default().sdd;
     let flags = ragent_specs::SddFlags::from_bools(
         sdd.clarification_markers,
         sdd.quality_checklists,
