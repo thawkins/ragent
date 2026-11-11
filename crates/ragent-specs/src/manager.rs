@@ -48,7 +48,82 @@ pub struct SpecManager {
     specs_root: PathBuf,
 }
 
+/// Result of [`SpecManager::status_command`]: the current status, or a
+/// completed transition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatusOutcome {
+    /// No new status was requested: report the current one.
+    Current {
+        /// The spec's identifier.
+        id: String,
+        /// Its current status.
+        status: SpecStatus,
+        /// The statuses it may move to next.
+        allowed: Vec<SpecStatus>,
+    },
+    /// The spec moved from one status to another (recorded in its audit trail).
+    Transitioned {
+        /// The spec's identifier.
+        id: String,
+        /// The status before the transition.
+        from: SpecStatus,
+        /// The status after the transition.
+        to: SpecStatus,
+    },
+}
+
 impl SpecManager {
+    /// Show or change a spec's status: the shared core of the TUI
+    /// `/spec status` command and the `ragent spec status` CLI.
+    ///
+    /// # Arguments
+    ///
+    /// * `spec_id` - the spec identifier, e.g. `001-auth`.
+    /// * `new_status` - the status to move to, or `None` to report the
+    ///   current status and its allowed transitions.
+    /// * `actor` - who made the change, recorded in the audit trail.
+    /// * `flags` - the SDD gates that apply to the transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns a user-facing message when the id is invalid, the spec cannot
+    /// be read, the status name is unknown, or the transition is refused.
+    pub async fn status_command(
+        &self,
+        spec_id: &str,
+        new_status: Option<&str>,
+        actor: &str,
+        flags: &SddFlags,
+    ) -> Result<StatusOutcome, String> {
+        let id = SpecId::new(spec_id).ok_or_else(|| format!("invalid spec id '{spec_id}'"))?;
+        let mut spec = self
+            .read_spec(&id)
+            .await
+            .map_err(|e| format!("failed to read {spec_id}: {e}"))?;
+        let Some(new_status) = new_status else {
+            return Ok(StatusOutcome::Current {
+                id: spec.id.to_string(),
+                status: spec.status,
+                allowed: next_statuses(spec.status),
+            });
+        };
+        let to = SpecStatus::parse(new_status).ok_or_else(|| {
+            format!(
+                "unknown status '{new_status}' (valid: draft, in_review, approved, \
+                 in_progress, implemented, verified, archived)"
+            )
+        })?;
+        let from = spec.status;
+        self.transition_with_flags(&mut spec, to, actor, flags)
+            .await
+            .map_err(|e| format!("transition failed: {e}"))?;
+        Ok(StatusOutcome::Transitioned {
+            id: spec.id.to_string(),
+            from,
+            to,
+        })
+    }
+
     /// Create a new manager rooted at `specs_root`.
     pub fn new(specs_root: impl Into<PathBuf>) -> Self {
         Self {

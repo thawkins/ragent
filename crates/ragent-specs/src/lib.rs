@@ -33,7 +33,8 @@ pub use git::{BranchResult, create_spec_branch, spec_branch_name};
 pub use impl_runner::{ImplOptions, ImplResult, MilestoneGroup, SpecImplRunner};
 pub use io::SpecIo;
 pub use manager::{
-    SortBy, SpecFilter, SpecManager, SpecSearchResult, is_valid_transition, next_statuses,
+    SortBy, SpecFilter, SpecManager, SpecSearchResult, StatusOutcome, is_valid_transition,
+    next_statuses,
 };
 pub use plan_parser::{
     Effort, Milestone, PhaseMinusOneGate, PhaseMinusOneGates, PlanParser, PlanTask, Priority,

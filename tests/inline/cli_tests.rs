@@ -37,7 +37,9 @@ fn govcreate_to_token_string_rebuilds_positionals_and_flags() {
         "--github",
         "--force",
     ]);
-    let super::SpecCommands::GovCreate(args) = cli.command;
+    let super::SpecCommands::GovCreate(args) = cli.command else {
+        panic!("expected govcreate");
+    };
     assert_eq!(
         args.to_token_string(),
         "my-spec docs/arch.md ./target-dir --language rust --type cmdline \
@@ -58,7 +60,9 @@ fn govcreate_to_token_string_omits_unset_optional_flags() {
         "--type",
         "library",
     ]);
-    let super::SpecCommands::GovCreate(args) = cli.command;
+    let super::SpecCommands::GovCreate(args) = cli.command else {
+        panic!("expected govcreate");
+    };
     assert_eq!(
         args.to_token_string(),
         "my-spec https://example.gov/docs /tmp/out --language python --type library"
@@ -104,7 +108,9 @@ fn govcreate_token_round_trip_through_shared_parser() {
         "cmdline",
         "--force",
     ]);
-    let super::SpecCommands::GovCreate(args) = cli.command;
+    let super::SpecCommands::GovCreate(args) = cli.command else {
+        panic!("expected govcreate");
+    };
     let parsed = SpecCommand::parse(&format!("govcreate {}", args.to_token_string()));
     let SpecCommand::GovCreate {
         spec_id,
@@ -141,7 +147,9 @@ fn govcreate_invalid_spec_id_surfaces_usage_variant_via_shared_parser() {
         "--type",
         "cmdline",
     ]);
-    let super::SpecCommands::GovCreate(args) = cli.command;
+    let super::SpecCommands::GovCreate(args) = cli.command else {
+        panic!("expected govcreate");
+    };
     let parsed = SpecCommand::parse(&format!("govcreate {}", args.to_token_string()));
     assert!(
         matches!(parsed, SpecCommand::GovCreateUsage(_)),
@@ -440,4 +448,21 @@ fn multi_word_topic_words_are_collected() {
         }
         other => panic!("expected Create, got {other:?}"),
     }
+}
+
+/// `ragent spec status <id> [<status>]` parses (#40).
+#[test]
+fn spec_status_parses_with_and_without_a_new_status() {
+    let show = SpecCli::parse_from(["spec", "status", "001-auth"]);
+    let super::SpecCommands::Status { spec_id, status } = show.command else {
+        panic!("expected status");
+    };
+    assert_eq!(spec_id, "001-auth");
+    assert_eq!(status, None);
+
+    let mv = SpecCli::parse_from(["spec", "status", "001-auth", "in_review"]);
+    let super::SpecCommands::Status { status, .. } = mv.command else {
+        panic!("expected status");
+    };
+    assert_eq!(status.as_deref(), Some("in_review"));
 }

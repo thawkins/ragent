@@ -9036,68 +9036,47 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             return;
                         };
                         let rt = tokio::runtime::Handle::current();
+                        // FR-019: gate the SDD checks via config flags.
+                        let sdd_cfg = ragent_agent::Config::load().unwrap_or_default().sdd;
+                        let flags = SddFlags::from_bools(
+                            sdd_cfg.clarification_markers,
+                            sdd_cfg.quality_checklists,
+                            sdd_cfg.consistency_checks,
+                            sdd_cfg.phase_minus_one_gates,
+                            sdd_cfg.constitution,
+                            sdd_cfg.feedback_loop,
+                        );
                         // reason: FUNC-015 nested-runtime bridge; converting to async is tracked in ANTIPAT M6.1
                         let result: Result<String, String> = tokio::task::block_in_place(|| {
-                            rt.block_on(async {
-                                let mut spec = match mgr.read_spec(&id).await {
-                                    Ok(s) => s,
-                                    Err(e) => {
-                                        return Err(format!("failed to read {}: {}", spec_id, e));
-                                    }
-                                };
-                                if let Some(new_status_str) = new_status {
-                                    let new_status = match SpecStatus::parse(&new_status_str) {
-                                        Some(s) => s,
-                                        None => {
-                                            return Err(format!(
-                                                "unknown status '{}'",
-                                                new_status_str
-                                            ));
-                                        }
-                                    };
-                                    // FR-019: Gate SDD clarification check via config flags.
-                                    let sdd_cfg =
-                                        ragent_agent::Config::load().unwrap_or_default().sdd;
-                                    let flags = SddFlags::from_bools(
-                                        sdd_cfg.clarification_markers,
-                                        sdd_cfg.quality_checklists,
-                                        sdd_cfg.consistency_checks,
-                                        sdd_cfg.phase_minus_one_gates,
-                                        sdd_cfg.constitution,
-                                        sdd_cfg.feedback_loop,
-                                    );
-                                    let old_status = spec.status;
-                                    if let Err(e) = mgr
-                                        .transition_with_flags(
-                                            &mut spec, new_status, "user", &flags,
-                                        )
-                                        .await
-                                    {
-                                        return Err(format!("transition failed: {}", e));
-                                    }
-                                    Ok(format!(
-                                        "From: /spec status\n\n\
-                                **{}** transitioned from `{}` to `{}`.",
-                                        spec.id,
-                                        old_status.as_str(),
-                                        new_status.as_str()
-                                    ))
-                                } else {
-                                    let next = ragent_specs::manager::next_statuses(spec.status);
-                                    let next_str = next
-                                        .iter()
-                                        .map(|s| s.as_str())
-                                        .collect::<Vec<_>>()
-                                        .join(", ");
-                                    Ok(format!(
-                                        "From: /spec status\n\n**{}** - current status: `{}`\n\
+                            rt.block_on(mgr.status_command(
+                                id.as_str(),
+                                new_status.as_deref(),
+                                "user",
+                                &flags,
+                            ))
+                        })
+                        .map(|outcome| match outcome {
+                            ragent_specs::StatusOutcome::Transitioned { id, from, to } => format!(
+                                "From: /spec status\n\n**{}** transitioned from `{}` to `{}`.",
+                                id,
+                                from.as_str(),
+                                to.as_str()
+                            ),
+                            ragent_specs::StatusOutcome::Current {
+                                id,
+                                status,
+                                allowed,
+                            } => format!(
+                                "From: /spec status\n\n**{}** - current status: `{}`\n\
                                  Allowed transitions: {}",
-                                        spec.id,
-                                        spec.status.as_str(),
-                                        next_str
-                                    ))
-                                }
-                            })
+                                id,
+                                status.as_str(),
+                                allowed
+                                    .iter()
+                                    .map(|s| s.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
                         });
                         match result {
                             Ok(output) => {
