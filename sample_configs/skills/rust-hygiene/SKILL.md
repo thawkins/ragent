@@ -88,12 +88,19 @@ it), then against the tree. Run them one at a time: some self-tests seed their
 fixture inside the checkout.
 
 ```
+failed=0
 for g in poison-locks file-tool-containment security-unwraps shared-guards \
          vcs-duplication connector-endpoint-literal team-duplication \
          inline-tests test-env-isolation silent-errors tool-rename; do
-  bash "scripts/check-$g.sh" --self-test && bash "scripts/check-$g.sh" || echo "FAIL: $g"
+  if ! { bash "scripts/check-$g.sh" --self-test && bash "scripts/check-$g.sh"; }; then
+    echo "FAIL: $g"
+    failed=1
+  fi
 done
+[ "$failed" -eq 0 ]
 ```
+
+The block exits non-zero if any guard's self-test or tree scan failed.
 
 Fix the code, not the guard: each script prints the file and line it rejects.
 
