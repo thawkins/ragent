@@ -184,8 +184,6 @@ fn split_authored_sections_three_markers_assign_files() {
 
 #[test]
 fn web_time_alias_parses_to_web_phase_timeout() {
-    // Flags must precede the trailing-var-arg topic, otherwise clap
-    // consumes them as positional topic words.
     let cli = TestCli::parse_from([
         "research",
         "create",
@@ -390,4 +388,56 @@ fn output_limit_help_lists_both_flags() {
     let help = create.render_long_help().to_string();
     assert!(help.contains("--max-concepts"), "{help}");
     assert!(help.contains("--max-findings"), "{help}");
+}
+
+/// Regression (#24): a flag after the topic is parsed as a flag, not folded
+/// into the topic text.
+#[test]
+fn flags_after_the_topic_are_parsed_as_flags() {
+    let cli = TestCli::parse_from([
+        "research",
+        "create",
+        "my-name",
+        "rust async runtimes",
+        "--depth",
+        "deep",
+    ]);
+    match cli.command {
+        ResearchCommands::Create { topic, depth, .. } => {
+            assert_eq!(topic, vec!["rust async runtimes".to_string()]);
+            assert_eq!(depth.as_deref(), Some("deep"));
+        }
+        other => panic!("expected Create, got {other:?}"),
+    }
+}
+
+/// Regression (#24): an unknown flag after the topic is an error, not topic
+/// text.
+#[test]
+fn unknown_flag_after_the_topic_is_an_error() {
+    let result = TestCli::try_parse_from(["research", "create", "my-name", "topic", "--bogusflag"]);
+    assert!(result.is_err(), "unknown flag must be rejected: {result:?}");
+}
+
+/// Multi-word topics given as separate words still join in order.
+#[test]
+fn multi_word_topic_words_are_collected() {
+    let cli = TestCli::parse_from([
+        "research",
+        "create",
+        "my-name",
+        "rust",
+        "async",
+        "--iterations",
+        "2",
+    ]);
+    match cli.command {
+        ResearchCommands::Create {
+            topic, iterations, ..
+        } => {
+            assert_eq!(topic, vec!["rust", "async"]);
+            assert_eq!(iterations, Some(2));
+        }
+        other => panic!("expected Create, got {other:?}"),
+    }
 }

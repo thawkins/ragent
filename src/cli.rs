@@ -133,10 +133,12 @@ pub enum ResearchCommands {
         /// Research name (URL-safe identifier)
         #[arg(value_name = "NAME")]
         name: String,
-        /// Topic description (everything after the name). Optional when
-        /// `--from-url` is supplied; in that case the fetched page content
-        /// becomes the research subject.
-        #[arg(value_name = "TOPIC", trailing_var_arg = true, num_args = 0.., required = false)]
+        /// Topic description (the positional words after the name). Optional
+        /// when `--from-urls` or `--from-files` is supplied; in that case the
+        /// fetched or extracted content becomes the research subject. Flags may
+        /// appear before or after the topic; an unknown flag is an error rather
+        /// than topic text.
+        #[arg(value_name = "TOPIC", num_args = 0.., required = false)]
         topic: Vec<String>,
         /// Fetch one or more URLs and use their content as the research
         /// subject in place of (or alongside) an explicit topic. Each page is
@@ -196,7 +198,7 @@ pub enum ResearchCommands {
         /// opts back in for academic topics.
         #[arg(long)]
         papers: bool,
-        /// Allow PDF documents from web search or --from-url to be captured
+        /// Allow PDF documents from web search or --from-urls to be captured
         /// as sources. By default PDF web sources are skipped.
         #[arg(long)]
         use_pdf: bool,
@@ -636,7 +638,7 @@ pub async fn handle_research_command_with_model(
             let clarify = clarify.unwrap_or(false);
             if topic.is_empty() && from_urls.is_empty() && from_files.is_empty() {
                 cliprintln_err!(
-                    "ragent-research: usage: ragent research create <name> <topic...> [--from-url <URL>] [--from-file <PATH>]"
+                    "ragent-research: usage: ragent research create <name> <topic...> [--from-urls <URL>] [--from-files <PATH>]"
                 );
                 return Err(CliExit::usage().into());
             }
@@ -862,8 +864,8 @@ pub async fn handle_research_command_with_model(
         } => {
             // Derive a human-readable item title that summarises the topic
             // (rather than truncating to its first word). Falls back to the
-            // URL when only `--from-url` was supplied, then the first file
-            // path when only `--from-file` was supplied, then to "Research".
+            // URL when only `--from-urls` was supplied, then the first file
+            // path when only `--from-files` was supplied, then to "Research".
             let title = ragent_research::derive_title_files(
                 &topic,
                 from_urls.first().map(String::as_str),
