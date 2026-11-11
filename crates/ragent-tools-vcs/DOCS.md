@@ -1,7 +1,7 @@
 # ragent-tools-vcs
 
 GitHub, GitLab, and local git version-control tools for ragent. Provides API
-clients, OAuth device-flow auth, 39 VCS tools, and a VCS-agnostic provider
+clients, OAuth device-flow auth, the local git / GitHub / GitLab tools, and a VCS-agnostic provider
 parser for the `/reverse` command.
 
 ## Workspace Dependencies
@@ -12,7 +12,7 @@ parser for the `/reverse` command.
 
 ## External Dependencies
 
-- tokio, async-trait, serde, serde_json, anyhow, tracing, reqwest, dirs, zip
+- tokio, async-trait, futures, serde, serde_json, anyhow, tracing, reqwest, zip
 
 Dev-dependencies: tempfile, wiremock.
 
@@ -21,8 +21,8 @@ Dev-dependencies: tempfile, wiremock.
 - **ToolOutput** (struct) — Result of a tool execution with optional structured metadata.
 - **ToolContext** (struct) — Execution context (session_id, working_dir, storage, config).
 - **Tool** (trait) — Core trait for agent-invokable tools.
-- **ToolRegistry** (struct) — Thread-safe registry; methods: `new`, `register`, `get`, `list`, `set_hidden`, `definitions`.
-- **create_vcs_registry** (fn) — Creates a `ToolRegistry` and registers all 39 VCS tools.
+- **ToolRegistry** (struct) — Thread-safe registry; methods: `new`, `register`, `get`, `list`, `definitions`.
+- **create_vcs_registry** (fn) — Creates a `ToolRegistry` and registers every VCS tool (see `registry.rs`).
 
 ## Module: http_client
 
@@ -51,14 +51,14 @@ Local git workspace tools — execute the `git` CLI in the agent's working direc
 - **README_MAX_CHARS** (const) — Max README chars in reverse-engineering context (8000).
 - **build_reverse_prompt**, **classify_api_error**, **extract_download_url**, **extract_rate_limit_reset**, **format_reset_time**, **parse_root_tree** (fns).
 - **DeviceFlowState** (struct), **start_device_flow**, **poll_device_flow** (fns) — OAuth device flow.
-- Tools: `GithubGetActionsTool`, `GithubListIssuesTool`, `GithubGetIssueTool`, `GithubCreateIssueTool`, `GithubCommentIssueTool`, `GithubCloseIssueTool`, `GithubListPrsTool`, `GithubGetPrTool`, `GithubCreatePrTool`, `GithubMergePrTool`, `GithubReviewPrTool`.
+- Tools: `GitHubGetActionsTool`, `GitHubListIssuesTool`, `GitHubGetIssueTool`, `GitHubCreateIssueTool`, `GitHubCommentIssueTool`, `GitHubCloseIssueTool`, `GitHubListPrsTool`, `GitHubGetPrTool`, `GitHubCreatePrTool`, `GitHubMergePrTool`, `GitHubReviewPrTool`.
 - **extract_context_ranges** (fn) — Extracts log line ranges around error keywords.
 
 ## Module: gitlab
 
 - Auth: **GitLabConfig** (struct), **load_token**, **save_token**, **delete_token**, **load_config**, **save_config**, **delete_config**, **migrate_legacy_files** (fns).
 - **GitLabClient** (struct) — Authenticated GitLab API client; methods: `new`, `with_credentials`, `get`, `post`, `put`, `detect_project`, `instance_url`, `token`, `fetch_project_metadata`, `fetch_repository_tree`, `fetch_repository_tree_recursive`, `fetch_readme`.
-- Tools: `GitlabListIssuesTool`, `GitlabGetIssueTool`, `GitlabCreateIssueTool`, `GitlabCommentIssueTool`, `GitlabCloseIssueTool`, `GitlabListMrsTool`, `GitlabGetMrTool`, `GitlabCreateMrTool`, `GitlabMergeMrTool`, `GitlabApproveMrTool`, `GitlabListPipelinesTool`, `GitlabGetPipelineTool`, `GitlabListJobsTool`, `GitlabGetJobTool`, `GitlabGetJobLogTool`, `GitlabRetryJobTool`, `GitlabCancelJobTool`, `GitlabRetryPipelineTool`, `GitlabCancelPipelineTool`.
+- Tools: `GitLabListIssuesTool`, `GitLabGetIssueTool`, `GitLabCreateIssueTool`, `GitLabCommentIssueTool`, `GitLabCloseIssueTool`, `GitLabListMrsTool`, `GitLabGetMrTool`, `GitLabCreateMrTool`, `GitLabMergeMrTool`, `GitLabApproveMrTool`, `GitLabListPipelinesTool`, `GitLabGetPipelineTool`, `GitLabListJobsTool`, `GitLabGetJobTool`, `GitLabGetJobLogTool`, `GitLabRetryJobTool`, `GitLabCancelJobTool`, `GitLabRetryPipelineTool`, `GitLabCancelPipelineTool`.
 
 ## Module: vcs_provider
 

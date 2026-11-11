@@ -16,7 +16,6 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 - globset
 - serde
 - serde_json
-- thiserror
 - tracing
 
 ## Public API (crate root)
@@ -40,7 +39,6 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 - **AgentConfig** (struct) — Per-agent configuration overrides.
 - **AgentPerfConfig** (struct) — Agent-loop performance configuration (step budget, stall timeout, concurrency).
 - **AutoExtractConfig** (struct) — Automatic memory extraction configuration.
-- **BrowserConfig** (struct) — Browser automation (CDP) configuration.
 - **Capabilities** (struct) — LLM provider capability flags (vision, tools, etc.).
 - **Config** (struct) — Top-level ragent configuration; loaded with layered precedence.
 - **Cost** (struct) — Per-token cost model for an LLM model.
@@ -81,7 +79,7 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 ### Module: config
 
 - **Config** (struct) — Top-level config; methods: `load`, `save`, `save_to_source`, `global_config_dir`, `global_config_path`, `backup_global_config`, `restore_global_config`, `merge`, `thinking_config_for_model`.
-- Supporting structs: `AgentPerfConfig`, `StreamConfig`, `CodeIndexConfig`, `CodeIndexSpecified`, `ProviderConfig`, `ApiConfig`, `ModelConfig`, `Cost`, `Capabilities`, `AgentConfig`, `BashConfig`, `DirsConfig`, `CommandDef`, `McpServerConfig`, `PriceEntry`, `McpTransport`, `ExperimentalFlags`, `MemoryConfig`, `StructuredMemoryConfig`, `SemanticConfig`, `RetrievalConfig`, `AutoExtractConfig`, `DecayConfig`, `CrossProjectConfig`, `GitLabIntegrationConfig`, `BrowserConfig`, `SddConfig`, `PieGapConfig`, `ResearchConfig`.
+- Supporting structs: `AgentPerfConfig`, `StreamConfig`, `CodeIndexConfig`, `CodeIndexSpecified`, `ProviderConfig`, `ApiConfig`, `ModelConfig`, `Cost`, `Capabilities`, `AgentConfig`, `BashConfig`, `DirsConfig`, `CommandDef`, `McpServerConfig`, `PriceEntry`, `McpTransport`, `ExperimentalFlags`, `MemoryConfig`, `StructuredMemoryConfig`, `RetrievalConfig`, `AutoExtractConfig`, `DecayConfig`, `CrossProjectConfig`, `GitLabIntegrationConfig`, `SddConfig`, `PieGapConfig`, `ResearchConfig`.
 
 ### Module: dir_lists
 

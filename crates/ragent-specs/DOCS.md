@@ -2,21 +2,22 @@
 
 Spec management system for ragent: EARS notation specs, validation, lifecycle
 tracking, plan parsing, constitution parsing, and spec implementation runner.
-A fully self-contained crate with zero internal workspace dependencies.
+Its only `ragent-*` workspace dependency is `ragent-tools-extended`.
 
 ## Workspace Dependencies
 
-None. `ragent-specs` is fully self-contained.
+- ragent-tools-extended
 
 ## External Dependencies
 
 - serde (derive)
+- chrono
 - thiserror
 - regex
 - tokio (fs, io-util)
 - tracing
 
-Dev-dependencies: tokio (full), tempfile.
+Dev-dependencies: tokio (full), tempfile, serde_json.
 
 ## Public API (crate root)
 

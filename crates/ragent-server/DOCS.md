@@ -7,72 +7,60 @@ and server-sent events so any frontend can drive the agent.
 
 - ragent-agent
 - ragent-research
-- ragent-llm
 - ragent-types
 - ragent-config
-- ragent-storage
-- ragent-tools-core
-- ragent-tools-extended
-- ragent-tools-vcs
-- ragent-telemetry
 
 ## External Dependencies
 
-- axum
 - tokio
 - serde
 - serde_json
 - anyhow
 - tracing
-- tower
+- axum
 - tower-http
-- hyper
+- tokio-stream
+- futures
+- async-stream
+- uuid
+- blake3
+- chrono
 
 ## Public API (crate root)
 
 ### Modules
 
-- **routes** — HTTP route handlers (session, message, model, config, research, spec, etc.).
-- **sse** — Server-sent event streaming for real-time session updates.
-- **state** — Shared server state (`AppState`) holding the agent manager, config, and event bus.
-- **auth** — Bearer token authentication middleware.
-- **error** — HTTP error response types.
+- **routes** — Router construction, shared `AppState`, bearer-token auth middleware, and the REST handlers. Submodules: `automation`, `memory`, `openai`, `openapi`, `research`.
+- **sse** — Server-sent event encoding for real-time session updates.
 
 ### Crate-root items
 
-- **AppState** (struct) — Shared server state holding the agent manager, provider registry, config, storage, and event bus.
-- **ServerConfig** (struct) — Server configuration (port, host, auth token, CORS).
-- **run_server** (async fn) — Start the HTTP server with the given config and state.
-- **create_router** (fn) — Build the Axum router with all routes registered.
+- **start_server** (async fn, re-export of `routes::start_server`) — Bind `addr` and serve the router for the given `AppState`.
+- **DEFAULT_LISTEN_ADDR** (const) — Default bind address for `ragent serve` (`127.0.0.1:3000`).
 
 ### Module: routes
 
-REST endpoint handlers organized by resource:
+- **AppState** (struct) — Shared server state: `event_bus`, `config`, `storage`, `session_processor`, `auth_token`, `rate_limiter`, `coordinator`, `research_runs`, `research_root`.
+- **router** (fn) — Build the Axum router with all routes and middleware (auth, timeout, body limit, CORS).
+- **constant_time_eq** (fn) — Constant-time token comparison used by the auth middleware.
+- **redact_config_secrets** (fn) / **REDACTED** (const) — Secret redaction for `GET /config`.
+- **internal_error_response** (fn) — Build a sanitised 500 response.
 
-- **Session routes** — `POST /sessions`, `GET /sessions`, `GET /sessions/:id`, `DELETE /sessions/:id`.
-- **Message routes** — `POST /sessions/:id/messages`, `GET /sessions/:id/messages`.
-- **Model routes** — `GET /models`, `GET /providers`.
-- **Config routes** — `GET /config`, `PUT /config`.
-- **Tool routes** — `GET /tools`, `POST /tools/:name`.
-- **Research routes** — `POST /research`, `GET /research`, `GET /research/:id`, `DELETE /research/:id`.
-- **Spec routes** — `GET /specs`, `GET /specs/:id`.
-- **Health routes** — `GET /health`.
+REST endpoints (all except `/health`, `/openapi.json` and the automation webhook require the bearer token):
+
+- **Sessions** — `GET|POST /sessions`, `GET|DELETE /sessions/{id}`, `GET|POST /sessions/{id}/messages`, `POST /sessions/{id}/abort`, `POST /sessions/{id}/permission/{req_id}`.
+- **Tasks** — `GET|POST /sessions/{id}/tasks`, `GET|DELETE /sessions/{id}/tasks/{tid}`.
+- **Config / providers** — `GET /config`, `GET /providers`.
+- **Events** — `GET /events` (SSE).
+- **Memory** (`/memory`) — `GET /search`, `POST /store`, `DELETE /{id}`, `GET /visualisation` (+ `/graph`, `/tags`, `/heatmap`).
+- **Research** (`/research`) — `GET|POST /`, `GET|PUT|DELETE /{name}`, `GET /{name}/events`.
+- **Automation** — `GET /automation`, `GET /automation/runs/{id}`, `POST /automation/{id}/run`, `POST /auto/{id}` (webhook).
+- **OpenAI-compatible** — `GET /v1/models`, `POST /v1/chat/completions`.
+- **Orchestrator** — `POST /orchestrator/start`, `GET /orchestrator/jobs/{id}`.
+- **Meta** — `GET /health`, `GET /openapi.json`.
 
 ### Module: sse
 
-- **SseStream** (struct) — Server-sent event stream handler.
-- **stream_session_events** (fn) — Stream session events to a client via SSE.
-
-### Module: state
-
-- **AppState** (struct) — Shared server state; holds `Arc<AgentManager>`, `Arc<ProviderRegistry>`, `Config`, `Storage`, `EventBus`.
-
-### Module: auth
-
-- **AuthMiddleware** (struct) — Bearer token authentication middleware.
-- **require_auth** (fn) — Extractor requiring a valid Bearer token.
-
-### Module: error
-
-- **ApiError** (enum) — HTTP API error types.
-- **error_response** (fn) — Convert an error to an HTTP response.
+- **event_to_parts** (fn) — Map an `Event` to its SSE event name and JSON payload.
+- **event_to_sse** (fn) — Build an Axum SSE `Event` from a ragent `Event`.
+- **redacted_event_debug** (fn) — Debug-format an event with secrets redacted.

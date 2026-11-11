@@ -13,8 +13,8 @@ model runners, suite adapters, and workbook output.
 
 ## External Dependencies
 
-- anyhow, serde, serde_json, chrono, uuid, sha2, tokio, tracing
-- rust_xlsxwriter, futures, reqwest, flate2, async-trait, rustc-hash, calamine, tempfile
+- anyhow, serde, serde_json, chrono, uuid, sha2, hex, tokio
+- futures, reqwest, async-trait, rustc-hash, calamine, tempfile
 
 Dev-dependencies: criterion.
 

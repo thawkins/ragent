@@ -7,7 +7,7 @@ depends on no other `ragent-*` workspace crates.
 
 ## Workspace Dependencies
 
-None. `ragent-types` is a leaf crate consumed by every other ragent crate.
+None. `ragent-types` is a leaf crate consumed by most other ragent crates.
 
 ## External Dependencies
 
@@ -20,10 +20,11 @@ None. `ragent-types` is a leaf crate consumed by every other ragent crate.
 - tracing
 - chrono
 - regex
+- memchr
 - rusqlite
-- once_cell
+- url
 
-Dev-dependencies: tokio (full), serial_test.
+Dev-dependencies: tokio (full), serial_test, tempfile.
 
 ## Public API (crate root)
 
@@ -46,7 +47,7 @@ Dev-dependencies: tokio (full), serial_test.
 - **thinking** — Provider-agnostic thinking/reasoning configuration types.
 - **tool_args** — The one decoder for accumulated tool-call argument text (spec `uniformtools` FR-007): a JSON object, a JSON string that decodes to one, or empty/whitespace as `{}`, with `ToolArgDecodeError` naming the failure for the corrective error of FR-008. `ToolArgDecodeError` is also re-exported at the crate root, because it is the argument type of the refusal constructor (`ragent_agent::session::tool_input_error`).
 - **tool_bridge** — The FR-032 rule for dynamically sourced tools: `check_dynamic_bridge(source, prefix, surfaced)` refuses a surfaced name that equals a `before` spelling (returning the pair, so the sentence carries the table's own values) or that is not under the source's `prefix`, and `report_bridge_refusals_once` logs each refusal once per source and name behind a process-wide ledger. Also owns the two manglings every call site now shares (`mcp_tool_name`/`mcp_tool_prefix` folding `-` `.` `/`; `plugin_tool_name`/`plugin_tool_prefix` leaving the plugin id unfolded, because it keys the store entry and the `plugin:<id>` permission category) and the one-wording source labels. It lives here because `ragent-plugins` and `ragent-agent` both ask it and cannot depend on each other. Registration-time only - nothing on a dispatch path calls it (NFR-006).
-- **tool_rename** — The FR-023 tool-rename table: `TOOL_RENAMES`, one checked-in `[Rename; 13]` of `(before, after)` pairs ascending by `after`, plus the `Rename` lookups (`after_of`, `before_of`, `is_retired`, `is_rename_spelling`). It sits in this leaf crate so `ragent-config` can refuse a retired `tools.aliases` spelling without depending on `ragent-agent`; `ragent_agent::tool::rename` re-exports it. It is not a translation layer - nothing consults it on a dispatch path (NFR-006).
+- **tool_rename** — The FR-023 tool-rename table: `TOOL_RENAMES`, one checked-in fixed-size array of `(before, after)` pairs ascending by `after`, plus the `Rename` lookups (`after_of`, `before_of`, `is_retired`, `is_rename_spelling`). It sits in this leaf crate so `ragent-config` can refuse a retired `tools.aliases` spelling without depending on `ragent-agent`; `ragent_agent::tool::rename` re-exports it. It is not a translation layer - nothing consults it on a dispatch path (NFR-006).
 - **trigger** — Trigger envelope types for the trigger system.
 
 ### Re-exported items
@@ -71,7 +72,7 @@ Dev-dependencies: tokio (full), serial_test.
 - **parse_duration** (fn) / **DurationParseError** (enum) — Duration parsing.
 - **parse_schedule** (fn) — Parse a schedule expression.
 - **RagentError** (enum) — Structured error type for shared ragent operations.
-- **Event** (enum) — Discrete occurrence in a session lifecycle (~90 variants).
+- **Event** (enum) — Discrete occurrence in a session lifecycle.
 - **EventBus** (struct) — Broadcasts `Event` values via a Tokio broadcast channel.
 - **EventId** / **MessageId** / **RunId** / **SessionId** (newtypes) — Typed identifiers.
 - **ChatContent** (enum) / **ChatMessage** (struct) / **ChatRequest** (struct) — LLM conversation primitives.
@@ -95,11 +96,11 @@ Dev-dependencies: tokio (full), serial_test.
   (`message`), `ContentPart::ToolUse::input` (`llm`) and
   `ToolDefinition::parameters` (`llm`). This is a recorded decision, not an open
   TODO: the arguments shape is owned by the callee and the callee set is open at
-  run time (148 built-in tools plus whatever an MCP server or plugin registers
+  run time (every built-in tool plus whatever an MCP server or plugin registers
   after the binary was compiled), the wire record must round-trip the payload
   unchanged (FR-006, FR-018), and the parameters field is forwarded JSON Schema -
-  155 `additionalProperties` keyword literals in tree, and arbitrary third-party
-  documents beyond them - so a typed subset could only drop keywords or add a
+  including the in-tree `additionalProperties` keyword literals and arbitrary
+  third-party documents beyond them - so a typed subset could only drop keywords or add a
   schema crate, which NFR-002 forbids. Full rationale:
   `specs/uniformtools/T-025-TYPED-ARGS-DECISION.md`. Guarded by
   `tests/test_typed_args_decision.rs`.

@@ -1,17 +1,17 @@
 # ragent-codeindex
 
 Codebase indexing with tree-sitter parsing, SQLite storage, Tantivy full-text
-search, file watching, and a semantic code graph. A self-contained leaf crate
-with no `ragent-*` workspace dependencies.
+search, file watching, and a semantic code graph. Its only `ragent-*`
+workspace dependency is `ragent-types`.
 
 ## Workspace Dependencies
 
-None. `ragent-codeindex` is a self-contained leaf crate.
+- ragent-types
 
 ## External Dependencies
 
-- blake3, ignore, rusqlite, tokio, serde, serde_json, tracing, chrono, anyhow, rayon, lru
-- tree-sitter + 13 language grammars (rust, python, typescript, javascript, go, c, cpp, java, hcl, openscad, cmake, groovy, kotlin, xml)
+- blake3, globset, ignore, rusqlite, serde, serde_json, tracing, chrono, anyhow, rayon, lru
+- tree-sitter + language grammars (rust, python, typescript, javascript, go, c, cpp, java, hcl, openscad, cmake, groovy, kotlin, xml)
 - tantivy (full-text search), notify (filesystem watching)
 
 Dev-dependencies: tempfile, tokio (full+test-util), criterion.
@@ -23,7 +23,7 @@ Dev-dependencies: tempfile, tokio (full+test-util), criterion.
 - **types** — Core data types: `SymbolKind`, `FileEntry`, `Symbol`, `SymbolRef`, `CodeIndexConfig`, etc.
 - **scanner** — File discovery, content hashing, language detection.
 - **store** — SQLite-backed index storage with incremental update support.
-- **parser** — Tree-sitter parsing and symbol extraction (13 language parsers).
+- **parser** — Tree-sitter parsing and symbol extraction (one parser per bundled grammar).
 - **search** — Full-text search index backed by Tantivy.
 - **watcher** — Filesystem event watcher for real-time index updates.
 - **worker** — Background indexing worker with debounce, dedup, and batching.
@@ -67,7 +67,7 @@ Dev-dependencies: tempfile, tokio (full+test-util), criterion.
 
 - **scan_directory(root, config)** (fn) — Gitignore-aware directory scan with parallel hashing.
 - **hash_content(content)** / **hash_file(path)** (fns) — blake3 content hashing.
-- **detect_language(path)** (fn) — Language detection from file extension (40+ languages).
+- **detect_language(path)** (fn) — Language detection from file extension.
 - **is_binary(content)** (fn) / **count_lines(content)** (fn) — Content inspection.
 - **SUPPORTED_LANGUAGES** (const) — All supported language identifiers.
 
