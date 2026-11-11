@@ -970,7 +970,8 @@ graph TD
 ```mermaid
 graph LR
     A[Start Turn] --> B[Build Context]
-          B --> C[Compact if Over Threshold]    C --> D[Send to LLM]
+    B --> C[Compact if Over Threshold]
+    C --> D[Send to LLM]
     D --> E[Stream Tokens / Tool Calls]
     E --> F[Execute Tools]
     F --> G[Record Results]

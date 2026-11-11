@@ -80,10 +80,12 @@ generate() {
     local rendered="$work_dir/SPEC.md"
     mmdc -i "$INPUT" -o "$rendered" -e svg
 
-    # md-to-pdf derives the output name from its input (SPEC.md -> SPEC.pdf).
+    # Feed md-to-pdf through stdin with --basedir: in positional-file mode it
+    # puts the file name into the page base URL, so the relative SVG links
+    # do not resolve (and the run can hang waiting for them).
     local tmp_out="$work_dir/SPEC.pdf"
 
-    md-to-pdf "$rendered" \
+    md-to-pdf --basedir "$work_dir" \
         --pdf-options '{
             "format": "A4",
             "margin": {
@@ -96,9 +98,10 @@ generate() {
         }' \
         --launch-options '{
             "args": ["--no-sandbox", "--disable-setuid-sandbox"]
-        }'
+        }' \
+        < "$rendered" > "$tmp_out"
 
-    if [[ -f "$tmp_out" ]]; then
+    if [[ -s "$tmp_out" ]]; then
         # If user requested a different output path, move it there
         if [[ "$tmp_out" != "$OUTPUT" ]]; then
             mv "$tmp_out" "$OUTPUT"
