@@ -1300,15 +1300,16 @@ pub struct ResearchSession {
 
 /// Split a model reference into `(provider_id, model_id)`.
 ///
-/// Accepts the documented `provider:model` form and `provider/model`. A `/`
-/// is tried first, so `ollama/phi4:latest` keeps its tag in the model id.
-/// Returns `None` when either part is empty or there is no separator.
+/// Accepts the documented `provider:model` form and `provider/model`, split
+/// at the earliest `/` or `:`, so the model id keeps any later separator:
+/// `ollama/phi4:latest` keeps its tag and `openrouter:anthropic/claude-sonnet-4`
+/// keeps its namespace. Returns `None` when either part is empty or there is
+/// no separator.
 #[must_use]
 pub fn parse_model_ref(model: &str) -> Option<(&str, &str)> {
-    model
-        .split_once('/')
-        .or_else(|| model.split_once(':'))
-        .filter(|(provider, model_id)| !provider.is_empty() && !model_id.is_empty())
+    let idx = model.find(['/', ':'])?;
+    let (provider, model_id) = (&model[..idx], &model[idx + 1..]);
+    (!provider.is_empty() && !model_id.is_empty()).then_some((provider, model_id))
 }
 
 /// Builds an [`AnalysisEngine`] for a `(provider_id, model_id)` pair.
@@ -1441,17 +1442,41 @@ impl ResearchSession {
         model: Option<&str>,
         fallback: &Arc<dyn AnalysisEngine>,
     ) -> Arc<dyn AnalysisEngine> {
+        self.phase_override(model)
+            .map_or_else(|| fallback.clone(), |(engine, _)| engine)
+    }
+
+    /// The final-report engine and the `provider/model` label to record for
+    /// it: the `final_report_model` override when it resolves, else the run's
+    /// engine and model.
+    fn final_report_engine(
+        &self,
+        final_report_model: Option<&str>,
+    ) -> (Arc<dyn AnalysisEngine>, Option<String>) {
+        self.phase_override(final_report_model).map_or_else(
+            || (self.analysis.clone(), self.model.clone()),
+            |(engine, label)| (engine, Some(label)),
+        )
+    }
+
+    /// Build the engine for a model override, with its `provider/model`
+    /// label. `None` when no override is set, no factory is attached, or the
+    /// override names no provider (logged).
+    fn phase_override(&self, model: Option<&str>) -> Option<(Arc<dyn AnalysisEngine>, String)> {
         let (Some(model), Some(factory)) = (model, self.engine_factory.as_ref()) else {
-            return fallback.clone();
+            return None;
         };
         match parse_model_ref(model) {
-            Some((provider, model_id)) => factory(provider, model_id),
+            Some((provider, model_id)) => Some((
+                factory(provider, model_id),
+                format!("{provider}/{model_id}"),
+            )),
             None => {
                 tracing::warn!(
                     model,
                     "research: phase model override is not `provider:model`; using the run model"
                 );
-                fallback.clone()
+                None
             }
         }
     }
@@ -1492,6 +1517,9 @@ pub(crate) struct AssembleInput<'a> {
     pub invocation: Option<String>,
     /// Whether to defang web source URLs in the output.
     pub url_cloak: bool,
+    /// `provider/model` recorded as the report's `Model:` (the final-report
+    /// engine's model).
+    pub model_label: Option<String>,
     /// Concept-list cap.
     pub max_concepts: usize,
     /// Finding-list cap.
@@ -1830,14 +1858,10 @@ impl ResearchSession {
                 merged_sources.push(seed);
             }
         }
+        let (final_engine, model_label) =
+            self.final_report_engine(config.models.final_report_model.as_deref());
         let (analysis, engine_outcome) = self
-            .synthesize(
-                &name,
-                topic,
-                &merged_sources,
-                brief,
-                config.models.final_report_model.as_deref(),
-            )
+            .synthesize(&name, topic, &merged_sources, brief, &final_engine)
             .await
             .map_err(|e| {
                 ResearchError::EngineRunFailed(format!("supervisor synthesis failed: {e}"))
@@ -1874,6 +1898,7 @@ impl ResearchSession {
                 max_concepts: config.analysis.max_concepts,
                 max_findings: config.analysis.max_findings,
                 observer: observer.clone(),
+                model_label,
             })
             .await?;
 
@@ -1902,6 +1927,7 @@ impl ResearchSession {
             max_concepts,
             max_findings,
             observer,
+            model_label,
         } = input;
         let llm_produced = synth_outcome == SynthesizeOutcome::Llm;
         if analysis.summary.is_empty() {
@@ -1935,8 +1961,8 @@ impl ResearchSession {
 
         let mut item_with_sources = item.clone();
         item_with_sources.set_queries(queries.clone());
-        if let Some(model) = &self.model {
-            item_with_sources.model = Some(model.clone());
+        if let Some(model) = model_label {
+            item_with_sources.model = Some(model);
         }
         // Populate the References Index inputs: without this the supervisor
         // path ships `sources: 0` frontmatter and a "No sources captured"
@@ -2625,7 +2651,11 @@ impl ResearchSession {
             };
         // Decide which fallback path we'll take *before* calling the engine
         // so we can attribute the resulting summary correctly in the UI.
-        let has_llm_engine = !self.analysis_is_noop();
+        // FR-013: resolve the final-report engine once, so the outcome is
+        // classified by the engine that actually synthesizes.
+        let (final_engine, final_model_label) =
+            self.final_report_engine(config.models.final_report_model.as_deref());
+        let has_llm_engine = !final_engine.is_noop_marker();
         self.log_run_event(
             "synthesize_start",
             serde_json::json!({
@@ -2639,7 +2669,7 @@ impl ResearchSession {
                 &topic,
                 &synthesis_sources,
                 effective_brief.as_deref(),
-                config.models.final_report_model.as_deref(),
+                &final_engine,
             )
             .await
         {
@@ -2870,8 +2900,8 @@ impl ResearchSession {
         });
         let mut item_with_sources = ResearchItem::new(name.clone(), &item_title, &topic);
         item_with_sources.set_queries(web_queries.clone());
-        if let Some(model) = &self.model {
-            item_with_sources.model = Some(model.clone());
+        if let Some(model) = final_model_label {
+            item_with_sources.model = Some(model);
         }
         // Only set output_format when it is not the default report so the
         // frontmatter stays minimal for the common case.
@@ -3647,15 +3677,15 @@ impl ResearchSession {
     /// so the caller can surface `SynthesizeOutcome::FallbackEmpty` when
     /// the LLM produced malformed output (FR-005 / T-005).
     ///
-    /// `final_report_model` (`provider/model`) selects the engine for this
-    /// final synthesis (FR-013); `None` uses the run's engine.
+    /// `engine` is the final-report engine from [`Self::final_report_engine`]
+    /// (FR-013).
     pub(crate) async fn synthesize(
         &self,
         name: &ResearchName,
         topic: &str,
         sources: &[Source],
         brief: Option<&str>,
-        final_report_model: Option<&str>,
+        engine: &Arc<dyn AnalysisEngine>,
     ) -> anyhow::Result<(AnalysisResult, AnalysisOutcome)> {
         let research_root = self.manager.root().to_path_buf();
         let name = name.clone();
@@ -3667,9 +3697,7 @@ impl ResearchSession {
         })
         .await
         .map_err(|e| anyhow::anyhow!("synthesis body loading failed: {e}"))?;
-        let analysis = self
-            .phase_engine(final_report_model, &self.analysis)
-            .with_brief(brief.map(String::from));
+        let analysis = engine.with_brief(brief.map(String::from));
         analysis.analyze_with_outcome(topic, &bodies).await
     }
 

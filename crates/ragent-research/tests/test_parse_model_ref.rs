@@ -38,3 +38,19 @@ fn test_parse_model_ref_rejects_missing_parts() {
     assert_eq!(parse_model_ref(":phi4"), None);
     assert_eq!(parse_model_ref("ollama/"), None);
 }
+
+#[test]
+fn test_parse_model_ref_colon_keeps_namespaced_model() {
+    assert_eq!(
+        parse_model_ref("openrouter:anthropic/claude-sonnet-4"),
+        Some(("openrouter", "anthropic/claude-sonnet-4"))
+    );
+}
+
+#[test]
+fn test_parse_model_ref_slash_keeps_namespaced_model() {
+    assert_eq!(
+        parse_model_ref("openrouter/anthropic/claude-sonnet-4"),
+        Some(("openrouter", "anthropic/claude-sonnet-4"))
+    );
+}
