@@ -6,15 +6,14 @@
 //! `test_loop_steps_harness.rs` / `test_processor_more_paths.rs` (an external
 //! `tests/` crate cannot call the `pub(crate)` loop-step methods, so every path
 //! is driven through the public `process_message` / `process_user_message` /
-//! `run_init_exchange` entry points) and targets branches the existing suites
+//! `announce_instruction_files` entry points) and targets branches the existing suites
 //! (`test_processor_loop_paths.rs`, `test_processor_more_paths.rs`,
 //! `test_loop_*`) do not reach:
 //!
 //! - the `max_steps <= 1` empty tool surface and the `step > max_steps`
 //!   "Reached maximum steps" guard;
 //! - `prepare_client` provider-not-found inside an active loop;
-//! - the AGENTS.md init acknowledgement failing (provider error) and its
-//!   several `run_init_exchange` early-return branches;
+//! - `announce_instruction_files` with no instruction files;
 //! - a blocking `on_session_end` Stop hook feeding guidance back to the model,
 //!   bounded by `MAX_STOP_CONTINUATIONS`;
 //! - automatic `in_progress` -> `completed` spec task completion after a write
@@ -504,48 +503,13 @@ async fn test_provider_not_found_fails_turn_and_loop() -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// AGENTS.md init acknowledgement
+// Instruction-file announcement
 // ---------------------------------------------------------------------------
 
-/// When the init acknowledgement request fails at the provider level, the
-/// failure is logged and the main turn still runs.
+/// `announce_instruction_files` publishes the discovery summary and makes no
+/// model request when no instruction files are discovered.
 #[tokio::test]
-async fn test_init_ack_provider_error_is_skipped() -> Result<()> {
-    let event_bus = Arc::new(EventBus::new(4096));
-    let (processor, working_dir, captured, _dir) = make_plain(
-        event_bus.clone(),
-        vec![
-            ScriptedReply::Error("init transport failure".into()),
-            ScriptedReply::Text("main reply".into()),
-        ],
-    )?;
-    std::fs::write(working_dir.join("AGENTS.md"), "# Guidelines\n").expect("write AGENTS.md");
-    let session = processor
-        .session_manager
-        .create_session(working_dir)
-        .expect("session created");
-
-    let reply = processor
-        .process_message(
-            &session.id,
-            "go",
-            &make_agent(),
-            Arc::new(AtomicBool::new(false)),
-        )
-        .await
-        .expect("the main turn runs despite the failed init ack");
-    assert_eq!(reply.text_content(), "main reply");
-    assert_eq!(
-        captured_count(&captured),
-        2,
-        "one failed init call then the main request"
-    );
-    Ok(())
-}
-
-/// `run_init_exchange` short-circuits when no instruction files are discovered.
-#[tokio::test]
-async fn test_run_init_exchange_no_instruction_files() -> Result<()> {
+async fn test_announce_instruction_files_no_instruction_files() -> Result<()> {
     let event_bus = Arc::new(EventBus::new(4096));
     let mut rx = event_bus.subscribe();
     let (processor, working_dir, captured, _dir) = make_plain(
@@ -559,104 +523,13 @@ async fn test_run_init_exchange_no_instruction_files() -> Result<()> {
         .expect("session created");
 
     processor
-        .run_init_exchange(&session.id, &make_agent(), Arc::new(AtomicBool::new(false)))
-        .await
-        .expect("early return succeeds");
-    assert_eq!(
-        captured_count(&captured),
-        0,
-        "no request without guidelines"
-    );
+        .announce_instruction_files(&session.id)
+        .expect("announcement succeeds");
+    assert_eq!(captured_count(&captured), 0, "no model request");
     assert!(
         collect_events(&mut rx).agent_notice,
         "the discovery summary is published"
     );
-    Ok(())
-}
-
-/// `run_init_exchange` short-circuits when the session already has an assistant
-/// turn.
-#[tokio::test]
-async fn test_run_init_exchange_skips_when_already_done() -> Result<()> {
-    let event_bus = Arc::new(EventBus::new(4096));
-    let (processor, working_dir, captured, _dir) = make_plain(
-        event_bus.clone(),
-        vec![ScriptedReply::Text("unused".into())],
-    )?;
-    std::fs::write(working_dir.join("AGENTS.md"), "# Guidelines\n").expect("write AGENTS.md");
-    let session = processor
-        .session_manager
-        .create_session(working_dir)
-        .expect("session created");
-    // Seed a prior assistant turn so the init exchange is skipped.
-    processor
-        .session_manager
-        .storage()
-        .create_message(&Message::new(
-            &session.id,
-            Role::Assistant,
-            vec![MessagePart::Text {
-                text: "prior".to_string(),
-            }],
-        ))
-        .expect("seed assistant message");
-
-    processor
-        .run_init_exchange(&session.id, &make_agent(), Arc::new(AtomicBool::new(false)))
-        .await
-        .expect("skip succeeds");
-    assert_eq!(captured_count(&captured), 0, "no request when already done");
-    Ok(())
-}
-
-/// `run_init_exchange` silently no-ops when the agent has no model configured.
-#[tokio::test]
-async fn test_run_init_exchange_no_model_noop() -> Result<()> {
-    let event_bus = Arc::new(EventBus::new(4096));
-    let (processor, working_dir, captured, _dir) = make_plain(
-        event_bus.clone(),
-        vec![ScriptedReply::Text("unused".into())],
-    )?;
-    std::fs::write(working_dir.join("AGENTS.md"), "# Guidelines\n").expect("write AGENTS.md");
-    let session = processor
-        .session_manager
-        .create_session(working_dir)
-        .expect("session created");
-
-    let mut agent = make_agent();
-    agent.model = None;
-    processor
-        .run_init_exchange(&session.id, &agent, Arc::new(AtomicBool::new(false)))
-        .await
-        .expect("no-model no-op succeeds");
-    assert_eq!(captured_count(&captured), 0);
-    Ok(())
-}
-
-/// `run_init_exchange` no-ops when the provider is not registered.
-#[tokio::test]
-async fn test_run_init_exchange_provider_not_found_noop() -> Result<()> {
-    let event_bus = Arc::new(EventBus::new(4096));
-    let (processor, working_dir, captured, _dir) = make_plain(
-        event_bus.clone(),
-        vec![ScriptedReply::Text("unused".into())],
-    )?;
-    std::fs::write(working_dir.join("AGENTS.md"), "# Guidelines\n").expect("write AGENTS.md");
-    let session = processor
-        .session_manager
-        .create_session(working_dir)
-        .expect("session created");
-
-    let mut agent = make_agent();
-    agent.model = Some(ModelRef {
-        provider_id: "missing".to_string(),
-        model_id: "x".to_string(),
-    });
-    processor
-        .run_init_exchange(&session.id, &agent, Arc::new(AtomicBool::new(false)))
-        .await
-        .expect("provider-not-found no-op succeeds");
-    assert_eq!(captured_count(&captured), 0);
     Ok(())
 }
 

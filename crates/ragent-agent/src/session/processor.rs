@@ -20,8 +20,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
-use futures::StreamExt;
-use ragent_types::ThinkingConfig;
 use serde_json::Value;
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -30,7 +28,7 @@ use crate::agent::AgentInfo;
 use crate::cost::{UsageRecord, compute_run_cost, merged_prices};
 use crate::error::classify_message;
 use crate::event::{Event, EventBus, FinishReason};
-use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent, ToolDefinition};
+use crate::llm::{ChatContent, ChatMessage, ContentPart, ToolDefinition};
 use crate::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
 use crate::permission::PermissionChecker;
 use crate::provider::ProviderRegistry;
@@ -2042,8 +2040,7 @@ impl SessionProcessor {
         };
 
         // T-012: per-run cost tracking. Set up a listener for `Event::TokenUsage`
-        // so we can accumulate usage across the init exchange and all loop
-        // iterations, then publish a single `Event::RunCostSummary` when the
+        // so we can accumulate usage across all loop iterations, then publish a single `Event::RunCostSummary` when the
         // run ends. The listener is aborted on return so it never leaks.
         let usage_accum = Arc::new(Mutex::new((0u64, 0u64)));
         let usage_listener = {
@@ -2167,27 +2164,7 @@ impl SessionProcessor {
         // instead of cloning the entire `Vec` on every attempt.
         let mut chat_messages: std::sync::Arc<Vec<ChatMessage>> = chat_messages;
 
-        // 5. Run AGENTS.md init exchange (display-only, skipped for subagents)
-        {
-            // P-1: route `get_messages` through `storage_op` so the SQLite
-            // read runs on a dedicated blocking thread instead of stalling
-            // the async runtime. Every other storage call in the loop already
-            // goes through `storage_op`; this one site was missed.
-            let sid = session_id.to_string();
-            let history = self.storage_op(move |s| s.get_messages(&sid)).await?;
-            self.run_inline_init_acknowledgement(
-                session_id,
-                agent,
-                &history,
-                &system_prompt,
-                &turn.client,
-                &turn.model_ref,
-                &turn.working_dir,
-            )
-            .await?;
-        }
-
-        // 6. Agent loop setup
+        // 5. Agent loop setup
         let max_steps = agent.max_steps.unwrap_or(1024) as usize;
         // Interactive-tool block (subagent): sub-agent runs have no attached
         // user, so interactive tools are filtered from the wire surface and
@@ -2324,7 +2301,7 @@ impl SessionProcessor {
         // `build_turn_chat_messages` instead of re-resolving it from the
         // provider registry a second time.
 
-        // 7. Agent loop
+        // 6. Agent loop
         // T-008: take a working copy of the loop tracker (when a goal-driven
         // loop is active) so the FR-017 guard below can consult and update it
         // without holding the `active_loops` lock across an await point.
@@ -4133,7 +4110,7 @@ impl SessionProcessor {
             return Err(watchdog_err);
         }
 
-        // 8. Finalize
+        // 7. Finalize
         let parts_owned =
             std::sync::Arc::try_unwrap(assistant_parts).unwrap_or_else(|arc| (*arc).clone());
         let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
@@ -4219,22 +4196,17 @@ impl SessionProcessor {
         Ok(saved_msg)
     }
 
-    /// Run the display-only AGENTS.md acknowledgement exchange.
+    /// Announce the project instruction files (`AGENTS.md` and friends) that
+    /// apply to a session.
     ///
-    /// Streams a one-shot init exchange to the UI so the user sees that the
-    /// project guidelines were loaded. The exchanged messages are NOT added to
-    /// the persisted `chat_messages` history - this is purely a UI affordance.
+    /// Publishes an [`Event::AgentNotice`] listing the discovered files, so the
+    /// user can see which guidelines were loaded. No model call is made: the
+    /// files already reach the model through the system prompt (#38).
     ///
     /// # Errors
     ///
-    /// Returns an error if the LLM call fails, the session cannot be resolved,
-    /// or the operation is cancelled via `cancel_flag`.
-    pub async fn run_init_exchange(
-        &self,
-        session_id: &str,
-        agent: &AgentInfo,
-        cancel_flag: Arc<AtomicBool>,
-    ) -> Result<()> {
+    /// Returns an error if the session lookup fails.
+    pub fn announce_instruction_files(&self, session_id: &str) -> Result<()> {
         // Resolve working directory.
         let working_dir = self.session_manager.get_session(session_id)?.map_or_else(
             || std::env::current_dir().unwrap_or_default(),
@@ -4242,8 +4214,7 @@ impl SessionProcessor {
         );
 
         // Collect instruction files with discovery info for logging
-        let (agents_md, discovery) =
-            crate::agent::collect_agents_md_content_with_discovery(&working_dir);
+        let (_, discovery) = crate::agent::collect_agents_md_content_with_discovery(&working_dir);
 
         // Log discovery info to tracing and emit AgentNotice event
         let discovery_msg = discovery.format_summary();
@@ -4256,195 +4227,6 @@ impl SessionProcessor {
             session_id: session_id.to_string(),
             message: discovery_msg.clone(),
         });
-
-        // Check if any instruction files were found
-        if discovery.all_discovered_files.is_empty() {
-            return Ok(());
-        }
-
-        // Skip if an assistant message already exists (init already ran).
-        // PERF-010: use the cheap existence check instead of loading the
-        // full message history just to test whether an assistant turn
-        // has already been recorded.
-        let already_done = self
-            .session_manager
-            .storage()
-            .has_assistant_messages(session_id)
-            .unwrap_or(false);
-        if already_done {
-            return Ok(());
-        }
-        // Resolve model / provider - bail silently if not configured yet.
-        let model_ref = match agent.model.as_ref() {
-            Some(m) => m,
-            None => {
-                tracing::debug!(
-                    session_id = %session_id,
-                    "run_init_exchange: no model configured, skipping"
-                );
-                return Ok(());
-            }
-        };
-        let provider = match self.provider_registry.get(&model_ref.provider_id) {
-            Some(p) => p,
-            None => {
-                tracing::debug!(
-                    session_id = %session_id,
-                    provider = %model_ref.provider_id,
-                    "run_init_exchange: provider not found, skipping"
-                );
-                return Ok(());
-            }
-        };
-        let api_key = match self.resolve_api_key(&model_ref.provider_id).await {
-            Ok(k) => k,
-            Err(e) => {
-                tracing::warn!(
-                    session_id = %session_id,
-                    error = %e,
-                    "run_init_exchange: API key not available, skipping"
-                );
-                return Ok(());
-            }
-        };
-
-        let client = match provider
-            .create_client(&api_key, None, &HashMap::new())
-            .await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(session_id=%session_id, error=%e, "run_init_exchange: client creation failed");
-                return Ok(());
-            }
-        };
-
-        // Build a minimal system prompt using the agent's configured prompt.
-        // Note: agents_md was already collected above with discovery info
-        let (git_status, readme, _, file_tree) =
-            crate::agent::collect_prompt_context(&working_dir).await;
-        let run_init_config = crate::Config::load().unwrap_or_default();
-        let system_prompt = crate::agent::build_system_prompt_with_storage(
-            agent,
-            &working_dir,
-            &file_tree,
-            None,
-            Some(&git_status),
-            Some(&readme),
-            Some(&agents_md),
-            Some(self.session_manager.storage()),
-            Some(&run_init_config.memory),
-        );
-        // PERF-006: wrap the init-exchange prompt in `Arc<str>` so the
-        // `ChatRequest::system` field is satisfied without an intermediate
-        // `String` clone.
-        let system_prompt: std::sync::Arc<str> = std::sync::Arc::from(system_prompt);
-        const INIT_ACK_PROMPT: &str = "AGENTS.md project guidelines have been loaded.\n\n\
-                                        Please acknowledge them briefly.";
-        let init_messages = vec![ChatMessage {
-            role: "user".to_string(),
-            content: ChatContent::Text(INIT_ACK_PROMPT.to_string()),
-        }];
-        let init_request = ChatRequest {
-            model: model_ref.model_id.clone(),
-            messages: Arc::new(init_messages),
-            tools: Arc::new(Vec::new()),
-            temperature: agent.temperature,
-            top_p: agent.top_p,
-            max_tokens: Some(64),
-            system: Some(system_prompt),
-            options: (*agent.options).clone(),
-            session_id: Some(session_id.to_string()),
-            request_id: Some(Uuid::new_v4().to_string()),
-            stream_timeout_secs: None,
-            thinking: Some(ThinkingConfig::off()),
-        };
-
-        let mut ack_text = String::new();
-        match client.chat(init_request).await {
-            Ok(mut stream) => loop {
-                let ev =
-                    match tokio::time::timeout(std::time::Duration::from_mins(1), stream.next())
-                        .await
-                    {
-                        Ok(Some(event)) => event,
-                        Ok(None) => break,
-                        Err(_) => {
-                            tracing::warn!(
-                                session_id = %session_id,
-                                "AGENTS.md init exchange stream stalled - no data for 60s"
-                            );
-                            break;
-                        }
-                    };
-                if cancel_flag.load(Ordering::Relaxed) {
-                    break;
-                }
-                match ev {
-                    StreamEvent::TextDelta { text } => {
-                        ack_text.push_str(&text);
-                    }
-                    _ => {}
-                }
-            },
-            Err(e) => {
-                tracing::warn!(
-                    session_id = %session_id,
-                    error = %e,
-                    "AGENTS.md init exchange failed - skipping acknowledgement"
-                );
-                self.event_bus.publish(Event::MessageEnd {
-                    session_id: session_id.to_string(),
-                    message_id: "init".to_string(),
-                    reason: FinishReason::Stop,
-                });
-                return Ok(());
-            }
-        }
-
-        // Save both the user trigger and the assistant ack to DB so the
-        // conversation history is well-formed (alternating user/assistant).
-        // Without the user message, history starts with an orphaned Assistant
-        // turn which many LLM APIs reject or mishandle, causing the model to
-        // ignore tools or the system prompt on the follow-up turn.
-        if !ack_text.is_empty() {
-            self.event_bus.publish(Event::TextDelta {
-                session_id: session_id.to_string(),
-                text: ack_text.clone(),
-            });
-            let init_user_text = INIT_ACK_PROMPT;
-            let user_msg = Message::new(
-                session_id,
-                Role::User,
-                vec![MessagePart::Text {
-                    text: init_user_text.to_string(),
-                }],
-            );
-            let ack_msg = Message::new(
-                session_id,
-                Role::Assistant,
-                vec![MessagePart::Text { text: ack_text }],
-            );
-            // Best-effort ack persistence; log a failure rather than
-            // swallowing it so a broken write is visible.
-            if let Err(e) = self
-                .storage_op(move |s| {
-                    s.create_message(&user_msg)?;
-                    s.create_message(&ack_msg)?;
-                    Ok(())
-                })
-                .await
-            {
-                tracing::warn!(error = %e, "init-ack message persistence failed");
-            }
-        }
-
-        self.event_bus.publish(Event::MessageEnd {
-            session_id: session_id.to_string(),
-            message_id: "init".to_string(),
-            reason: FinishReason::Stop,
-        });
-
         Ok(())
     }
 

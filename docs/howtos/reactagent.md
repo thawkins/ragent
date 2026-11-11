@@ -28,7 +28,7 @@ unrecoverable error).
 | Public entry (plain text prompt) | `process_message` — `processor.rs` |
 | Public entry (pre-built `Message`, multipart/images) | `process_user_message` — `processor.rs` |
 | **The core loop** | inline `loop { ... }` inside `process_user_message` (`processor.rs`) |
-| Per-step helpers | `crates/ragent-agent/src/session/loop_steps.rs` — `prepare_client`, `build_turn_system_prompt`, `build_turn_chat_messages`, `run_inline_init_acknowledgement`, `call_llm_step`, `finalize_assistant_message` |
+| Per-step helpers | `crates/ragent-agent/src/session/loop_steps.rs` — `prepare_client`, `build_turn_system_prompt`, `build_turn_chat_messages`, `call_llm_step`, `finalize_assistant_message` |
 | Loop-run state machine | `LoopSpec` / `LoopTracker` / `StopCondition` — `crates/ragent-agent/src/session/loop_state.rs` |
 
 `SessionProcessor` orchestrates the loop: it accepts a user message, streams an
@@ -65,9 +65,7 @@ Location: `process_user_message` in `processor.rs`, before the `loop {`.
    chat messages, whether compression happened, the last reported input token
    count, and the context window. The vector is shared behind an
    `Arc<Vec<ChatMessage>>` so per-retry requests share it by refcount.
-8. **AGENTS.md init acknowledgement** — `run_inline_init_acknowledgement`
-   prints a one-time display-only acknowledgement (skipped for sub-agents).
-9. **Loop setup**:
+8. **Loop setup**:
    - `max_steps = agent.max_steps.unwrap_or(1024)` — the default iteration
      ceiling is **1024** unless the agent preset sets one.
    - `event_bus.set_step(session_id, 0)`.
