@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed - function_analyzer.py follows CODE_INDEX_SPEC
+
+- `scripts/function_analyzer.py` now judges functions on effective LOC
+  (blank, comment-only and docstring lines removed) with the strict
+  `loc > threshold` rule, applies the spec's path, test-file and
+  generated-file exclusions, and emits the spec's fields (`path`, `language`,
+  `kind`, `name`, `span`, `loc`, `threshold`, `violates`, plus `raw_lines`,
+  `blank_lines`, `comment_lines`). It previously flagged on physical lines
+  and emitted `line_count`/`sloc`/`exceeds_threshold` (#33).
+- The scanner now finds Rust `fn` and Go `func`, ignores comment markers
+  inside strings, and no longer treats Rust `#[attr]` or C `#include` lines
+  as comments. `--only-exceeding` is kept as an alias of `--only-violating`;
+  `--self-test` checks counting, the threshold and exclusions.
 ### Added - doc link check in CI
 
 - `scripts/check-doc-links.py` checks every relative link and `#anchor` in

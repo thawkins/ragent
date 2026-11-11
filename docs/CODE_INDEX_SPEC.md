@@ -3,7 +3,7 @@
 **Version:** 1.0  
 **Status:** Active — source-of-truth for any scan, report, or remediation that references "a 1000-line function" or "a 1000-line module"  
 **Owner:** ragent team  
-**Applies to:** code-index scanner, `FUNCPLAN`, `PERFPLAN`, and any ad-hoc audit script. `scripts/function_analyzer.py` does **not** implement this contract: it flags on physical `line_count` (optional `sloc`) and emits no `violates` field
+**Applies to:** code-index scanner, `FUNCPLAN`, `PERFPLAN`, `scripts/function_analyzer.py`, and any ad-hoc audit script. `scripts/function_analyzer.py` implements §1.3, §2, §3 and the §5 fields for functions; it does not use tree-sitter, emit module records, or provide `--spec-check` (see §7)
 
 ---
 
@@ -73,7 +73,7 @@ For both modules and functions:
    - A line that has code followed by a trailing comment counts as 1 (it is a code line).
 4. **Effective formula:** `LOC = total physical lines − blank lines − comment-only lines`, scoped to the entity (file for module, body span for function).
 
-Implementation note: for accuracy, parse with tree-sitter / language-aware tooling rather than regex. A line-count helper MUST accept both the raw text and a way to identify comment/blank lines; `scripts/function_analyzer.py` computes an `sloc` figure but flags on physical `line_count`, so it is not a reference implementation of this section.
+Implementation note: for accuracy, parse with tree-sitter / language-aware tooling rather than regex. A line-count helper MUST accept both the raw text and a way to identify comment/blank lines. `scripts/function_analyzer.py` follows this section: it removes blank lines, line and block comments and Python docstrings, tracks string and char literals so comment markers inside them are ignored, and counts a blank line inside a multi-line string as code.
 
 ---
 
@@ -205,7 +205,7 @@ A scan is conformant iff:
 5. It supports the 6 required languages per §4.
 6. Its output includes the fields in §5.
 
-Reference checker: `cargo run --bin ragent -- code-audit` (future) / `scripts/function_analyzer.py --spec-check <report.json>`.
+Reference checker: none yet. `scripts/function_analyzer.py` covers rules 1-3 and 6 for functions in a single file; it uses `ast` (Python), `lizard` when installed, or a regex + brace-matching scanner rather than tree-sitter, emits no module records, and has no `--spec-check` mode.
 
 ---
 
