@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed - research config keys apply to runs
+
+- `research.models.research_model` / `compression_model` /
+  `final_report_model`, `research.supervisor.max_concurrent_research_units`
+  and `research.evaluate.enabled` in `ragent.json` now set the default for
+  every research run; a per-run flag still wins. They were parsed but never
+  used (#39).
+- `ragent research continue` now loads `ragent.json` like `create`; it passed
+  no config, so every research setting fell back to built-in defaults there.
+
 ### Changed - function_analyzer.py follows CODE_INDEX_SPEC
 
 - `scripts/function_analyzer.py` now judges functions on effective LOC

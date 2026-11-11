@@ -2281,13 +2281,12 @@ Configuration" for the full schema):
 
 - `research.models.research_model` / `compression_model` /
   `final_report_model`, `research.supervisor.max_concurrent_research_units`
-  and `research.evaluate.enabled` are parsed but **not yet applied** to runs:
-  the run builder (`build_session_config` in `ragent-research`
-  `run_request.rs`) reads only the per-run request fields. Set them per run
-  instead (`--research-model`, `--compression-model`, `--final-report-model`,
-  `--max-concurrent-research-units`, and `--evaluate` on the TUI
-  `/research create`). The per-page summarization model has no config key;
-  pass `--summarization-model` to the TUI `/research create` command.
+  and `research.evaluate.enabled` set the default for every run. A per-run
+  flag wins (`--research-model`, `--compression-model`,
+  `--final-report-model`, `--max-concurrent-research-units`, and `--evaluate`
+  on the TUI `/research create`). The per-page summarization model has no
+  config key; pass `--summarization-model` to the TUI `/research create`
+  command.
 
 ```jsonc
 {

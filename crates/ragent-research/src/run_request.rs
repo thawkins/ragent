@@ -508,19 +508,38 @@ pub fn build_session_config(
         engine: RunEngineConfig {
             tier,
             mode,
-            max_concurrent_research_units: req
-                .max_concurrent_research_units
-                .unwrap_or(crate::supervisor::DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS),
+            // Precedence: `--max-concurrent-research-units`, then the configured
+            // `research.supervisor.max_concurrent_research_units`, then the
+            // built-in default.
+            max_concurrent_research_units: req.max_concurrent_research_units.unwrap_or_else(|| {
+                cfg_research
+                    .map(|r| r.supervisor.max_concurrent_research_units)
+                    .unwrap_or(crate::supervisor::DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS)
+            }),
         },
         clarify: req.clarify.unwrap_or(false),
         brief: req.brief.clone(),
         invocation: req.invocation.clone(),
+        // A per-run `--*-model` flag wins over the configured
+        // `research.models.*` override for the same phase.
         models: ModelConfig {
-            research_model: req.research_model.clone(),
-            compression_model: req.compression_model.clone(),
-            final_report_model: req.final_report_model.clone(),
+            research_model: req
+                .research_model
+                .clone()
+                .or_else(|| cfg_research.and_then(|r| r.models.research_model.clone())),
+            compression_model: req
+                .compression_model
+                .clone()
+                .or_else(|| cfg_research.and_then(|r| r.models.compression_model.clone())),
+            final_report_model: req
+                .final_report_model
+                .clone()
+                .or_else(|| cfg_research.and_then(|r| r.models.final_report_model.clone())),
         },
-        evaluate: req.evaluate.unwrap_or(false),
+        // An explicit per-run setting wins; otherwise `research.evaluate.enabled`.
+        evaluate: req
+            .evaluate
+            .unwrap_or_else(|| cfg_research.is_some_and(|r| r.evaluate.enabled)),
     }
 }
 

@@ -1044,7 +1044,9 @@ pub async fn handle_research_command_with_model(
                         title: Some(title.clone()),
                         ..Default::default()
                     };
-                    let config = ragent_research::build_session_config(&req, None);
+                    // Apply `ragent.json` here too, as `create` does.
+                    let config_arc = ragent_config::Config::load().ok().map(Arc::new);
+                    let config = ragent_research::build_session_config(&req, config_arc.as_deref());
                     let tool_registry = Arc::new(ragent_agent::tool::create_default_registry());
                     let event_bus = Arc::new(EventBus::new(256));
                     let storage = research_storage.clone();
@@ -1055,7 +1057,7 @@ pub async fn handle_research_command_with_model(
                         working_dir.clone(),
                         event_bus,
                         Some(storage),
-                        None,
+                        config_arc.clone(),
                         Some(Arc::new(ragent_agent::provider::create_default_registry())),
                         active_model.clone(),
                         Some(name.as_str()),

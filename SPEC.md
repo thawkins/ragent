@@ -5397,10 +5397,8 @@ but these are not `ragent.json` keys: `ResearchConfig` has no `few_shot` or
 
 ### `research.models.*` (string, optional)
 
-Per-phase model overrides. **Parsed but not yet applied:** the run builder
-(`build_session_config` in `ragent-research` `run_request.rs`) copies only the
-per-run request fields (`--research-model`, `--compression-model`,
-`--final-report-model`), so these config keys currently have no effect.
+Per-phase model overrides, applied to every run. A per-run flag for the same
+phase (`--research-model`, `--compression-model`, `--final-report-model`) wins.
 
 - `research_model` — model used by research agents / sub-topic workers.
 - `compression_model` — model used to compress or summarise intermediate findings.
@@ -5413,16 +5411,15 @@ command (FR-002).
 ### `research.supervisor.max_concurrent_research_units` (integer, default 5)
 
 Maximum number of researcher agents that may run concurrently in `supervisor`
-and `competitive` modes (FR-012). **Parsed but not yet applied:** runs use the
-per-run `--max-concurrent-research-units` value or the built-in default.
+and `competitive` modes (FR-012). A per-run `--max-concurrent-research-units`
+wins over this value.
 
 ### `research.evaluate.enabled` (boolean, default `false`)
 
-Intended to append a deterministic quality scorecard to every run's
-`RESEARCH.md` (FR-015). **Parsed but not yet applied:** the run builder reads
-only the per-run `evaluate` field, so pass `--evaluate` on the TUI
-`/research create` command (the `ragent research create` CLI has no
-`--evaluate` flag).
+Appends a deterministic quality scorecard to every run's `RESEARCH.md`
+(FR-015). A per-run `--evaluate` on the TUI `/research create` command turns it
+on for one run; the `ragent research create` CLI has no `--evaluate` flag, so
+this key is how CLI runs enable it.
 
 ### Example stanza
 
