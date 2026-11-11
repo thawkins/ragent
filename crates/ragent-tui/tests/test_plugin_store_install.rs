@@ -30,6 +30,12 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
         "../../target/temp/plugin-store-install/{name}-{}-{unique}",
         std::process::id()
     ));
+    // Under nextest every test is its own process, so `unique` is always 0 and
+    // the key is name + pid. CI restores `target/` from cache, so a directory
+    // from an earlier run with a reused pid may still exist: start empty.
+    if path.exists() {
+        std::fs::remove_dir_all(&path).expect("stale temp dir removable");
+    }
     std::fs::create_dir_all(&path).expect("temp dir creatable");
     path
 }
