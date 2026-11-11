@@ -621,14 +621,14 @@ inherited by every crate.
 Incremental compilation is disabled workspace-wide (`.cargo/config.toml` sets
 `[build] incremental = false`, and `[profile.dev]` / `[profile.test]` repeat it)
 because the configured `sccache` wrapper cannot cache incremental artifacts, so
-the cache only consumed disk. Expect full rebuilds; `BUILDSTATS.md` records the
+the cache only consumed disk. Expect full rebuilds; [`docs/BUILDSTATS.md`](docs/BUILDSTATS.md) records the
 measured cost of each step on the reference machine - release build 8m 1s /
 1.78 GiB, debug build 2m 22s / 2.37 GiB, the first full test run 7m 9s /
 14.95 GiB (that run compiles every test binary from scratch; the green re-run
 that reused them took 8m 49s and 0.30 GiB), and a coverage run 9m 0s that
 reused the instrumented tree. The same report carries the line-coverage figures:
 **86.7% of 168,392 instrumented lines**, with every crate in that measurement above 85%
-except the CLI presentation binary (per-crate table in `BUILDSTATS.md`).
+except the CLI presentation binary (per-crate table in [`docs/BUILDSTATS.md`](docs/BUILDSTATS.md)).
 
 Every crate builds **one** integration-test binary from its `tests/` tree
 (`autotests = false` plus a single `[[test]] name = "all"` that `#[path]`-includes
@@ -1006,7 +1006,7 @@ Related documents:
 - [SPEC.md](SPEC.md) — the full specification and requirement history (incl. §21.4
   on the one-test-binary-per-crate layout)
 - [STATS.md](STATS.md) — line, file, test and per-crate composition statistics
-- [BUILDSTATS.md](BUILDSTATS.md) — measured build, test and coverage time/disk cost
+- [docs/BUILDSTATS.md](docs/BUILDSTATS.md) — measured build, test and coverage time/disk cost
 - [QUICKSTART.md](QUICKSTART.md) — the guided feature tour
 - [TUI-QUICKSTART.md](TUI-QUICKSTART.md) — running and driving the terminal UI
 - [docs/howtos/](docs/howtos/) — one how-to manual per subsystem

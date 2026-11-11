@@ -107,7 +107,7 @@ Developer notes / Implementation guidance
 - Prefer explicit types and use anyhow::Result in binaries to align with guidelines.
 - Use tracing for structured logs and avoid println!.
 - Follow formatting rules (4-space indent). Use rustfmt and clippy.
-- Place new public docs in docs/ and keep FASTFILE.md as the planning artifact in repo root.
+- Place new public docs in docs/ and keep FASTFILE.md as the planning artifact in docs/plans/.
 
 Checklist before merging
 ------------------------

@@ -1,6 +1,6 @@
 ---
 name: buildstats
-description: Measure wall-clock time and disk usage of a clean release build, a debug build, the full workspace test suite and a coverage pass, then write BUILDSTATS.md and clean up.
+description: Measure wall-clock time and disk usage of a clean release build, a debug build, the full workspace test suite and a coverage pass, then write docs/BUILDSTATS.md and clean up.
 disable-model-invocation: true
 argument-hint: ""
 allowed-tools:
@@ -10,12 +10,12 @@ allowed-tools:
 # Build statistics
 
 Measure how long each build phase takes and how much disk it consumes, then
-write a single `BUILDSTATS.md` report at the repository root.
+write a single `docs/BUILDSTATS.md` report.
 
 Run the five steps **in order**. For every step measure the time taken and the
 free disk space immediately before and immediately after that step's command.
 At the end print one table with a row per step (time taken, disk consumed) and
-write that same table to `BUILDSTATS.md`. Finally run `cargo clean` again so the
+write that same table to `docs/BUILDSTATS.md`. Finally run `cargo clean` again so the
 tree is left as it was found.
 
 ## Robustness rules
@@ -27,7 +27,7 @@ variables or functions surviving between commands. Use the fixed run directory
 - Create `target/buildstats/` **after** step 1 (`cargo clean` deletes `target/`).
 - Every step reads/writes literal paths under `target/buildstats/`, never a
   variable from a previous shell.
-- `BUILDSTATS.md` lives at the repo root so it survives the final clean.
+- `docs/BUILDSTATS.md` lives outside `target/` so it survives the final clean.
 - Precondition check (before step 1): `command -v df awk jq cargo-llvm-cov`.
   If `cargo-llvm-cov` is missing, run `cargo install cargo-llvm-cov` first.
 - Skill bodies substitute positional placeholders, so never write a dollar
@@ -202,7 +202,7 @@ PY
 cat target/buildstats/table.md
 ```
 
-Then write `BUILDSTATS.md` at the repo root containing: a short header (date,
+Then write `docs/BUILDSTATS.md` containing: a short header (date,
 host, `cargo -V`/`rustc -V`), that table, the overall line coverage from
 `coverage-overall.txt`, the per-crate coverage table rendered from
 `coverage_by_crate.json`, and the test totals from `tests-summary.txt`. Print
@@ -210,12 +210,12 @@ the table to stdout as well. The file must exist before the final clean.
 
 ## 7. Final `cargo clean`
 
-Run `cargo clean` again and finish. Do not delete `BUILDSTATS.md`.
+Run `cargo clean` again and finish. Do not delete `docs/BUILDSTATS.md`.
 
 ## Gotchas
 
 - `cargo clean` removes `target/` entirely, including the run directory. Write
-  `BUILDSTATS.md` at the repo root first, then clean.
+  `docs/BUILDSTATS.md` first, then clean.
 - The root `.gitignore` ignores `/target/`, so no measurement artifacts are
   tracked.
 - Tests must leave the working tree unchanged (they write under the git-ignored

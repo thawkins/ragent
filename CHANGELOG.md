@@ -7262,8 +7262,6 @@ The uncommitted M5/M6/M7/M8/M9 work, the M1 `.gitignore`/`.env.example`
 hardening, and the config-write robustness fix are documented in the
 `Uncommitted (working tree)` section immediately below.
 
-## Uncommitted (working tree)
-
 ### Added
 
 - **Milestone M7 of `docs/plans/code-audit.md` complete - new test coverage.**
@@ -11903,6 +11901,88 @@ QUICKSTART, TUI-QUICKSTART, README, STATS) was refreshed to the 1.0.86 state.
 - `cargo check` passes; `cargo audit` reports no actionable security failures
   (only the pre-existing allowed warnings).
 
+### /spec simplify pass
+
+/simplify pass over the /spec system (ragent-specs + its TUI/agent consumers):
+17 files, +580/-455. Highlights:
+
+#### Fixed
+
+- **Auto task-completion no longer corrupts PLAN.md** — the agent loop marked
+  every `in_progress` spec task `completed` whenever ANY file-write tool was
+  called; writes are now required to resolve inside the active spec's own
+  directory (`writes_in_spec_dir` guard on the tool-call path arguments).
+- **UTF-8 panic in feedback logging** — `build_feedback_log` sliced `&note[..80]`
+  by byte offset; multi-byte notes (em-dash) panicked on a char boundary. Now
+  truncates at a real character boundary via `char_indices().nth(80)`.
+- **Frontmatter key loss on write** — `update_frontmatter` rebuilt the
+  frontmatter from scratch, silently dropping unmodelled keys (notably
+  `research:` written by `/spec create --from-research`) on every status
+  transition. Unmodelled keys are now preserved; audit/reviewer values are
+  YAML-escaped so embedded quotes cannot corrupt the frontmatter.
+- **Stale REVIEW.md/FEEDBACK.md after in-memory clear** — `write_spec` skipped
+  empty content, so a cleared field round-tripped as a no-op and the stale file
+  repopulated it on the next read; the file is now deleted when its content is
+  cleared (empty files are still never created).
+- **Atomic-write temp collision + durability** — temp names are unique per
+  write (monotonic sequence) so concurrent writers no longer race on the same
+  `.tmp` path, and the temp file is synced before rename.
+- **create_spec_dir TOCTOU** — the `exists()` pre-check raced past concurrent
+  creation; `create_dir` + `AlreadyExists` mapping is used instead.
+- **Lying completion timestamp** — `parse_tasks` fabricated
+  `completed_at: Some(1)` for completed rows on read-back; tests updated to the
+  honest `None` (PLAN.md tables carry no timestamp column).
+- **Non-deterministic validation report** — `Report::format` iterated a
+  `HashMap` of template counts; output is now sorted by template name.
+- **Amendment rows containing `|`** — `parse_amendment_row` shifted cells when
+  the rationale contained a pipe; middle cells are rejoined instead of
+  mis-parsed; an unreachable duplicate `section_end` assignment was removed.
+
+#### Added
+
+- `Spec::coverage_report()` — single requirement-coverage renderer shared by
+  the TUI `/spec coverage` arm and the `spec_coverage` agent tool (previously
+  two drifting implementations, one ASCII one emoji).
+- `TaskStatus::symbol()` — ASCII status symbols as one source of truth.
+- `Task::table_row()` / `PlanTask::table_row()` — shared task-table row
+  formatting (manager PLAN rewrite + `/spec tasks` builder).
+- `SpecIo::extract_research` + `Spec.research` is now actually populated from
+  frontmatter (the field was documented but never populated).
+- `SpecIo::frontmatter()` — single frontmatter slicing helper for
+  status/reviewers/research extraction.
+
+#### Changed
+
+- `/spec` arms consolidate 15 `SpecManager::new` constructions into one
+  `spec_manager()` helper and 11 `SpecId::new` match blocks into
+  `parse_spec_id()`.
+- `discover_specs`/`read_spec` share one `load_spec_from_dir` hydration path
+  (was ~50 duplicated lines); requirements are built before the `spec_md` move,
+  removing a full-text clone per spec.
+- Search snippet extraction reuses the already-lowercased text (one
+  lowercasing per document instead of two); empty search queries short-circuit.
+- `find_dependents` drops a dead O(n) ID-to-index map; `build_file_order_warning`
+  replaces an `unwrap()` with a let-else; `milestone_groups` borrows milestone
+  names instead of cloning per task; `Effort`/`Priority` parse without
+  allocation; unrecognised task Status values warn (parity with effort/priority).
+- `Report` filter helpers deduplicated to `any_in`/`count_in`;
+  `is_usage_error` shares a `USAGE_SUBCOMMANDS` const with parse;
+  `build_create_message`/`build_specify_message` drop unused `_feature`
+  parameters; `extract_from_research` is token-based (prose containing the flag
+  no longer splits) and strips dangling `--from-research` tokens.
+- lib.rs re-exports `EarsTemplate`.
+
+#### Documentation
+
+- `docs/howtos/spec.md` — new "Spec file write semantics" subsection (atomic
+  writes, clear-on-empty `REVIEW.md`/`FEEDBACK.md`), a `/spec coverage` report
+  format description (shared `Spec::coverage_report()` renderer, `[ok]`/
+  `[  ]` requirement symbols), a task-status symbol table (`[wait]`/`[sync]`/
+  `[ok]`/`[stop]`), an "Automatic task completion after writes" subsection
+  documenting the `writes_in_spec_dir` guard, and a note that `/spec update`
+  preserves unmodelled frontmatter keys (e.g. `research:` linkage).
+- `docs/howtos/pdf/spec.md.pdf` regenerated (A4 xelatex).
+
 ## Version: 1.0.85
 
 Tool-calling audit remediation pass (arg parsing, dispatch, providers, edit
@@ -12036,88 +12116,6 @@ stream parsers), `crates/ragent-tools-core` (edit family + central validator),
   (CRLF preservation, BOM round-trip, non-UTF-8 message), and text-fallback
   extraction tests (11 cases including multibyte payloads).
 
-## Version: 1.0.86 — /spec simplify pass (superseded section, retained for detail)
-
-/simplify pass over the /spec system (ragent-specs + its TUI/agent consumers):
-17 files, +580/-455. Highlights:
-
-### Fixed
-
-- **Auto task-completion no longer corrupts PLAN.md** — the agent loop marked
-  every `in_progress` spec task `completed` whenever ANY file-write tool was
-  called; writes are now required to resolve inside the active spec's own
-  directory (`writes_in_spec_dir` guard on the tool-call path arguments).
-- **UTF-8 panic in feedback logging** — `build_feedback_log` sliced `&note[..80]`
-  by byte offset; multi-byte notes (em-dash) panicked on a char boundary. Now
-  truncates at a real character boundary via `char_indices().nth(80)`.
-- **Frontmatter key loss on write** — `update_frontmatter` rebuilt the
-  frontmatter from scratch, silently dropping unmodelled keys (notably
-  `research:` written by `/spec create --from-research`) on every status
-  transition. Unmodelled keys are now preserved; audit/reviewer values are
-  YAML-escaped so embedded quotes cannot corrupt the frontmatter.
-- **Stale REVIEW.md/FEEDBACK.md after in-memory clear** — `write_spec` skipped
-  empty content, so a cleared field round-tripped as a no-op and the stale file
-  repopulated it on the next read; the file is now deleted when its content is
-  cleared (empty files are still never created).
-- **Atomic-write temp collision + durability** — temp names are unique per
-  write (monotonic sequence) so concurrent writers no longer race on the same
-  `.tmp` path, and the temp file is synced before rename.
-- **create_spec_dir TOCTOU** — the `exists()` pre-check raced past concurrent
-  creation; `create_dir` + `AlreadyExists` mapping is used instead.
-- **Lying completion timestamp** — `parse_tasks` fabricated
-  `completed_at: Some(1)` for completed rows on read-back; tests updated to the
-  honest `None` (PLAN.md tables carry no timestamp column).
-- **Non-deterministic validation report** — `Report::format` iterated a
-  `HashMap` of template counts; output is now sorted by template name.
-- **Amendment rows containing `|`** — `parse_amendment_row` shifted cells when
-  the rationale contained a pipe; middle cells are rejoined instead of
-  mis-parsed; an unreachable duplicate `section_end` assignment was removed.
-
-### Added
-
-- `Spec::coverage_report()` — single requirement-coverage renderer shared by
-  the TUI `/spec coverage` arm and the `spec_coverage` agent tool (previously
-  two drifting implementations, one ASCII one emoji).
-- `TaskStatus::symbol()` — ASCII status symbols as one source of truth.
-- `Task::table_row()` / `PlanTask::table_row()` — shared task-table row
-  formatting (manager PLAN rewrite + `/spec tasks` builder).
-- `SpecIo::extract_research` + `Spec.research` is now actually populated from
-  frontmatter (the field was documented but never populated).
-- `SpecIo::frontmatter()` — single frontmatter slicing helper for
-  status/reviewers/research extraction.
-
-### Changed
-
-- `/spec` arms consolidate 15 `SpecManager::new` constructions into one
-  `spec_manager()` helper and 11 `SpecId::new` match blocks into
-  `parse_spec_id()`.
-- `discover_specs`/`read_spec` share one `load_spec_from_dir` hydration path
-  (was ~50 duplicated lines); requirements are built before the `spec_md` move,
-  removing a full-text clone per spec.
-- Search snippet extraction reuses the already-lowercased text (one
-  lowercasing per document instead of two); empty search queries short-circuit.
-- `find_dependents` drops a dead O(n) ID-to-index map; `build_file_order_warning`
-  replaces an `unwrap()` with a let-else; `milestone_groups` borrows milestone
-  names instead of cloning per task; `Effort`/`Priority` parse without
-  allocation; unrecognised task Status values warn (parity with effort/priority).
-- `Report` filter helpers deduplicated to `any_in`/`count_in`;
-  `is_usage_error` shares a `USAGE_SUBCOMMANDS` const with parse;
-  `build_create_message`/`build_specify_message` drop unused `_feature`
-  parameters; `extract_from_research` is token-based (prose containing the flag
-  no longer splits) and strips dangling `--from-research` tokens.
-- lib.rs re-exports `EarsTemplate`.
-
-### Documentation
-
-- `docs/howtos/spec.md` — new "Spec file write semantics" subsection (atomic
-  writes, clear-on-empty `REVIEW.md`/`FEEDBACK.md`), a `/spec coverage` report
-  format description (shared `Spec::coverage_report()` renderer, `[ok]`/
-  `[  ]` requirement symbols), a task-status symbol table (`[wait]`/`[sync]`/
-  `[ok]`/`[stop]`), an "Automatic task completion after writes" subsection
-  documenting the `writes_in_spec_dir` guard, and a note that `/spec update`
-  preserves unmodelled frontmatter keys (e.g. `research:` linkage).
-- `docs/howtos/pdf/spec.md.pdf` regenerated (A4 xelatex).
-
 ## Version: 1.0.84
 
 The /simplify all pass fixes (post 1.0.83) reviewed by parallel sub-agents over the diff since 1.0.83, plus slash-command help coverage.
@@ -12230,8 +12228,6 @@ The /simplify all pass fixes (post 1.0.83) reviewed by parallel sub-agents over 
 - `cargo check` passes (only the pre-existing future-incompat notice for the external `attribute-derive-macro` crate).
 - `cargo audit` reports only the allowed warnings (unmaintained `ttf-parser`, unsound `lru`, yanked `chacha20` transitive dependencies); no actionable security failures.
 
-## Uncommitted (post 1.0.81)
-
 Working-tree changes (staged + unstaged) on top of commit `429c9190`
 ("Version: 1.0.81 - updated codeindex indexing tooling").
 
@@ -12312,8 +12308,6 @@ Working-tree changes (staged + unstaged) on top of commit `429c9190`
 - Version bump to 1.0.81 (updated codeindex indexing tooling).
 - `cargo check` passes (only the pre-existing future-incompat notice for the external `attribute-derive-macro` crate).
 - `cargo audit` reports only the 10 allowed warnings (unmaintained `ttf-parser`, unsound `lru`, yanked `chacha20` transitive dependencies); no actionable security failures.
-
-## Uncommitted (post 1.0.80)
 
 Working-tree changes (staged + unstaged) on top of commit `a042f4ed`
 ("Version: 1.0.80 - add plot tools"). Detailed entries for the codeindex graph
@@ -16610,8 +16604,6 @@ now applies the evidence-based prompt-engineering guidance from
   rendering, bullet lists, the footer note, `Esc`/click close, keyboard
   scrolling, and mouse-wheel scrolling.
 
-### Added — `/research` parallel web capture
-
 ### Fixed — `/research` TUI screen corruption
 
 - **Sanitize external strings before display.** URL, page title, error, and
@@ -17121,8 +17113,6 @@ Post-refactor report: `docs/reports/dupes-final.txt`.
     copy lives in `app/tests.rs`) and its `#[cfg(test)]` import block.
   - Removed redundant `use super::*;` from `app/tests.rs` and the
     `router_modifiers` inline test file.
-
-## [Unreleased] — REMPLAN.md Structural Remediation (M1–M10)
 
 ### Refactoring
 
