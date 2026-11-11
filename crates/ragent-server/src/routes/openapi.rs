@@ -898,7 +898,7 @@ pub fn typescript_client() -> String {
     let mut out = String::new();
     out.push_str("// AUTO-GENERATED from crates/ragent-server/src/routes/openapi.rs\n");
     out.push_str(
-        "// Do not edit by hand. Regenerate with `ragent openapi --client typescript`.\n\n",
+        "// Do not edit by hand. Regenerate with `ragent openapi --client > docs/openapi/ragent-client.d.ts`.\n\n",
     );
     out.push_str("export interface RagentClientOptions {\n");
     out.push_str("  baseUrl: string;\n");

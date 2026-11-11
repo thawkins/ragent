@@ -1,5 +1,5 @@
 // AUTO-GENERATED from crates/ragent-server/src/routes/openapi.rs
-// Do not edit by hand. Regenerate with `ragent openapi --client typescript`.
+// Do not edit by hand. Regenerate with `ragent openapi --client > docs/openapi/ragent-client.d.ts`.
 
 export interface RagentClientOptions {
   baseUrl: string;
