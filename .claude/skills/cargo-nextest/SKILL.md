@@ -14,12 +14,10 @@ cargo-nextest is a faster, more reliable test runner for Rust that executes each
 
 ## When to Use This Skill
 
-| Use this skill when... | Use sibling skill instead when... |
-|---|---|
-| Running tests in parallel with process isolation | Measuring code coverage -- use `cargo-llvm-cov` |
-| Filtering tests by package, name, or pattern | Linting test code style -- use `clippy-advanced` |
-| Setting up flaky-test retries in CI | Auditing unused test deps -- use `cargo-machete` |
-| Optimizing test runtime via partitioning | Authoring tests / async patterns -- use `rust-development` |
+- Running tests in parallel with process isolation
+- Filtering tests by package, name, or pattern
+- Setting up flaky-test retries in CI
+- Optimizing test runtime via partitioning
 
 ## Installation
 
@@ -85,8 +83,9 @@ failure-output = "immediate-final"
 slow-timeout = { period = "60s", terminate-after = 2 }
 
 [profile.ci.junit]
-# JUnit XML output for CI
-path = "target/nextest/ci/junit.xml"
+# JUnit XML output for CI. The path is relative to the profile's store
+# directory, so this lands at target/nextest/ci/junit.xml.
+path = "junit.xml"
 ```
 
 ## Test Filtering with Expression Language
@@ -113,11 +112,11 @@ cargo nextest run -E 'kind(lib) and test(/)'
 
 ### Expression Operators
 
-- `test(pattern)` - Match test name (regex)
-- `binary(pattern)` - Match binary name
-- `package(pattern)` - Match package name
+- `test(pattern)` - Match test name (substring by default; `/regex/`, `=exact`, `#glob`)
+- `binary(pattern)` - Match binary name (glob by default)
+- `package(pattern)` - Match package name (glob by default)
 - `kind(type)` - Match test kind (lib, bin, test, bench, example)
-- `platform(os)` - Match target platform
+- `platform(host)` / `platform(target)` - Match the build platform
 - `not expr` - Logical NOT
 - `expr and expr` - Logical AND
 - `expr or expr` - Logical OR
@@ -148,11 +147,12 @@ cargo nextest run --test-threads 0
 # Human-readable output (default)
 cargo nextest run
 
-# JSON output for programmatic parsing
-cargo nextest run --message-format json
+# libtest-compatible JSON for programmatic parsing (experimental; needs
+# NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1)
+NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --message-format libtest-json
 
-# JSON with test output
-cargo nextest run --message-format json-pretty
+# Same, plus a nextest subobject with extra metadata
+NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --message-format libtest-json-plus
 
 # Generate JUnit XML for CI
 cargo nextest run --profile ci
@@ -169,8 +169,8 @@ cargo llvm-cov nextest --html
 # Retry flaky tests automatically
 retries = 3
 
-# Detect tests that pass on retry
-[profile.default.overrides]
+# Per-test override: more retries for tests named flaky_*
+[[profile.default.overrides]]
 filter = 'test(flaky_)'
 retries = 5
 ```
@@ -233,7 +233,7 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 [test-groups.database]
 max-threads = 1  # Serialize database tests
 
-[profile.default.overrides]
+[[profile.default.overrides]]
 filter = 'test(db_)'
 test-group = 'database'
 
@@ -262,10 +262,14 @@ cargo nextest run && cargo test --doc
 [profile.default]
 default-filter = 'all()'
 
-# Per-package overrides
+# Per-package overrides: serialise one package via a test group
+# (`test-threads` is a profile key, not an override key)
+[test-groups.slow-serial]
+max-threads = 1
+
 [[profile.default.overrides]]
 filter = 'package(slow_tests)'
-test-threads = 1
+test-group = 'slow-serial'
 slow-timeout = { period = "120s" }
 ```
 

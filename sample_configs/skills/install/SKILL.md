@@ -1,12 +1,11 @@
 ---
-description: "Increment patch version, commit, build and install"
+description: "Build and install ragent locally (cargo install --path .); does not bump the version or commit"
 user-invocable: true
 disable-model-invocation: true
-argument-hint: "[commit message]"
 allowed-tools:
  - any
 ---
-Perform a release of the ragent project by following these steps **in order**:
+Build and install the current ragent working tree locally by following these steps **in order**:
 
 In the project root directory:
 

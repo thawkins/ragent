@@ -107,25 +107,33 @@ run_step release 'cargo build --release --workspace' \
 run_step debug 'cargo build --workspace' cargo build --workspace
 ```
 
-### 4. Full workspace test suite (all targets, debug binaries)
+### 4. Full workspace test suite (debug binaries)
+
+Run the same two commands as CI's `Test` job: the nextest suite under the `ci`
+profile, then the doc tests (nextest does not run doc tests). Both always run;
+the step records failure if either fails.
 
 ```bash
 . target/buildstats/lib.sh
-run_step tests 'cargo test --workspace --all-targets' \
-  cargo test --workspace --all-targets
+tests_impl() {
+  local rc=0
+  cargo nextest run --workspace \
+    --features ragent-tools-extended/test-ssrf-bypass \
+    --profile ci --no-fail-fast || rc=1
+  cargo test --workspace --doc || rc=1
+  return "$rc"
+}
+run_step tests 'cargo nextest run --profile ci + cargo test --doc' tests_impl
 ```
 
-Then capture the totals for the report:
+Then capture the totals for the report (nextest prints one `Summary` line;
+the doc tests print `test result:` lines):
 
 ```bash
-grep -E "test result:|^running [0-9]+ tests" target/buildstats/tests.log \
+grep -E "^ *Summary \[|test result:" target/buildstats/tests.log \
   | tail -40 >target/buildstats/tests-summary.txt
 cat target/buildstats/tests-summary.txt
 ```
-
-`--all-targets` excludes doctests. CI also runs `cargo test --workspace`
-(which includes doctests); note that difference in the report if the doctest
-count matters.
 
 ### 5. Coverage (overall and per crate)
 
@@ -210,8 +218,7 @@ Run `cargo clean` again and finish. Do not delete `BUILDSTATS.md`.
   `BUILDSTATS.md` at the repo root first, then clean.
 - The root `.gitignore` ignores `/target/`, so no measurement artifacts are
   tracked.
-- Running the tests dirties generated files under
-  `crates/ragent-server/research/` (`INDEX.md`, `.index.json`). If they show as
-  modified afterwards, restore only those generated files with
-  `git restore -- crates/ragent-server/research/`; never touch other work.
-- `--all-targets` builds benches but does not run them.
+- Tests must leave the working tree unchanged (they write under the git-ignored
+  `target/temp/`). If a run leaves it modified, report that as a test bug; do
+  not `git restore` it.
+- The coverage step's `--all-targets` builds benches but does not run them.
