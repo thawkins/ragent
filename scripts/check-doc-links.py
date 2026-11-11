@@ -28,13 +28,15 @@ import re
 import subprocess
 import sys
 import tempfile
+from urllib.parse import unquote
 from functools import lru_cache
 
 EXCLUDED_PREFIXES = ("research/",)
 LINK_RE = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 HEADING_RE = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
-FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+# Any indentation: fences nested in list items are indented 4+ spaces.
+FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 HTML_ANCHOR_RE = re.compile(r"""<a\s+(?:name|id)=["']([^"']+)["']|\sid=["']([^"']+)["']""")
 INLINE_CODE_RE = re.compile(r"(`+)(?:(?!\1).)+?\1")
 
@@ -81,11 +83,18 @@ def anchors_of(path: str) -> frozenset[str]:
     for line in lines:
         m = HEADING_RE.match(line)
         if m:
+            # Like GitHub: take the next unused id, so `# Repeat`, `# Repeat-1`,
+            # `# Repeat` yield repeat, repeat-1, repeat-2.
             base = slugify(m.group(2))
             n = seen.get(base, 0)
-            found.add(base if n == 0 else f"{base}-{n}")
+            candidate = base if n == 0 else f"{base}-{n}"
+            while candidate in found:
+                n += 1
+                candidate = f"{base}-{n}"
+            found.add(candidate)
             seen[base] = n + 1
-        for a, b in HTML_ANCHOR_RE.findall(line):
+        # Explicit anchors count only outside inline code.
+        for a, b in HTML_ANCHOR_RE.findall(INLINE_CODE_RE.sub("", line)):
             found.add(a or b)
     return frozenset(found)
 
@@ -101,6 +110,7 @@ def check_file(path: str) -> list[str]:
                 if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target):
                     continue  # http:, https:, mailto:, ...
                 target_path, _, fragment = target.partition("#")
+                target_path, fragment = unquote(target_path), unquote(fragment)
                 if target_path.startswith("/"):
                     resolved = target_path.lstrip("/")
                 elif target_path:
@@ -121,9 +131,9 @@ def check_file(path: str) -> list[str]:
 def tracked_markdown() -> list[str]:
     """Return git-tracked Markdown files, minus excluded generated trees."""
     out = subprocess.run(
-        ["git", "ls-files", "*.md"], capture_output=True, text=True, check=True
-    ).stdout.split()
-    return [f for f in out if not f.startswith(EXCLUDED_PREFIXES) and os.path.exists(f)]
+        ["git", "ls-files", "-z", "*.md"], capture_output=True, text=True, check=True
+    ).stdout.split("\0")
+    return [f for f in out if f and not f.startswith(EXCLUDED_PREFIXES) and os.path.exists(f)]
 
 
 def run(files: list[str]) -> int:
@@ -146,22 +156,27 @@ def self_test() -> int:
         with open(target, "w", encoding="utf-8") as fh:
             fh.write(
                 "# Top\n\n## `--flag` option\n\n## Repeat\n\n## Repeat\n\n## snake_case\n\n"
-                "## 4.1 `/cmd <name>` - deck\n"
+                "## 4.1 `/cmd <name>` - deck\n\n## Dup\n\n## Dup-1\n\n## Dup\n\n## Café\n\n"
+                "`<a id=\"not-real\">`\n"
             )
+        with open(os.path.join(tmp, "my guide.md"), "w", encoding="utf-8") as fh:
+            fh.write("# Guide\n")
         good = os.path.join(tmp, "good.md")
         with open(good, "w", encoding="utf-8") as fh:
             fh.write(
                 "[a](target.md#top) [b](target.md#--flag-option) [c](target.md#repeat-1)\n"
                 "[d](target.md#snake_case) [e](https://example.com/x)\n"
-                "[f](target.md#41-cmd-name---deck)\n"
+                "[f](target.md#41-cmd-name---deck) [g](target.md#dup-2) [h](my%20guide.md)\n"
+                "[i](target.md#caf%C3%A9)\n"
+                "- item\n\n    ```\n    [nested fence](missing.md)\n    ```\n"
                 "```\n[ignored](missing.md)\n```\n`[ignored](missing.md)`\n"
             )
         bad = os.path.join(tmp, "bad.md")
         with open(bad, "w", encoding="utf-8") as fh:
-            fh.write("[x](missing.md) [y](target.md#nope) [z](target.md#repeat-2)\n")
+            fh.write("[x](missing.md) [y](target.md#nope) [z](target.md#repeat-2) [w](target.md#not-real)\n")
         good_problems = check_file(good)
         bad_problems = check_file(bad)
-    if good_problems or len(bad_problems) != 3:
+    if good_problems or len(bad_problems) != 4:
         print("self-test FAILED")
         print("good:", good_problems)
         print("bad:", bad_problems)
