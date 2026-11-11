@@ -1737,7 +1737,7 @@ and regenerates `PLAN.md` and `TESTPLAN.md` to match the current requirements.
 The `SPEC.md` file is not modified; existing task IDs in `PLAN.md` are preserved
 where unchanged. Archived specs cannot be updated.
 
-`/spec create <name> <title>` now also generates a `TESTPLAN.md` manual test
+`/spec create <name> <title>` also generates a `TESTPLAN.md` manual test
 plan (with `TC-NNN` test cases) alongside `SPEC.md` and `PLAN.md`.
 
 `/spec jtbd <specname>` performs a Jobs-To-Be-Done analysis of an existing
@@ -1950,38 +1950,6 @@ Type `/` in the input to open an autocomplete menu:
 | `/new --language <lang> --type <type> [--stack <name>] [--github\|--gitlab]` | Scaffold a new project in the current directory (46 canonical languages spanning the codeindex scanner set, from rust/python to json/sql/cmake; library/cmdline/tui/gui/webapp; optional GitHub/GitLab hosting + push) |
 | `/new help` | Show `/new` usage, flag table, and supported values |
 | `/spawn <agent> <prompt...>` | Launch a **detached** fire-and-forget background sub-agent from the chat input (not listed by `list_agents`, not awaitable, result never injected back); `/spawn help` for usage |
-
-### New in v1.0.79
-
-- **`/research create --max-search-calls N`** — places a hard, run-scoped cap on the total web-search calls a research run may issue, shared across every supervisor/competitive researcher and gather pass.
-- **`/research update <name>`** — re-runs a research item by replaying its recorded invocation line. (Since v1.0.161 the report is dated — `RESEARCH-<run date>.md` — so a re-run no longer overwrites the earlier report.)
-- **`--mode competitive` defaults `--format` to `comparison-table`** — competitive runs no longer require an explicit `--format comparison-table`.
-- **`--depth` bounds web volume by default** — the effective web-source budget is derived from the selected depth (shallow 6 / standard 9 / deep 15) unless `--max-web-results` is passed explicitly.
-- **`/clip`** — copies the rendered message-window transcript to the system clipboard in one step.
-- **`/research list` renders a human-readable table again** — the fixed-width `NAME/TITLE/STATUS/CREATED/MODIFIED` table is the default output, with JSON behind the `--json` flag.
-
-### New in v1.0.78
-
-- **`/research create` execution modes** — `--mode tiered|supervisor|competitive` selects the high-level research strategy. `supervisor` spawns parallel sub-topic researchers; `competitive` compares entities and defaults to `--format comparison-table` (an explicit `--format` still wins).
-- **`/research create` per-phase models** — `--research-model`, `--compression-model`, `--final-report-model`, and `--summarization-model` override the model used for each research phase.
-- **`/research create --brief` and `--clarify`** — supply an explicit mission statement or opt in to a single clarifying question for ambiguous topics (clarification is off by default).
-- **`dirs.allowed_roots`** — configure multiple project directories the agent can read/write via `ragent.json`.
-
-### New in v1.0.77
-
-- **`research.evaluate` config option** — enable a deterministic quality scorecard
-  (quality, relevance, groundedness, completeness, structure) appended to
-  `/research create` reports by setting `"research": { "evaluate": { "enabled": true } }`
-  in `ragent.json`.
-
-### New in v1.0.76
-
-- **`--web-time N`** for `/research create` sets the web-phase deadline
-  (default 180 s; `0` disables the deadline).
-- **Concepts section** in `/research create` reports — a `## Concepts` block
-  appears directly above `## Findings` when an LLM is configured.
-- Research slash commands now show a live `web:M:SS` countdown in the TUI
-  status bar during the web-gathering phase.
 
 ### Benchmark Workflow
 
@@ -2345,12 +2313,8 @@ Configuration" for the full schema):
 }
 ```
 
-All keys are opt-in; existing configs are unchanged. The prompt builder also
+All keys are opt-in. The prompt builder also
 enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
-
-## Release History
-
-Release notes live in [CHANGELOG.md](CHANGELOG.md).

@@ -4,10 +4,6 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-Release notes live in [CHANGELOG.md](CHANGELOG.md).
-
----
-
 ## 1. Starting the TUI in your project workspace
 
 Open a terminal in the project you want to work on and run:
@@ -550,8 +546,7 @@ by an older ragent keeps its undated `RESEARCH.md` / `CORPA.md`, which resolves
 the same way.
 
 While the run is gathering, the pinned **Research Progress** message in the
-message window does not list each captured URL (that previously flooded the
-window). Instead it maintains a compact summary table with one row per
+message window does not list each captured URL. Instead it maintains a compact summary table with one row per
 backend search engine (duckduckgo, brave, openalex, wikipedia, tavily, ...)
 showing the counts of captured files by type (`page` / `pdf` / `yt`) and a
 `languages` cell listing every currently acquired language with its article

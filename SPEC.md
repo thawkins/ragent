@@ -98,15 +98,13 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.158). The core architecture, tool system,
+Ragent is in **beta**. The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), execution backends (§19D), the Agent
 Client Protocol client and server (§19E), the automation service (§19F), and
 release packaging are functional and under active development. The specification
 below documents the current state of all subsystems.
-
-Release history: see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -375,8 +373,7 @@ graph TD
 
 **Figure 3:** Crate Dependency Graph — Inter-crate dependency relationships
 
-Per-crate `fn`-definition counts (lexical lower bounds, re-measured 2026-10-21;
-the v1.0.142 `countreport.md` inventory records 25,823 on its tree):
+Per-crate `fn`-definition counts (lexical lower bounds, re-measured 2026-10-21):
 `ragent-tui` 6,054 · `ragent-agent` 4,630 · `ragent-tools-extended` 2,956 ·
 `ragent-research` 2,513 · `ragent-codeindex` 1,130 · `ragent-llm` 1,102 ·
 `ragent-tools-core` 1,001 · `ragent-plugins` 991 · `ragent-specs` 981 ·
@@ -1461,7 +1458,7 @@ containment gaps found by the 18-crate audit.
 The second milestone of `ANTIPAT.md` closes the test-location, module-docblock,
 and production-`unwrap` debt found by the 18-crate audit.
 
-**Inline-test gate (M2.17).** `scripts/check-inline-tests.sh` is now a wrapper
+**Inline-test gate (M2.17).** `scripts/check-inline-tests.sh` is a wrapper
 over `scripts/check_inline_tests.py`, which distinguishes the two `#[cfg(test)]`
 shapes:
 
@@ -3125,7 +3122,7 @@ in-memory strings; the implementation contains no `unsafe` code and no
 
 ### 11.6 Iterative Research Loop (`researchext`)
 
-The research engine now supports an iterative, stateful loop:
+The research engine supports an iterative, stateful loop:
 
 1. **Plan** — decompose the topic into focused sub-questions.
 2. **Gather** — capture sources for pending sub-questions in parallel.
@@ -5399,8 +5396,6 @@ The review, the measurement method and the per-crate rollout record live in
 # Appendices
 
 ---
-
-Release history lives in [CHANGELOG.md](CHANGELOG.md); it is not repeated here.
 
 ## Appendix B: Documentation
 
