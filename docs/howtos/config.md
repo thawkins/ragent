@@ -63,6 +63,7 @@ the project root `README.md` and the **Tutorial** in
    - 7.40 [`tools`](#740-tools)
    - 7.41 [`agents`](#741-agents)
    - 7.42 [`storage`](#742-storage)
+   - 7.43 [`gcf`](#743-gcf)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -1950,6 +1951,24 @@ detail.
 Surfaces: the startup pass (on a blocking thread, so it never stalls startup),
 `ragent db prune [--days N] [--dry-run]`, and the TUI `/db prune [--days N]
 [--dry-run]` (confirmed, with `No` preselected).
+
+---
+
+### 7.43 `gcf`
+
+GCF (Graph Compact Format) encoding of JSON-dense tool results in the LLM view
+(spec `gcf`). Opt-in; the key is omitted from a saved file while disabled.
+
+```json
+{ "gcf": { "enabled": true } }
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `enabled` | `bool` | `false` | Re-encode eligible JSON tool results as lossless GCF blocks. |
+
+Toggled at runtime with `/gcf on|off`; see
+[`slashcommands/gcf.md`](slashcommands/gcf.md) for eligibility rules and output.
 
 ---
 

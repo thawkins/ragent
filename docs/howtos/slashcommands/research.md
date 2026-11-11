@@ -27,6 +27,7 @@ a background task while the status bar shows `[wait] research: <name>...`.
 /research continue <name> [--message <text>]
 /research update <name>
 /research cluster <name> [--force]
+/research deck <name> [--from <date>] [--to <date>] [--elements <list>] [--include-old] [--out <path>] [--force]
 /research export <name> [--output <path>]
 /research import <path> [--name <name>]
 /research config
@@ -62,6 +63,7 @@ step reports as a `title` `RunStep` event.
 | `continue <name> [--message <text>]` | Continues an existing project with an optional steering message. |
 | `update <name>` | Refreshes an existing project's findings. |
 | `cluster <name> [--force]` | Runs research clustering on the project; `--force` re-runs over existing clusters. |
+| `deck <name> [flags]` | Writes a Markdown diff deck comparing two of the item's dated reports (default: the two newest) to `DECK-<YYYY-MM-DD>.md` in the item directory. See the deck flag table below and [research.md](../research.md#412-research-deck-name---the-diff-deck) for the workflow. |
 | `export <name> [--output <path>]` | Exports the project bundle to a path. |
 | `import <path> [--name <name>]` | Imports a project bundle, optionally renaming it. |
 | `config` | Shows the resolved research configuration. |
@@ -109,6 +111,17 @@ step reports as a `title` `RunStep` event.
 | `--evaluate` | Enable evaluation scoring of findings. |
 | `--url-cloak` | Emit web source URLs as defanged plain text (`hxxps://host[.]tld/...` in a code span) in the `Sources` bullets and `References Index` table. Off by default. |
 | `--age <span>` | Reject web sources published longer ago than the span (`30d`, `6m`, `2y`); undated sources are rejected too. The window's start date (`today - span`, as ISO `YYYY-MM-DD`) is appended to every decomposed search query so the engines steer towards material inside the window. |
+
+## Deck flags
+
+| Flag | Values / Default |
+|---|---|
+| `--from <YYYY-MM-DD>` | Older (baseline) report; alone, pairs with the next newer report. |
+| `--to <YYYY-MM-DD>` | Newer (current) report; alone, pairs with the next older report. |
+| `--elements <list>` | Comma-separated subset of `Executive Summary`, `Concepts`, `Findings`, `Cross-References`, `References` (case-insensitive). Default: all. |
+| `--include-old` | Also emit a slide for an element whose items are all unchanged. |
+| `--out <path>` | Write the deck here instead of `DECK-<YYYY-MM-DD>.md` in the item directory. |
+| `--force` | Overwrite an existing deck file. |
 
 ## Examples
 

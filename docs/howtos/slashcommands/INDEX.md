@@ -70,6 +70,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/doctor` | [doctor](doctor.md) | Run system diagnostics (providers, git, ripgrep, MCP, memory); /doctor help for details |
 | `/webapi` | [webapi](webapi.md) | Manage the HTTP REST API: /webapi enable \| disable \| help |
 | `/websearch` | [websearch](websearch.md) | Web search engine diagnostics: /websearch show \| test \| help |
+| `/i18n` | [i18n](i18n.md) | UI language: /i18n on\|off\|status\|list\|<locale>\|help |
 | `/init` | [init](init.md) | Analyse the project and write a summary, or create a default config: /init [config\|help] |
 | `/codeindex` | [codeindex](codeindex.md) | Manage codebase index: /codeindex on\|off\|show\|lang\|reindex\|rebuild\|graph <build\|export\|lang>\|explain <symbol>\|path <A> <B>\|communities\|godnodes\|help |
 | `/status` | [status](status.md) | Show status message history: /status [clear] |

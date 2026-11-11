@@ -29,6 +29,9 @@ separate `/teams` command surface.
 /team tasks
 /team clear
 /team cleanup
+/team forcecleanup [confirm]
+/team approve <teammate-name>
+/team reject <teammate-name> <feedback>
 /team focus [name]
 ```
 
@@ -48,6 +51,9 @@ separate `/teams` command surface.
 | `tasks` | Lists the shared team task list. |
 | `clear` | Clears team state. |
 | `cleanup` | Tears the team down after teammates have stopped. |
+| `forcecleanup [confirm]` | Alias `force-cleanup`. Force-cleans the active team: shuts down active teammates and removes the team's on-disk state. Without `confirm` it lists active teammates and asks for Enter (confirm) or Esc (cancel). See [teams.md](../teams.md#5-complete-slash-command-reference). |
+| `approve <teammate-name>` | Approves the plan of a teammate in `plan_pending` (matched by name or agent id); the teammate begins implementation. See [teams.md](../teams.md#67-plan-approval-optional). |
+| `reject <teammate-name> <feedback>` | Rejects a `plan_pending` teammate's plan with the required feedback; the teammate stays in `plan_pending` and must resubmit with `team_submit_plan`. |
 | `focus [name]` | Focuses the named team; with no argument, clears the current focus. |
 
 ## Examples

@@ -122,6 +122,7 @@ the needle from.
 | `new_string` | string | yes | Replacement text; empty string deletes the match | — |
 | `dry_run` | boolean | no | Resolve and preview without writing | `true` |
 | `collapse_whitespace` | boolean | no | Fold whitespace runs; decodes `\t`, `\n`, `\r`, `\\` escapes | `false` |
+| `path` / `old_str` / `new_str` | string | no | Deprecated legacy aliases for `file_path` / `old_string` / `new_string` | — |
 
 **Example:**
 ```text
@@ -149,6 +150,7 @@ Each edit object:
 | `old_string` | string | yes | Text to find (exactly one match) |
 | `new_string` | string | yes | Replacement text |
 | `collapse_whitespace` | boolean | no | Whitespace-relaxed matching for this edit |
+| `path` / `old_str` / `new_str` | string | no | Deprecated legacy aliases for `file_path` / `old_string` / `new_string` |
 
 **Example:**
 ```text

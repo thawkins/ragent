@@ -10,6 +10,7 @@ configuration, and common workflows.
 ## Prerequisites
 
 - **Rust 1.91+** (edition 2024) — install via [rustup](https://rustup.rs)
+- **cargo-nextest** to run the tests — `cargo install cargo-nextest --locked`
 - An LLM provider: **Anthropic**, **OpenAI**, **Hugging Face**, **Amazon Bedrock**, or a local **Ollama** server
 
 ## Installation
