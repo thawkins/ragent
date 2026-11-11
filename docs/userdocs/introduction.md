@@ -39,7 +39,6 @@ ragent offers a rich set of features designed to enhance developer productivity:
 - File snapshotting and rollback functionality
 - Real-time event bus for UI updates
 - Background agent spawning for parallel task execution
-- Prompt optimization with structured frameworks
 
 ## Target Audience
 
