@@ -359,7 +359,7 @@ Statuses: `Proposed` → `Approved` → `In progress` → `Done`. Cars marked �
 | CODE-01…15 | Code defects | section 9 | separate tickets, not in this train | – | – | – | Filed: #24–#40 and #43 (CODE-01…17), outside this train |
 
 **Prevention decisions** (one per car):
-- **DOC-02 and DOC-06: Guard not yet added.** The cheapest independent proof is an offline link and anchor check in CI (CODE-13), since 33 broken links accumulated with no gate. It needs a CI change, so it is filed as #36 rather than added in a doc PR. Until it lands, every doc PR in this train carried the link-check output itself.
+- **DOC-02 and DOC-06: Guard added (#36).** `scripts/check-doc-links.py` checks every relative link and anchor in tracked Markdown, offline, in the `Doc links and anchors` CI job and `pre-flight.sh`, with a `--self-test`.
 - **DOC-03 and DOC-09: Ownership recorded.** Instruction files keep the behavioral-delta rule in their PR template.
 - **All other cars: No guard justified.**
 

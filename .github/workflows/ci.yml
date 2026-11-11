@@ -94,6 +94,16 @@ jobs:
       - name: Verify allow(dead_code) reasons
         run: bash scripts/check-dead-code-reasons.sh
 
+  doc-links:
+    name: Doc links and anchors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify self-test catches seeded broken links
+        run: python3 scripts/check-doc-links.py --self-test
+      - name: Verify every relative link and anchor in tracked Markdown resolves
+        run: python3 scripts/check-doc-links.py
+
   poison-lock-guard:
     name: Poison-lock guard (FUNC-080)
     runs-on: ubuntu-latest
