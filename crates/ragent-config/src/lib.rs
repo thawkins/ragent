@@ -1,7 +1,7 @@
 //! Configuration system for ragent
 //!
 //! This crate handles:
-//! - Configuration loading from ragent.json / ragent.jsonc
+//! - Configuration loading from ragent.json
 //! - Config merging (global + project + CLI overrides)
 //! - Permission rules and checking
 //! - Runtime allowlists and denylists (bash, directories)
