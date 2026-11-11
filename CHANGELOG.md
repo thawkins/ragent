@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed - CLI help and argument parsing
+
+- `ragent research create <name> <topic> --depth deep` now parses `--depth`
+  as a flag; flags after the topic were previously folded into the topic
+  text, and an unknown flag there is now an error (#24). The usage line and
+  help name the real flags, `--from-urls` and `--from-files`.
+- `ragent memory --help` no longer advertises `export` and `import`
+  subcommands that do not exist (#25).
 ### Fixed - slash commands advertise only forms they handle
 
 - `/status` now has a handler: it lists the status-line history newest first,

@@ -149,7 +149,7 @@ enum Commands {
         command: DbCommands,
     },
 
-    /// Manage persistent memory (export, import, list)
+    /// Manage persistent memory (list)
     Memory {
         #[command(subcommand)]
         command: MemoryCommands,
