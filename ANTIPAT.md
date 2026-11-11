@@ -8,9 +8,9 @@ verified); M7 COMPLETE (M7.1-M7.9 implemented and verified); M1 open
 Created: session on top of `6cf0b60f` (MS-04) + uncommitted MS-05 work
 Scope: all 17 workspace crates plus the root `ragent` binary package
 Method: 17 parallel `explore` audit agents, one per crate, each verifying every
-finding against the actual source text. The per-crate evidence reports are kept at
-`target/temp/antipat/<crate>.md` and are the normative reference for every numbered
-finding below. Raw command output, exact `file:line` citations and per-finding
+finding against the actual source text. The per-crate evidence reports were written
+to `target/temp/antipat/<crate>.md`, an ignored scratch path; they were never
+committed and no longer exist, so the findings below are the surviving record. Raw command output, exact `file:line` citations and per-finding
 remediation text live in those files; this plan is the consolidated roll-up.
 
 Priority mapping (from AGENTS.md): 0 = critical (security, data loss, broken
@@ -501,7 +501,8 @@ now has a passing `--self-test`.
 
 ## 4. Evidence index
 
-Per-crate audit reports (normative, full `file:line` evidence):
+Per-crate audit reports as written at audit time (ignored scratch under
+`target/temp/`; never committed and no longer present):
 
 | Report                                           | Crate                 | Findings                     | Lines |
 | ------------------------------------------------ | --------------------- | ---------------------------- | ----- |
@@ -516,7 +517,7 @@ Per-crate audit reports (normative, full `file:line` evidence):
 | `target/temp/antipat/ragent-server.md`         | ragent-server         | 3 HIGH, 10 MEDIUM, 10 LOW    | 426   |
 | `target/temp/antipat/ragent-specs.md`          | ragent-specs          | 1 HIGH, 7 MEDIUM, 4 LOW      | 292   |
 | `target/temp/antipat/ragent-storage.md`        | ragent-storage        | 5 HIGH, 12 MEDIUM, misc LOW  | 404   |
-| `target/temp/antipat/ragent-team.md`           | ragent-team           | 1 HIGH, 3 MEDIUM, misc LOW   | 303   |
+| `target/temp/antipat/ragent-team.md`           | ragent-team (crate deleted in M7.8) | 1 HIGH, 3 MEDIUM, misc LOW   | 303   |
 | `target/temp/antipat/ragent-telemetry.md`      | ragent-telemetry      | 5 HIGH, 8 MEDIUM, 4 LOW      | 176   |
 | `target/temp/antipat/ragent-tools-core.md`     | ragent-tools-core     | 3 HIGH, 11 MEDIUM, 8 LOW     | 295   |
 | `target/temp/antipat/ragent-tools-extended.md` | ragent-tools-extended | 5 HIGH, 9 MEDIUM, 8 LOW      | 294   |

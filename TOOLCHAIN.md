@@ -35,7 +35,7 @@ ship inside the rustup toolchain and are listed for completeness.
 | `cargo-cache` | Inspect / clean the cargo caches |
 | `cargo-sweep` | Reap stale target-dir artifacts (target-dir housekeeping, item 4) |
 | `cargo-deb` | Build Debian packages for ragent releases |
-| `cargo-rpm` | Build RPM packages for ragent releases |
+| `cargo-generate-rpm` | Build RPM packages for ragent releases |
 | `cargo-release` | Release/version flow automation |
 | `cargo-set-version` | Bump workspace versions in lockstep |
 | `cargo-install-update` | Keep installed plugins up to date |

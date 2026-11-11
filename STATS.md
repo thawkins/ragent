@@ -123,7 +123,7 @@
 | Metric | Value |
 |---|---|
 | Total Rust lines | 773,062 (765,039 in `crates/` + 8,023 in root `src/`/`tests/`) |
-| Total Rust files | 3,272 (3,250 under `crates/` + 22 in root `src/`/`tests/`) |
+| Total Rust files | 2,021 (1,999 under `crates/` + 22 in root `src/`/`tests/`) |
 | Tests defined | 15,774 (`#[test]` / `#[tokio::test]` attributes, including `flavor = ...` variants, across `crates/`, `src/`, and root `tests/`) |
 | Test files | 1,253 under crate `tests/` trees (1,089 consolidated `test_*.rs` + 130 `tests/inline/*` modules, 19 `tests/all.rs` roots and the 15 shared support/prelude helpers); the 19 `tests/all.rs` roots are the per-crate targets |
 | Test binaries | 38 (19 consolidated `[[test]] name = "all"` integration targets - one per crate, 18 crate lib targets and the 1 root bin) |

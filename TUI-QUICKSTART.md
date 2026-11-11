@@ -1132,8 +1132,8 @@ middle, and status information at the top. You can start typing immediately.
 
 | Flag                                   | What it does                                         |
 | -------------------------------------- | ---------------------------------------------------- |
-| `--model ollamacloud/kimi-k2.7-code` | Start with a specific model                          |
-| `--agent coder`                      | Start with the`coder` agent profile                |
+| `--model ollama_cloud/kimi-k2.7-code` | Start with a specific model                          |
+| `--agent rust-coder`                 | Start with the `rust-coder` agent profile          |
 | `--yes`                              | Auto-approve all permission prompts (YOLO-style)     |
 | `--no-tui`                           | Skip the TUI and run a single prompt in the terminal |
 | `--log`                              | Open the TUI with the log panel already visible      |
@@ -1141,13 +1141,13 @@ middle, and status information at the top. You can start typing immediately.
 ### Example
 
 ```bash
-ragent --model ollamacloud/kimi-k2.7-code --agent coder
+ragent --model ollama_cloud/kimi-k2.7-code --agent rust-coder
 ```
 
 You can also open the provider setup directly from the input box:
 
 ```text
-/provider ollamacloud
+/provider
 ```
 
 ---
@@ -1262,7 +1262,7 @@ model and tier, e.g. `Model Router (claude-sonnet-4-20250514) / complex`.
 The status bar will update to something like:
 
 ```text
-ollamacloud/kimi-k2.7-code ●
+ollama_cloud/kimi-k2.7-code ●
 ```
 
 Other providers work the same way; only the available model list and the
@@ -1282,10 +1282,9 @@ ragent supports these providers out of the box:
 | Ollama                  | none (local)                 | Local or remote Ollama server        |
 | Ollama Cloud            | `OLLAMA_API_KEY`           | Managed Ollama endpoints             |
 | Azure AI Foundry        | `AZURE_AI_FOUNDRY_API_KEY` | Microsoft Azure-hosted models        |
-| Azure Resource          | `AZURE_RESOURCE_API_KEY`   | File-based Azure deployment config   |
+| Azure Resource          | per-entry `api_key_env`    | File-based Azure deployment config   |
 | Amazon Bedrock          | AWS credentials              | AWS SigV4 signing                    |
 | Generic OpenAI          | `GENERIC_OPENAI_API_KEY`   | Any OpenAI-compatible endpoint       |
-| Microsoft Foundry Local | local endpoint               | Local Windows AI backend             |
 | XAI                     | `XAI_API_KEY`              | xAI / Grok models                    |
 | Model Router            | cluster of providers         | Virtual provider that routes prompts |
 

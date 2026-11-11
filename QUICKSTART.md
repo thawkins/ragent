@@ -864,8 +864,8 @@ For full details and advanced workflows (plan approval, hooks, graceful shutdown
 
 - [`docs/userdocs/TEAMS.md`](docs/userdocs/TEAMS.md)
 - [`docs/howtos/teams.md`](docs/howtos/teams.md)
-- [`.ragent/blueprints/teams/`](.ragent/blueprints/teams/) (`code-review`,
-  `parallel-feature`, `debate`)
+- [`docs/howtos/slashcommands/blueprints.md`](docs/howtos/slashcommands/blueprints.md)
+  (`/blueprints list` shows the team blueprints installed locally)
 
 ---
 
@@ -935,7 +935,7 @@ activity log, memory extraction, hooks, and compaction always keep seeing the
 raw JSON. See SPEC.md section 5.6 for details.
 
 MCP servers can provide additional tools that are automatically discovered and
-made available to the agent (see [SPEC.md §3.11](SPEC.md#311-mcp-client)). MCP
+made available to the agent (see [SPEC.md §19](SPEC.md#19-mcp-integration-model-context-protocol)). MCP
 tools use the official `rmcp` SDK and support both stdio and HTTP transports.
 
 Use **`/mcp config`** to see where ragent looks for MCP server definitions — the
@@ -1321,8 +1321,8 @@ Control background agent limits in `ragent.json`:
 ```jsonc
 {
   "experimental": {
-    "maxBackgroundAgents": 4,        // Max concurrent background tasks (default: 4)
-    "backgroundAgentTimeout": 3600   // Timeout in seconds (default: 1 hour)
+    "max_background_agents": 8,       // Max concurrent background tasks (default: 8)
+    "background_agent_timeout": 3600  // Timeout in seconds (default: 1 hour)
   }
 }
 ```
@@ -1349,11 +1349,11 @@ ragent session list
 # Resume a previous session (loads message history into the TUI)
 ragent session resume <session-id>
 
-# Export a session to JSON
-ragent session export <session-id> > session.json
+# Export a session to a portable archive (default: session_archive.tar.gz)
+ragent session export-archive <session-id> -o session_archive.tar.gz
 
-# Import a session from JSON (creates a new session with re-parented messages)
-ragent session import session.json
+# Import a session from an archive written by export-archive
+ragent session import session_archive.tar.gz
 ```
 
 ### Pruning an old transcript
@@ -1406,8 +1406,8 @@ Run ragent as a headless API server for IDE integrations or remote use:
 # Start the server (prints a bearer token for auth)
 ragent serve
 
-# With a custom port
-ragent serve --port 8080
+# With a custom bind address (default 127.0.0.1:3000)
+ragent serve --addr 127.0.0.1:8080
 ```
 
 ### API Endpoints
@@ -1484,7 +1484,7 @@ disabled by default** — build with `--features acp-server` and set
 {
   "acp": {
     "server_enabled": true,
-    "server_agent": "coder",
+    "server_agent": "general",
     "agents": { "claude": { "id": "claude", "command": "claude-code-acp" } }
   }
 }
@@ -1571,7 +1571,6 @@ it unauthenticated.
 | `HUGGING_FACE_HUB_TOKEN` | HuggingFace API token (legacy name)          | —                          |
 | `RAGENT_CONFIG`        | Path to a config file                          | —                          |
 | `RAGENT_CONFIG_CONTENT`| Inline JSON config                             | —                          |
-| `RUST_LOG`             | Log level filter (e.g. `info`, `debug`)        | `info`                     |
 
 ---
 
@@ -1750,17 +1749,17 @@ specific agent instead of the default explore agent.
 Or from the CLI:
 
 ```bash
+# Flags go BEFORE the name: everything after the name is taken as topic text.
 ragent research create rust-async "async/await idioms in stable Rust"
-ragent research create rust-async "async/await idioms" --depth deep --format executive-summary
-ragent research create rust-async --from-url https://example.com/article
+ragent research create --depth deep --format executive-summary rust-async "async/await idioms"
+ragent research create --from-urls https://example.com/article rust-async
 ragent research continue rust-async "focus on io_uring integration"
-ragent research create fireworks "Compare Fireworks AI, Together.ai and Groq" --mode competitive   # --format comparison-table is implied
-ragent research create rust-async "async/await idioms" --mode supervisor --summarization-model ollama:phi4 --max-concurrent-research-units 3
-ragent research create rust-async "async/await idioms" --evaluate
-ragent research create brief "Vector databases" --max-concepts 3 --max-findings 10
-ragent research create local-only "Project error handling" --use-local --papers
-ragent research create vendors "Managed vector db vendors" --url-cloak
-ragent research create llm-pricing "Current frontier model pricing" --age 30d
+ragent research create --mode competitive fireworks "Compare Fireworks AI, Together.ai and Groq"   # --format comparison-table is implied
+ragent research create --mode supervisor --max-concurrent-research-units 3 rust-async "async/await idioms"
+ragent research create --max-concepts 3 --max-findings 10 brief "Vector databases"
+ragent research create --use-local --papers local-only "Project error handling"
+ragent research create --url-cloak vendors "Managed vector db vendors"
+ragent research create --max-age 30d llm-pricing "Current frontier model pricing"
 ragent research list          # aligned table; add --json for machine-readable output
 ragent research open rust-async
 ragent research search "async"
@@ -1822,9 +1821,10 @@ source tensions). The `--mode` flag selects the execution strategy:
 researchers coordinated by a lead supervisor), or `competitive`
 (supervisor graph specialised for comparing entities). In `supervisor`
 and `competitive` modes, `--max-concurrent-research-units N` caps the
-number of parallel researchers (default 5). `--summarization-model`
+number of parallel researchers (default 5). `--summarization-model` (TUI
+`/research create` only)
 selects a lightweight model for per-page webpage summaries, and
-`--evaluate` appends a deterministic quality scorecard to the final report.
+`--evaluate` (TUI `/research create` only) appends a deterministic quality scorecard to the final report.
 
 The report is written to a **dated** file, `research/<name>/RESEARCH-<YYYY-MM-DD>.md`,
 alongside the QA companion `CORPA-<YYYY-MM-DD>.md`. The primary report is named
@@ -1844,7 +1844,7 @@ writing a fresh dated report and companion while the earlier run's report
 stays on disk. The original invocation is preserved on
 `research continue` re-runs.
 
-See [`docs/research.md`](docs/research.md) for the full workflow guide.
+See [`docs/howtos/research.md`](docs/howtos/research.md) for the full workflow guide.
 
 ### Spec from an Architecture Document (govcreate)
 
@@ -2306,7 +2306,7 @@ each dispatch target names the environment variable holding its credential
 → Add `"permission": [{"permission": "file:read", "action": "allow"}]` to your config, or use `--yes`.
 
 **See debug output**
-→ Run with `RUST_LOG=debug ragent run "..."` for verbose logging.
+→ Run with `ragent --log-level debug run "..."` for verbose logging.
 
 ---
 
@@ -2318,15 +2318,10 @@ The `/research create` synthesis prompt accepts optional `ragent.json`
 keys under a top-level `research` object (see SPEC.md → "Research
 Configuration" for the full schema):
 
-- `research.few_shot` (bool, default `false`) — append up to two exemplar
-  findings to the synthesis prompt so the model calibrates the required label
-  structure, `[#N]` citations, and **Sources Cited / Date Spread** paragraph.
-- `research.analysis_persona` (string, optional) — override the default
-  `"You are a careful research analyst..."` system persona to tailor voice,
-  audience, and domain framing.
 - `research.models.research_model` / `compression_model` /
-  `final_report_model` / `summarization_model` (string, optional) —
-  default model overrides for each research phase.
+  `final_report_model` (string, optional) — default model overrides for each
+  research phase. (The per-page summarization model has no config key; pass
+  `--summarization-model` to the TUI `/research create` command.)
 - `research.supervisor.max_concurrent_research_units` (integer, default 5)
   — cap parallel sub-topic researchers when using `supervisor` or
   `competitive` modes.
@@ -2336,10 +2331,7 @@ Configuration" for the full schema):
 ```jsonc
 {
   "research": {
-    "few_shot": true,
-    "analysis_persona": "You are a senior research analyst for a venture-capital audience.",
     "models": {
-      "summarization_model": "ollama:phi4",
       "compression_model": "ollama:phi4",
       "research_model": "openrouter/anthropic/claude-sonnet-4-20250514",
       "final_report_model": "openrouter/anthropic/claude-sonnet-4-20250514"
