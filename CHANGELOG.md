@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed - slash commands advertise only forms they handle
+
+- `/status` now has a handler: it lists the status-line history newest first,
+  and `/status clear` empties it. It previously answered "Unknown command"
+  (#26).
+- `/router` help, description, autocomplete and argument hint no longer offer
+  `stats`, `stats reset` or `tier <name> set|add|remove`, which have no
+  handler (#27).
+- `/team` description no longer lists `open`, and its autocomplete now offers
+  the subcommands the dispatcher handles instead of `open`, `list` and
+  `spawn` (#28).
+- `/i18n help` now says bare `/i18n` shows the status, matching the
+  dispatcher (#43).
+
 ### Security
 
 - Bump `rusqlite` 0.40 -> 0.41 (pulls `libsqlite3-sys` 0.39.1, RUSTSEC-2026-0459)

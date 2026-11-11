@@ -809,12 +809,6 @@ Check status any time:
 /team tasks
 ```
 
-Open an existing team:
-
-```text
-/team open feature-squad
-```
-
 ### Spawn teammates (tool-driven)
 
 Use `team_spawn` with a role-specific prompt:

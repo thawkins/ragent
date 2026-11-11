@@ -979,7 +979,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "team",
-        description: "Team management (/team help|status|show [name]|create/open/delete <name>|close|message <id> <text>|tasks|clear|cleanup)",
+        description: "Team management (/team help|status|show [name]|create/delete <name>|close|message <id> <text>|tasks|clear|cleanup)",
     },
     SlashCommandDef {
         trigger: "teams",
@@ -1099,7 +1099,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "router",
-        description: "Model router management: /router on|off|status|tiers|weights|boundaries|test|stats|reload|help",
+        description: "Model router management: /router on|off|status|tiers|weights|boundaries|test|reload|help",
     },
     SlashCommandDef {
         trigger: "startup",
