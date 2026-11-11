@@ -2,9 +2,8 @@
 //!
 //! The research HTTP routes operate on a vault root supplied through
 //! [`ragent_server::routes::AppState::research_root`]. Tests point that root at
-//! `target/temp/` so a test run never rewrites the checked-in
-//! `crates/ragent-server/research/` tree (`INDEX.md`, `.index.json`) and never
-//! leaves per-run item directories behind in the repository.
+//! `target/temp/` so a test run never writes a `research/` tree (`INDEX.md`,
+//! `.index.json`, per-run item directories) into the repository.
 //!
 //! This module is declared once in `tests/all.rs`, so every child test module
 //! reaches it as `crate::research_sandbox::...`.

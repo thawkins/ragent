@@ -1,6 +1,6 @@
 //! Criterion benchmarks for markdown rendering and ASCII table normalization.
 //!
-//! Covers COMPLIANCE.md Section 5.B and 5.D:
+//! Covers:
 //! - `render_markdown_to_ascii` with varying input sizes (1 KB, 10 KB, 100 KB)
 //! - `normalize_ascii_tables` with varying table sizes
 

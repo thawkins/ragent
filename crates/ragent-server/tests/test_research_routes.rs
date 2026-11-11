@@ -4,7 +4,7 @@
 //! requests. The vault root comes from `AppState::research_root`, which here
 //! is the git-ignored `target/temp/ragent-server-research/research` sandbox
 //! (see [`crate::research_sandbox`]) - never `cwd/research` - so a test run
-//! cannot rewrite the checked-in `crates/ragent-server/research/` tree.
+//! cannot write a `research/` tree into the repository.
 //! Items still get unique `test-` prefixed names and are removed after each
 //! test, and filesystem-touching tests stay serialized so concurrent
 //! INDEX.md writes cannot race.

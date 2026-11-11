@@ -256,7 +256,7 @@ success or blank data on a path that reaches the user". Before M1 can close:
 
 ## 12. Verification protocol (every task)
 
-1. `cargo fmt` after every `.rs` edit (mandatory — see AGENTS-RUST.md).
+1. `cargo fmt` after every `.rs` edit (mandatory — see AGENTS-LANGUAGE.md).
 2. `cargo check -p <crate>` then `cargo clippy -p <crate> -- -D warnings`.
 3. `cargo test -p <crate>` (the task's acceptance test first, then the crate suite).
 4. For panic/UTF-8 tasks: the test **must** use non-ASCII multibyte input.

@@ -616,7 +616,7 @@ pub(crate) fn parse_anthropic_rate_limit_headers(
     let tok_limit = header_u64("anthropic-ratelimit-tokens-limit");
     let tok_remaining = header_u64("anthropic-ratelimit-tokens-remaining");
 
-    // NOTE: intentional duplication - see DUPPLAN.md Milestone J.
+    // NOTE: intentional duplication, reviewed and kept; do not merge.
     // Two distinct streaming closures with different capture sets.
     let requests_used_pct = req_limit.zip(req_remaining).map(|(limit, remaining)| {
         if limit == 0 {

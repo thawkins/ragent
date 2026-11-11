@@ -553,9 +553,8 @@ fn detect_markdown_sections(lines: &[&str]) -> Vec<(usize, String)> {
     markers
 }
 
-// NOTE: intentional duplication with `detect_go_sections` - see DUPPLAN.md
-// Milestone J.  Same shape, different language grammar; generalising would
-// obscure intent.
+// NOTE: intentional duplication with `detect_go_sections`. Same shape,
+// different language grammar; generalising would obscure intent.
 fn detect_python_sections(lines: &[&str]) -> Vec<(usize, String)> {
     let mut markers = Vec::new();
     for (i, line) in lines.iter().enumerate() {

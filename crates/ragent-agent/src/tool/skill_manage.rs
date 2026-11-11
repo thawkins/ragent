@@ -1,6 +1,6 @@
 //! The `Skill` tool (`skill_manage` module) - runtime management of the skill registry.
 //!
-//! Implements JCODEPLAN M8 T-071: lets the agent inspect, load, reload, and
+//! Implements jcodeport spec M8 T-071: lets the agent inspect, load, reload, and
 //! invoke skills on demand without restarting the session. Works against the
 //! canonical [`crate::skill::SkillRegistry`], reusing its scope-precedence
 //! rules (bundled -> enterprise -> OpenSkills -> personal -> project).

@@ -185,7 +185,7 @@ links.
   | M2.13 | `percent.rs` infallible `.expect` documented `no-panic-ok`; `vcs_provider.rs`/`gitlab/client.rs` `#[path]` hooks confirmed external; `github/auth.rs`/`gitlab/auth.rs` `//!` docblocks verified present |
   | M2.14 | `sanitise_fts_query` -> `sanitize_fts_query` (3 sites) |
   | M2.15 | 4 `trigger_runtime.as_ref().unwrap()` + `active_spec.take().unwrap()` + `sid_opt.unwrap()` + `name.expect(..)` in `app/slash.rs` replaced with `let Some(..) = .. else`/`unwrap_or_else`; 4 `LazyLock` regex `.unwrap()` sites documented `// INVARIANT`; the three production-path tests that asserted the old emoji labels realigned; `is_agent_notice` now matches the plain-text `Agent Notice` label after the M1 `[notice]` marker |
-  | M2.16 | the `println!`/`eprintln!` policy is a documented CLI-presentation exception added to `AGENTS-RUST.md`; the root `src/` inline-test hooks are external and now scanned by the gate |
+  | M2.16 | the `println!`/`eprintln!` policy is a documented CLI-presentation exception added to `AGENTS-LANGUAGE.md`; the root `src/` inline-test hooks are external and now scanned by the gate |
   | M2.17 | `scripts/check-inline-tests.sh` rewritten over a new `scripts/check_inline_tests.py` scanner (covers `crates/*/src` **and** root `src/`, shrink-only baseline 0, `--self-test` proves an inline body fails and a `#[path]` hook passes); wired into `ci.yml` (self-test + check) and `pre-flight.sh` |
 
   **Verification:** `cargo fmt --all -- --check` clean; `cargo check --workspace

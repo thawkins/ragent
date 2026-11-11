@@ -136,3 +136,6 @@ node_modules/
 
 # Regenerable function-length analysis scratch (tools/analyze_function_lengths.py)
 .func-count/
+
+# Output of scripts/gen-spec-pdf.sh
+/SPEC.pdf

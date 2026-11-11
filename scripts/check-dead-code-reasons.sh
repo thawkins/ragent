@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI guard: every `#[allow(dead_code)]` attribute in `src/` must have an
-# explanatory comment nearby. This prevents regression of RMPLAN.md Milestone 7
+# explanatory comment nearby. This prevents regression of docs/RMPLAN.md Milestone 7
 # by forcing authors to document why dead-code lints are suppressed.
 #
 # Usage: bash scripts/check-dead-code-reasons.sh

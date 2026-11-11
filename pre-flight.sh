@@ -99,7 +99,7 @@ print_step "Inline test guard..."
 bash "$(dirname "$0")/scripts/check-inline-tests.sh" || print_failure "Inline test guard failed"
 bash "$(dirname "$0")/scripts/check-inline-tests.sh" --self-test || print_failure "Inline test guard self-test failed"
 
-# Dead-code reason guard (RMPLAN.md Milestone 7 / T7.2)
+# Dead-code reason guard (docs/RMPLAN.md Milestone 7 / T7.2)
 print_step "Dead-code reason guard..."
 bash "$(dirname "$0")/scripts/check-dead-code-reasons.sh" || print_failure "Dead-code reason guard failed"
 
@@ -120,7 +120,7 @@ bash "$(dirname "$0")/scripts/check-security-unwraps.sh" || print_failure "Secur
 print_step "Shared-guard duplication guard..."
 bash "$(dirname "$0")/scripts/check-shared-guards.sh" || print_failure "Shared-guard duplication guard failed"
 
-# VCS tool duplication guard (DUPPLAN.md Milestone A)
+# VCS tool duplication guard
 print_step "VCS tool duplication guard..."
 bash "$(dirname "$0")/scripts/check-vcs-duplication.sh" || print_failure "VCS tool duplication guard failed"
 

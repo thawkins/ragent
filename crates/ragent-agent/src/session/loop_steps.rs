@@ -480,7 +480,7 @@ impl SessionProcessor {
             })
             .await
         };
-        // JCODEPLAN M8 (T-070): surface active durable initiatives on every
+        // jcodeport spec M8 (T-070): surface active durable initiatives on every
         // turn so the agent stays aware of long-term goals across sessions.
         let initiatives_section = {
             let _scope = profiler.scope("prompt.build_initiatives_section");

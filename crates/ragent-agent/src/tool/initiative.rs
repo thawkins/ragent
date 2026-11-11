@@ -1,6 +1,6 @@
 //! `initiative` - Durable, cross-session goals with milestone tracking.
 //!
-//! Implements JCODEPLAN M8 T-070: long-lived initiatives that persist in
+//! Implements jcodeport spec M8 T-070: long-lived initiatives that persist in
 //! SQLite (via `ragent-storage`) and survive compaction, session restarts,
 //! and machine reboots. Unlike session-scoped `task_*` items,
 //! initiatives are scoped to the *project* (working directory) so any future
