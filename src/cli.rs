@@ -456,10 +456,10 @@ impl ragent_research::deck_progress::DeckProgress for CliDeckProgress {
 /// [`ragent_research::deck_pptx::DeckPptxOutcome::Unavailable`] and still writes
 /// the markdown deck. Connecting here is best-effort by design - a broken MCP
 /// server must never stop a user writing a deck.
-async fn connect_cli_deck_sink()
--> Option<std::sync::Arc<dyn ragent_research::deck_pptx::DeckSlideSink>> {
+async fn connect_cli_deck_sink(
+    config: &ragent_config::Config,
+) -> Option<std::sync::Arc<dyn ragent_research::deck_pptx::DeckSlideSink>> {
     let working_dir = std::env::current_dir().ok()?;
-    let config = ragent_agent::Config::load().ok()?;
     let configs = ragent_agent::plugin::plugin_mcp_servers(&working_dir, &config.mcp);
     if configs.is_empty() {
         return None;
@@ -544,8 +544,13 @@ fn parse_deck_elements_arg(list: Option<&str>) -> Result<Vec<ragent_research::de
 /// deck on its deterministic enrichment, so a caller without a registry still
 /// gets every other requirement's behaviour and the deck never fails for want
 /// of a provider.
+///
+/// `startup_config` is the configuration `main` loaded (from `--config <file>`
+/// when given). Every research path reads it rather than reloading the
+/// default `ragent.json` chain, so a `--config` file's settings apply.
 pub async fn handle_research_command_with_model(
     command: ResearchCommands,
+    startup_config: std::sync::Arc<ragent_config::Config>,
     active_model: Option<ragent_agent::agent::ModelRef>,
     storage: Option<std::sync::Arc<Storage>>,
     provider_registry: Option<std::sync::Arc<ragent_agent::provider::ProviderRegistry>>,
@@ -871,7 +876,7 @@ pub async fn handle_research_command_with_model(
                 from_urls.first().map(String::as_str),
                 &from_files,
             );
-            let config_arc = ragent_config::Config::load().ok().map(Arc::new);
+            let config_arc = Some(Arc::clone(&startup_config));
             let req = ragent_research::ResearchRunRequest {
                 name: name.clone(),
                 topic,
@@ -1047,7 +1052,7 @@ pub async fn handle_research_command_with_model(
                         ..Default::default()
                     };
                     // Apply `ragent.json` here too, as `create` does.
-                    let config_arc = ragent_config::Config::load().ok().map(Arc::new);
+                    let config_arc = Some(Arc::clone(&startup_config));
                     let config = ragent_research::build_session_config(&req, config_arc.as_deref());
                     let tool_registry = Arc::new(ragent_agent::tool::create_default_registry());
                     let event_bus = Arc::new(EventBus::new(256));
@@ -1121,7 +1126,7 @@ pub async fn handle_research_command_with_model(
             req.name = name.clone();
             req.title = Some(item.title.clone());
             cliprintln_err!("ragent-research: updating research/{name} - replaying: {recorded}");
-            let config_arc = ragent_config::Config::load().ok().map(Arc::new);
+            let config_arc = Some(Arc::clone(&startup_config));
             let config = ragent_research::build_session_config(&req, config_arc.as_deref());
             let tool_registry = Arc::new(ragent_agent::tool::create_default_registry());
             let event_bus = Arc::new(EventBus::new(256));
@@ -1308,7 +1313,7 @@ pub async fn handle_research_command_with_model(
             );
         }
         ResearchCliCommand::Config => {
-            let research = ragent_config::Config::load()?.research;
+            let research = &startup_config.research;
             cliprintln!("{}", serde_json::to_string_pretty(&research)?);
         }
         ResearchCliCommand::Resume { name } => {
@@ -1377,7 +1382,7 @@ pub async fn handle_research_command_with_model(
                 // servers, used, and torn down before the command returns. A
                 // connection failure is not an error: the markdown deck is the
                 // canonical artifact and is written either way.
-                let deck_sink = connect_cli_deck_sink().await;
+                let deck_sink = connect_cli_deck_sink(&startup_config).await;
                 let sink_ref = deck_sink
                     .as_ref()
                     .map(|sink| sink.as_ref() as &dyn ragent_research::deck_pptx::DeckSlideSink);
@@ -2098,10 +2103,17 @@ pub async fn handle_govcreate_command(
 ///   outlive, so use the server/TUI surface for a long-lived run).
 /// - `ragent automation help` (or a bare `ragent automation`) - usage.
 ///
+/// `config` is the configuration `main` loaded (from `--config <file>` when
+/// given); the automation block is read from it, never reloaded from disk.
+///
 /// # Errors
 ///
 /// Returns a usage error for a malformed invocation, or a storage error.
-pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storage>) -> Result<()> {
+pub fn handle_automation_command(
+    args: &[String],
+    storage: std::sync::Arc<Storage>,
+    config: &ragent_config::Config,
+) -> Result<()> {
     let joined = args.join(" ");
     let text = joined.trim();
     let mut parts = text.split_whitespace();
@@ -2149,7 +2161,6 @@ pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storag
                 cliprintln_err!("ragent automation run: missing automation id");
                 return Err(CliExit::usage().into());
             };
-            let config = ragent_config::Config::load().unwrap_or_default();
             let automation = config.automation_config();
             if !automation.is_enabled() {
                 cliprintln_err!("ragent automation run: the automation service is disabled");
@@ -2182,7 +2193,6 @@ pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storag
             Ok(())
         }
         "" | "list" => {
-            let config = ragent_config::Config::load().unwrap_or_default();
             let automation = config.automation_config();
             if automation.automations.is_empty() {
                 cliprintln!(

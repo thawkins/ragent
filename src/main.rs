@@ -1756,8 +1756,11 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
             }
         }
         Some(Commands::Research { command }) => {
+            // Use the startup config, so `--config <file>` settings apply.
+            let startup_config = Arc::new(config.read().await.clone());
             Box::pin(cli::handle_research_command_with_model(
                 *command,
+                startup_config,
                 resolved_agent.model.clone(),
                 Some(storage.clone()),
                 Some(provider_registry.clone()),
@@ -1815,7 +1818,8 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
             // Automation service CLI parity surface (spec `openhands` T-016;
             // FR-018). Lists automations and their run history, or enqueues a
             // manual run; the run-history reads are synchronous storage calls.
-            cli::handle_automation_command(&args, Arc::clone(&storage))?;
+            let config = config.read().await.clone();
+            cli::handle_automation_command(&args, Arc::clone(&storage), &config)?;
         }
         Some(Commands::Openapi { client }) => {
             // FR-007 parity surface: emit the OpenAPI 3.1 document, or the

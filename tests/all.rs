@@ -30,6 +30,9 @@ pub fn global_env_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+#[path = "test_cli_config_flag.rs"]
+mod test_cli_config_flag;
+
 #[path = "test_connectors_cli_command.rs"]
 mod test_connectors_cli_command;
 
