@@ -271,7 +271,13 @@ async fn status_transition_succeeds() {
 async fn status_unknown_status_is_rejected() {
     let (_g, _e, _t, mut app) = app_with_spec();
     app.execute_slash_command("/spec status sample bogus").await;
-    assert_eq!(app.status, "spec: unknown status 'bogus'");
+    // The message also lists the valid statuses (#40).
+    assert!(
+        app.status
+            .starts_with("spec: unknown status 'bogus' (valid: draft,"),
+        "{}",
+        app.status
+    );
     assert!(last_message(&app).contains("**Error:**"));
 }
 

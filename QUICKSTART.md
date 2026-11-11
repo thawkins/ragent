@@ -1855,6 +1855,16 @@ via the configured model (`--model provider/model`, else the stored
 passed. In the TUI use `/spec govcreate ...` with live staged progress and
 Escape to cancel. See `docs/howtos/spec.md` §5.19.
 
+### Spec status from the shell
+
+```bash
+ragent spec status 001-auth              # current status and allowed transitions
+ragent spec status 001-auth in_review    # move it on (recorded in the audit trail)
+```
+
+The same transition rules and SDD gates as `/spec status` apply; a refused
+transition exits 1. See `docs/howtos/spec.md` §5.10.
+
 ---
 
 ## 14. TUI Interaction

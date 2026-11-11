@@ -355,7 +355,7 @@ Statuses: `Proposed` → `Approved` → `In progress` → `Done`. Cars marked �
 | DOC-10 | Bare counts → properties | section 7 | tools/INDEX.md for tool counts (with command) | none | grep shows no bare count without its command | DOC-01, 02, 05 | Done (#41) |
 | DOC-11 | Gaps | section 8 items 1–10 | named in section 8 | none | new docs have an owner line; link checker | DOC-02 | Done (#42; `/i18n help` mismatch filed as #43) |
 | DOC-12 ⚑ | Structural moves | TOOLCHAIN, ANTIPAT, BUILDSTATS → `docs/` (or add them to the AGENTS.md root allowlist); FASTFILE → docs/plans; CHANGELOG heading normalisation (ROOT-60) | `docs/` | ANTIPAT is cited by 8 source comments (**source edit → split out**); buildstats skill path; release.yml regex | pin grep is empty after the move; release.yml extraction dry-run on the new headings | all above | Done (#46) |
-| SPEC-01 | Spec statuses | 46 complete-but-draft specs | `/spec` status transition (tool, not hand edit) | ragent-specs manager | `/spec` list shows the transitions with an audit trail | – | Blocked — needs a non-interactive `ragent spec status` (#40); transitions are tool-only, not hand edits |
+| SPEC-01 | Spec statuses | 46 complete-but-draft specs | `/spec` status transition (tool, not hand edit) | ragent-specs manager | `/spec` list shows the transitions with an audit trail | – | Approved — `ragent spec status <id> <status>` (#40) now scripts the transitions with the audit trail; run it per spec after checking its PLAN |
 | CODE-01…15 | Code defects | section 9 | separate tickets, not in this train | – | – | – | Filed: #24–#40 and #43 (CODE-01…17), outside this train |
 
 **Prevention decisions** (one per car):

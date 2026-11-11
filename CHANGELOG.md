@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added - `ragent spec status`
+
+- `ragent spec status <id> [<status>]` shows a spec's status and allowed
+  transitions, or moves it to a new status from the shell. It shares
+  `SpecManager::status_command` with the TUI `/spec status`, so the same
+  transition rules and SDD gates apply; the audit trail records the actor
+  `cli`, and a refused transition exits 1 (#40).
+- An unknown status name now lists the valid statuses (TUI and CLI).
+
 ### Fixed - research config keys apply to runs
 
 - `research.models.research_model` / `compression_model` /

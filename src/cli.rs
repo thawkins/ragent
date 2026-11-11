@@ -1804,6 +1804,73 @@ pub enum SpecCommands {
     /// author the spec, and scaffold the project
     #[command(name = "govcreate")]
     GovCreate(#[command(flatten)] GovCreateArgs),
+    /// Show a spec's status and allowed transitions, or move it to a new
+    /// status (recorded in the spec's audit trail; the configured SDD gates
+    /// apply, as for `/spec status` in the TUI)
+    Status {
+        /// Spec identifier, e.g. `001-auth`
+        #[arg(value_name = "SPEC_ID")]
+        spec_id: String,
+        /// New status: draft, in_review, approved, in_progress, implemented,
+        /// verified or archived; omit to show the current status
+        #[arg(value_name = "STATUS")]
+        status: Option<String>,
+    },
+}
+
+/// Run `ragent spec status <id> [<status>]` against `<cwd>/specs`.
+///
+/// Prints the current status and allowed transitions, or performs the
+/// transition with the actor `cli`. The SDD gates come from `sdd`, the
+/// startup configuration (honouring `--config`), as for the TUI.
+///
+/// # Errors
+///
+/// Returns a [`CliExit::failure`] after printing the reason when the spec id
+/// is invalid, the spec cannot be read, the status is unknown, or the
+/// transition is refused.
+pub async fn handle_spec_status_command(
+    cwd: &std::path::Path,
+    spec_id: &str,
+    new_status: Option<&str>,
+    sdd: &ragent_config::SddConfig,
+) -> anyhow::Result<()> {
+    let flags = ragent_specs::SddFlags::from_bools(
+        sdd.clarification_markers,
+        sdd.quality_checklists,
+        sdd.consistency_checks,
+        sdd.phase_minus_one_gates,
+        sdd.constitution,
+        sdd.feedback_loop,
+    );
+    let mgr = ragent_specs::SpecManager::new(cwd.join("specs"));
+    match mgr.status_command(spec_id, new_status, "cli", &flags).await {
+        Ok(ragent_specs::StatusOutcome::Current {
+            id,
+            status,
+            allowed,
+        }) => {
+            let allowed: Vec<&str> = allowed.iter().map(|s| s.as_str()).collect();
+            cliprintln!("{id}: {}", status.as_str());
+            cliprintln!(
+                "allowed transitions: {}",
+                if allowed.is_empty() {
+                    "none".to_string()
+                } else {
+                    allowed.join(", ")
+                }
+            );
+            Ok(())
+        }
+        Ok(ragent_specs::StatusOutcome::Transitioned { id, from, to }) => {
+            cliprintln!("{id}: {} -> {}", from.as_str(), to.as_str());
+            Ok(())
+        }
+        Err(e) => {
+            cliprintln_err!("ragent spec status: {e}");
+            Err(CliExit::failure().into())
+        }
+    }
 }
 
 /// Production [`GovCreateStages`] wiring for the CLI parity surface.

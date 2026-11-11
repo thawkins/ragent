@@ -398,6 +398,18 @@ the full transition graph.
 /spec status websocket approved           # transition to approved
 ```
 
+The same command runs from the shell, for scripts and batch transitions:
+
+```bash
+ragent spec status websocket              # prints "websocket: draft" and the allowed transitions
+ragent spec status websocket in_review    # prints "websocket: draft -> in_review"
+```
+
+It uses the same code and SDD gates as the TUI command, records `cli` as the
+actor in the spec's audit trail, prints results to stdout, and exits 1 when the
+spec ID is invalid, the spec cannot be read, the status is unknown, or the
+transition is refused.
+
 ### 5.11 `/spec task <spec-id> [<task-id>] [<new-status>]`
 
 List tasks, show a single task, or update a task's status.

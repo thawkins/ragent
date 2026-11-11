@@ -36,6 +36,8 @@ mod test_spec_io;
 mod test_spec_reverse_flags;
 #[path = "test_spec_roundtrip.rs"]
 mod test_spec_roundtrip;
+#[path = "test_spec_status_command.rs"]
+mod test_spec_status_command;
 #[path = "test_t017_govcreate_parser.rs"]
 mod test_t017_govcreate_parser;
 #[path = "test_templates.rs"]
