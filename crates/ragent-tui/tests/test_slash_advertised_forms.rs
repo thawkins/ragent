@@ -99,3 +99,21 @@ async fn test_i18n_help_describes_bare_command_as_status() {
         "help must match the dispatcher: {text}"
     );
 }
+
+/// The `commands_info` catalog serialises its own subcommand lists; they must
+/// match the TUI autocomplete for the commands fixed here (#27, #28).
+#[test]
+fn test_catalog_subcommands_match_tui_suggestions() {
+    let app = make_app();
+    for trigger in ["router", "team", "teams"] {
+        let entry = ragent_agent::tool::command_catalog::COMMAND_CATALOG
+            .iter()
+            .find(|e| e.trigger == trigger)
+            .expect("catalog entry");
+        let mut catalog: Vec<String> = entry.subcommands.iter().map(|s| (*s).to_string()).collect();
+        let mut tui = app.get_command_suggestions(trigger);
+        catalog.sort();
+        tui.sort();
+        assert_eq!(catalog, tui, "/{trigger} catalog vs TUI suggestions");
+    }
+}

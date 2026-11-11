@@ -1103,7 +1103,6 @@ impl App {
                     "boundaries".to_string(),
                     "test".to_string(),
                     "reload".to_string(),
-                    "help".to_string(),
                 ]
             }
             "config" => {
