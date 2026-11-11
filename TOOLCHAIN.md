@@ -1,8 +1,9 @@
 # Rust Toolchain Configuration Review
 
 Review date: 2026-09-06
-Scope: dev/debug rebuild times for the ragent workspace (963 crates in `Cargo.lock`,
-16 workspace crates, target dir currently 482 GB).
+Scope: dev/debug rebuild times for the ragent workspace (every crate in
+`Cargo.lock` and every workspace crate under `crates/`; target dir 482 GB at the
+review date).
 
 ## Current Setup (what is in place)
 
@@ -126,7 +127,7 @@ nightly updating daily, that is potentially a full rebuild storm every day.
 - **Important**: `RUSTUP_TOOLCHAIN` (if still exported in the shell
   environment) **overrides** `rust-toolchain.toml`. Remove the env var for the
   pin to take effect.
-- Note: 18 workspace crates became 16 after the `ragent-prompt_opt` removal.
+- Note: the `ragent-prompt_opt` crate has since been removed from the workspace.
 
 ### 2. Move `[profile.dev]` from `~/.cargo/config.toml` into the workspace `Cargo.toml`
 

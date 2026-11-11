@@ -6,8 +6,8 @@ verified); M4 COMPLETE (M4.1-M4.13 implemented and verified); M5 COMPLETE
 (M5.1-M5.13 implemented and verified); M6 COMPLETE (M6.1-M6.10 implemented and
 verified); M7 COMPLETE (M7.1-M7.9 implemented and verified); M1 open
 Created: session on top of `6cf0b60f` (MS-04) + uncommitted MS-05 work
-Scope: all 17 workspace crates plus the root `ragent` binary package
-Method: 17 parallel `explore` audit agents, one per crate, each verifying every
+Scope: every workspace crate under `crates/` at the time plus the root `ragent` binary package
+Method: one parallel `explore` audit agent per crate, each verifying every
 finding against the actual source text. The per-crate evidence reports were written
 to `target/temp/antipat/<crate>.md`, an ignored scratch path; they were never
 committed and no longer exist, so the findings below are the surviving record. Raw command output, exact `file:line` citations and per-finding
@@ -21,7 +21,7 @@ builds), 1 = high, 2 = medium (default), 3 = low, 4 = backlog.
 ## 0. Executive summary
 
 Every crate in the workspace compiles clean: `cargo clippy --all-targets` reports
-**0 warnings in all 17 crates**, `cargo fmt --check` is clean, and there is no
+**0 warnings in every crate**, `cargo fmt --check` is clean, and there is no
 `unsafe` outside the one approved site (`kill_process_group` in
 `ragent-tools-core/src/bash.rs`). The debt is concentrated in seven recurring
 classes, each of which appears in most crates:
@@ -457,7 +457,7 @@ ignore list. All ten guard scripts pass, each with `--self-test`:
    can lose data or escape the workspace today. Estimate: 2-3 days, most of it
    verification rather than code.
 2. **M1.16 first within M1** - add the non-ASCII gate before doing the sweep, so the
-   sweep cannot regress. The sweep itself is mechanical but touches ~16 crates.
+   sweep cannot regress. The sweep itself is mechanical but touches most crates.
 3. **M7.7 and M7.9** - repair or delete the three misleading guards before relying
    on any of them for M0 verification. (Done in M7.)
 4. **M4** - silent error suppression, because it is the class most likely to hide a
@@ -526,7 +526,7 @@ Per-crate audit reports as written at audit time (ignored scratch under
 | `target/temp/antipat/ragent-types.md`          | ragent-types          | 3 HIGH, 6 MEDIUM, 9 LOW      | 329   |
 
 Verified-clean baselines recorded by the auditors (do not re-litigate):
-zero clippy warnings in all 17 crates; zero production `println!` except root
+zero clippy warnings in every crate; zero production `println!` except root
 `src/` (R-05); zero production wildcard imports except root (R-04); one approved
 `unsafe`; all `cargo fmt --check` clean; no hardcoded credentials found in any
 crate.

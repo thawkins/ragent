@@ -16,9 +16,10 @@ ragent offers a rich set of features designed to enhance developer productivity:
 - Automatic model compatibility handling and switching
 
 ### Comprehensive Tool System
-- **Built-in Tools (8)**: File operations (read/Write/create/Edit), Bash execution, Grep, Glob, directory listing, and interactive questions
-- **Extended Tools (15)**: Advanced editing (multiedit, patch), web integration (webfetch, websearch), planning (plan delegation), task management (todo), document processing (PDF), and file deletion
-- **Sub-Agent Tools (3)**: Background task management with new_agent, cancel_agent, and list_agents
+- File operations, shell execution, search and code-index tools
+- Web fetch/search, planning, task management, document (PDF/Office) and VCS (Git, GitHub, GitLab) tools
+- Sub-agent and team tools for background and parallel work
+- See [the tools reference](../howtos/tools/INDEX.md) for every category and the command that lists the live registry
 
 ### Terminal User Interface
 - Full-screen ratatui interface with intuitive navigation
@@ -71,16 +72,13 @@ Whether used interactively through the terminal UI or programmatically via the H
 
 ## Document Structure and Navigation
 
-This documentation is organized to support both quick reference and comprehensive learning:
+The documentation lives in these places:
 
-1. **Getting Started** - Installation, configuration, and basic usage
-2. **Core Concepts** - Understanding agents, sessions, tools, and permissions
-3. **Advanced Features** - Teams, background agents, prompt optimization
-4. **API Reference** - Detailed documentation for HTTP endpoints and tool usage
-5. **Guides and Tutorials** - Step-by-step examples for common scenarios
-6. **Troubleshooting** - Solutions to common issues and error messages
-7. **Architecture** - Deep dive into ragent's internal design and components
-
-Each section builds upon previous concepts while remaining accessible as standalone reference material. Code examples throughout illustrate practical usage, and cross-references help you discover related topics efficiently.
+- [QUICKSTART.md](../../QUICKSTART.md) and [TUI-QUICKSTART.md](../../TUI-QUICKSTART.md) - installation, configuration, and first use
+- [docs/howtos/](../howtos/tutorial.md) - task guides, starting with the tutorial; [configuration](../howtos/config.md), [permissions](../howtos/permissions.md) and [teams](../howtos/teams.md) are there too
+- [docs/howtos/tools/INDEX.md](../howtos/tools/INDEX.md) - per-tool reference
+- [docs/howtos/slashcommands/](../howtos/slashcommands/) - per-command reference
+- [docs/openapi/ragent-client.d.ts](../openapi/ragent-client.d.ts) - HTTP API client types
+- [SPEC.md](../../SPEC.md) - architecture and the specification of every subsystem
 
 For immediate assistance, the integrated `/help` command within ragent provides context-sensitive guidance tailored to your current session and configuration.

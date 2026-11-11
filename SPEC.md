@@ -62,7 +62,7 @@ graph LR
 
 | Capability | Summary |
 |-----------|---------|
-| **Multi-provider LLM** | 12 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
+| **Multi-provider LLM** | Every provider registered in `ragent-llm` (`crates/ragent-llm/src/providers/`), with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
 | **Terminal UI** | Full-screen ratatui interface with streaming markdown, syntax highlighting, slash commands, and image support |
 | **HTTP Server** | REST + SSE API (Axum) for headless operation and external integrations |
 | **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, teams, sub-agents, PDF, web, and MCP |
@@ -580,7 +580,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
 | **Multi-provider** | 13 first-class LLM provider IDs with auto-discovery and health checks |
-| **Tool-rich** | 150 registered tools across 21 categories in the default build (`mf_screenshot` is engine-gated, spec `openhands` FR-029) |
+| **Tool-rich** | A tool registry grouped into permission categories; `ragent --dry-run --json run x` reports the live total (`mf_screenshot` is engine-gated, spec `openhands` FR-029) |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -674,7 +674,7 @@ graph TB
 | `ragent-tools-core` | File, shell, search, and utility tools | ~12,300 |
 | `ragent-tools-extended` | Memory, code index, PDF, web tools | ~29,900 |
 | `ragent-tools-vcs` | GitHub and GitLab tool surface | ~9,000 |
-| `ragent-agent` | Session processor, agent resolution, tool registry, memory, MCP; team runtime + 20 team tools (former `ragent-team` shim folded in) | ~77,300 |
+| `ragent-agent` | Session processor, agent resolution, tool registry, memory, MCP; team runtime + the `team_*` tools (former `ragent-team` shim folded in) | ~77,300 |
 | `ragent-codeindex` | Tree-sitter parsing, SQLite/Tantivy index, file watcher | ~14,200 |
 | `ragent-server` | Axum HTTP routes and SSE streaming | ~6,100 |
 | `ragent-tui` | Ratatui terminal interface | ~72,300 |
@@ -941,7 +941,7 @@ non-zero rather than printing a hole in the table.
 The tool system is the primary way agents interact with the world. Each tool
 has a JSON schema, a permission category, and an async `execute` method.
 
-#### File Operations Tools (16)
+#### File Operations Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -972,7 +972,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `apply_patch` | `patch` |
 | `multiedit` | `multi_edit` (legacy parameter normalisation) |
 
-#### Execution Tools (5)
+#### Execution Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -982,14 +982,14 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `calculator` | Evaluate mathematical expressions |
 | `open` | Open/reveal files, folders, or URLs in the desktop environment |
 
-#### Interactive Tools (2)
+#### Interactive Tools
 
 | Tool | Purpose |
 |------|---------|
 | `AskUserQuestion` | Ask the user a question (text or multiple-choice, with an optional default used on timeout) |
 | `think` | Record a reasoning note |
 
-#### Task Management Tools (4)
+#### Task Management Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -998,7 +998,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `TaskGet` | Retrieve the full record of a single task by ID |
 | `TaskList` | List all session tasks, optionally filtered by status |
 
-#### Utility Tools (6)
+#### Utility Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -1011,28 +1011,28 @@ has a JSON schema, a permission category, and an async `execute` method.
 
 ### 3.2.1 Tool System Categories Summary
 
-| Category | Tools | Count |
-|----------|-------|-------|
-| File operations | `read`, `Write`/`create`/`update_file`, `Edit`, `multi_edit`/`multiedit`, `apply_patch`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `Glob`, `list` | 18 |
-| Shell / execution | `Bash`, `run_code`, `bash_reset`, `calculator`, `open` | 5 |
-| Search | `Grep`, `codeindex_*` | 6 |
-| Web / MasterFetch | `webfetch`, `websearch`, `http_request`, `mf_fetch`, `mf_crawl`, `mf_search`, `mf_cache_clear`, `mf_version` (+ `mf_screenshot`, engine-gated per FR-029) | 8 |
-| Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate`, `conversation_search`, `session_search` | 10 |
-| Code index | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` | 6 |
-| Code graph | `codeindex_explain`, `codeindex_path`, `codeindex_communities`, `codeindex_godnodes` | 4 |
-| Teams | 19 team lifecycle/task/message tools | 19 |
-| Sub-agents | `new_agent`, `cancel_agent`, `list_agents`, `wait_agents`, `agent_complete` | 5 |
-| VCS | 48 Git local, GitHub, and GitLab issue/PR/MR/pipeline tools | 48 |
-| PDF | `pdf_read/write` | 2 |
-| MCP | `mcp_tool` | 1 |
-| Planning | `EnterPlanMode`, `ExitPlanMode` | 2 |
-| Background tasks | `bg` | 1 |
-| Initiatives / skills | `initiative`, `Skill` | 2 |
-| Interactive | `AskUserQuestion`, `think` | 2 |
-| Task management | `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList` | 4 |
-| Utility | `get_env`, `calculator`, `ragent_info`, `os_info`, `tool_info`, `commands_info` | 6 |
+| Category | Tools |
+|----------|-------|
+| File operations | `read`, `Write`/`create`/`update_file`, `Edit`, `multi_edit`/`multiedit`, `apply_patch`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `Glob`, `list` |
+| Shell / execution | `Bash`, `run_code`, `bash_reset`, `calculator`, `open` |
+| Search | `Grep`, `codeindex_*` |
+| Web / MasterFetch | `webfetch`, `websearch`, `http_request`, `mf_fetch`, `mf_crawl`, `mf_search`, `mf_cache_clear`, `mf_version` (+ `mf_screenshot`, engine-gated per FR-029) |
+| Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate`, `conversation_search`, `session_search` |
+| Code index | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` |
+| Code graph | `codeindex_explain`, `codeindex_path`, `codeindex_communities`, `codeindex_godnodes` |
+| Teams | `team_*` lifecycle/task/message tools |
+| Sub-agents | `new_agent`, `cancel_agent`, `list_agents`, `wait_agents`, `agent_complete` |
+| VCS | Git local, GitHub, and GitLab issue/PR/MR/pipeline tools |
+| PDF | `pdf_read/write` |
+| MCP | `mcp_tool` |
+| Planning | `EnterPlanMode`, `ExitPlanMode` |
+| Background tasks | `bg` |
+| Initiatives / skills | `initiative`, `Skill` |
+| Interactive | `AskUserQuestion`, `think` |
+| Task management | `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList` |
+| Utility | `get_env`, `calculator`, `ragent_info`, `os_info`, `tool_info`, `commands_info` |
 
-#### Team Tools (20)
+#### Team Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -1056,18 +1056,18 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `team_wait` | Block until teammates finish |
 | `team_cleanup` | Delete team on-disk state |
 
-#### Background Shell Task Tool (1)
+#### Background Shell Task Tool
 
 | Tool | Purpose |
 |------|---------|
 | `bg` | Spawn, monitor, tail, and cancel long-running shell commands as **shell tasks** (never sub-agents, whose vocabulary is the execution contract). Actions: `spawn`, `list`, `status`, `output`, `tail`, `cancel`, `wait`, `cleanup`. `session_id` on `list`/`cleanup` must name the calling session - a foreign id is refused (`reason_code: wrong_session`) and deletes nothing. |
 
-#### Agent Search Tool (1)
+#### Agent Search Tool
 
 | Tool | Purpose |
 |------|---------|
 
-#### Durable Initiatives & Skill Management Tools (2)
+#### Durable Initiatives & Skill Management Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -1151,8 +1151,9 @@ and nowhere else.
 
 ### 3.2.3 Tool Surface Agreement (FR-030, spec `uniformtools`)
 
-The registered tool surface is **150 tools in 21 permission families** in the default
-build, and every enumeration of it is checked against the registry rather than
+The registered tool surface is grouped into permission families (the `tools`
+section of `ragent --dry-run --json run x` reports the live total and per-family
+counts), and every enumeration of it is checked against the registry rather than
 against a remembered number:
 
 | Enumeration | What it reads | Guard |
@@ -2949,7 +2950,8 @@ requirements, and implementation tasks.
 
 ### 10.2 Directory Layout
 
-Specs live in `specs/<SpecId>/` (58 spec directories as of v1.0.141). Only
+Specs live in `specs/<SpecId>/`, one directory per spec (`ls -d specs/*/` lists
+them). Only
 `SPEC.md` is required: a directory holding just a `SPEC.md` is discoverable and
 readable, and is a valid target for `/spec update`, `/spec plan` and
 `/spec validate`. Every other file in the layout below is optional and derived.
@@ -3833,7 +3835,7 @@ carry the lead session id (`MailboxMessage::with_sender_session`,
 SEC-ragent-team-003), so a lead-authored message pushed without one is rejected
 at the write boundary rather than silently forwarded.
 
-### 14.3 Team Tools (20)
+### 14.3 Team Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -5733,10 +5735,10 @@ module resolution at the child file, so plain `mod support;`, nested
 and inner attributes (`#![forbid(...)]`, `#![cfg(feature = ...)]`) all keep
 working. Test names keep a `test_<file>::<fn>` shape, so one file is run with
 the filter form `cargo test -p <crate> --test all test_foo::`. The workspace
-compiles **19 integration test targets instead of ~948**, and `BUILDSTATS.md`
-records the resulting `cargo test --workspace --all-targets` cost (13,862
-passed, 0 failed, 16 ignored across 40 reporting targets) and the re-measured
-coverage (86.58% workspace line coverage, all 18 crates above 85%).
+compiles **one integration test target per crate plus one for the root package**
+(`ls crates/*/tests/all.rs tests/all.rs`) instead of one per test file, and
+`BUILDSTATS.md` records the resulting test cost and the re-measured line
+coverage.
 
 Three consequences are part of the contract:
 
