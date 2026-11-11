@@ -33,7 +33,7 @@ impl GradleParser {
     );
 }
 
-// NOTE: intentional duplication - see DUPPLAN.md Milestone J.
+// NOTE: intentional duplication, reviewed and kept; do not merge.
 // Same walk pattern but different Ctx types per language.
 impl LanguageParser for GradleParser {
     fn language_id(&self) -> &'static str {

@@ -1,4 +1,4 @@
-//! Tests for the `Skill` tool (JCODEPLAN M8 T-071).
+//! Tests for the `Skill` tool (jcodeport spec M8 T-071).
 
 use ragent_agent::event::EventBus;
 use ragent_agent::tool::{Tool, ToolContext, skill_manage::SkillManageTool};
@@ -167,7 +167,7 @@ async fn test_skill_manage_read_unknown_skill_lists_available() {
     );
 }
 
-// -- Load (JCODEPLAN M8 acceptance) ----------------------------------
+// -- Load (jcodeport spec M8 acceptance) ----------------------------------
 
 #[tokio::test]
 async fn test_skill_manage_load_injects_skill_prompt() {

@@ -65,8 +65,8 @@ pub fn research_routes() -> Router<AppState> {
 ///
 /// This is explicit application state rather than a process-global `cwd`
 /// lookup: production passes `<working_dir>/research`, while tests point it at
-/// `target/temp/...` so a test run never rewrites the checked-in
-/// `<crate>/research/` tree.
+/// `target/temp/...` so a test run never writes a `research/` tree into the
+/// repository.
 fn research_root(state: &AppState) -> PathBuf {
     state.research_root.as_ref().clone()
 }

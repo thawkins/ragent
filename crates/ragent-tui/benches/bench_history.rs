@@ -1,6 +1,6 @@
 //! Criterion benchmarks for history save/load cycle.
 //!
-//! Covers COMPLIANCE.md Section 5.A:
+//! Covers:
 //! - `save_history` with varying history sizes
 //! - `load_history` reading back saved histories
 

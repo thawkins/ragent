@@ -1,4 +1,4 @@
-//! Tests for the `initiative` tool (JCODEPLAN M8 T-070).
+//! Tests for the `initiative` tool (jcodeport spec M8 T-070).
 
 use ragent_agent::event::EventBus;
 use ragent_agent::storage::{InitiativeMilestone, Storage};
@@ -194,7 +194,7 @@ async fn test_initiative_checkpoint_updates_progress() {
     .await
     .expect("create");
 
-    // Acceptance criterion from JCODEPLAN M8:
+    // Acceptance criterion from jcodeport spec M8:
     // initiative action="checkpoint" id="api-v2" updates progress.
     let out = tool
         .execute(

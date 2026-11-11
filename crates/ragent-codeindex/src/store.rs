@@ -551,7 +551,7 @@ impl IndexStore {
 
     /// Count total indexed files.
     ///
-    /// NOTE: intentional duplication - see `DUPPLAN.md` Milestone J.
+    /// NOTE: intentional duplication, reviewed and kept; do not merge.
     pub fn file_count(&self) -> Result<u64> {
         let count: i64 = self
             .conn

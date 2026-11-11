@@ -4,8 +4,7 @@
 //! - [`build_qname`](crate::parser::util::build_qname) - build a qualified name from scope
 //!   segments and a name, with a configurable separator (`"::"` or `"."`).
 //!   Previously this was copy-pasted as `build_qname` / `build_qualified` /
-//!   `build_qualified_name` across 10 parser files (see `DUPPLAN.md`
-//!   Milestone C).
+//!   `build_qualified_name` across the parser files.
 //! - [`extend_scope`](crate::parser::util::extend_scope) - append a name to a scope chain
 //!   (10 parser files).
 //! - [`node_hash`](crate::parser::util::node_hash) - content hash of a tree-sitter node,
@@ -17,7 +16,7 @@
 //!   across the parsers.
 //! - `tree_sitter_parser!` - generates the uniform `create_parser()` +
 //!   `parse_tree()` pair used by most language parsers, eliminating a third
-//!   boilerplate duplication (DUPPLAN.md Milestone C).
+//!   boilerplate duplication.
 
 use tree_sitter::Node;
 
@@ -153,8 +152,7 @@ pub fn build_qname(scope: &[String], name: &str, sep: &str) -> String {
 /// tree-sitter language parser.
 ///
 /// This macro eliminates the boilerplate `create_parser` / `parse_tree`
-/// methods that were copy-pasted across 7-9 language parser structs
-/// (DUPPLAN.md Milestone C, `cargo dupes` groups 10 and 16).
+/// methods that were copy-pasted across 7-9 language parser structs.
 ///
 /// # Expansion
 ///

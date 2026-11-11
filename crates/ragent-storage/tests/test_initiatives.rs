@@ -1,5 +1,5 @@
 //! Tests for the durable `initiatives` table CRUD in `ragent-storage`
-//! (JCODEPLAN M8 T-070).
+//! (jcodeport spec M8 T-070).
 
 use ragent_storage::storage::{InitiativeMilestone, Storage};
 

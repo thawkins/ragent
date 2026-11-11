@@ -10,7 +10,7 @@
 // Extracted in WSPLAN Milestone 2.
 pub mod replace;
 
-// Shared path-resolution helper (DUPPLAN.md Milestone B).
+// Shared path-resolution helper.
 pub mod path_util;
 
 // Shared stale-file / timestamp helpers used by edit and multi_edit.
@@ -93,7 +93,7 @@ pub mod guard {
 
 /// Minimal process resource gate used by shell-based tools.
 ///
-/// Re-exported from `ragent_types::resource` (DUPPLAN.md Milestone E).
+/// Re-exported from `ragent_types::resource`.
 /// Previously duplicated as an inline module; now a single source of truth
 /// lives in `ragent_types::resource`.
 pub use ragent_types::resource;

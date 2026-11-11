@@ -16,7 +16,7 @@
 #    defined only in `github/helpers.rs` / `gitlab/helpers.rs`, not
 #    re-derived in the individual `github_*.rs` / `gitlab_*.rs` modules.
 #
-# See `DUPPLAN.md` Milestone A and `ANTIPAT.md` M3.9 / M7.9.
+# See `ANTIPAT.md` M3.9 / M7.9.
 #
 # Usage: bash scripts/check-vcs-duplication.sh [--self-test]
 # Exit code: 0 = clean, 1 = a duplicate implementation was found.

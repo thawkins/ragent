@@ -2,7 +2,7 @@
 //!
 //! Provides [`resolve_path`] - a trivial leaf helper that resolves a path
 //! string against a working directory.  Previously this function was
-//! copy-pasted into every file tool (see `DUPPLAN.md` Milestone B); it now
+//! copy-pasted into every file tool; it now
 //! lives here as the single source of truth.
 
 use std::path::{Path, PathBuf};

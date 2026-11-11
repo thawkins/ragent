@@ -1025,7 +1025,7 @@ async fn session_skips_local_phase_when_disable_local_is_true() {
     #[derive(Default)]
     struct SingleLocalTool;
     #[async_trait::async_trait]
-    // NOTE: intentional duplication - see DUPPLAN.md Milestone J.
+    // NOTE: intentional duplication, reviewed and kept; do not merge.
     // Trait impls for different mock types; cannot be deduplicated.
     impl LocalTool for SingleLocalTool {
         async fn glob(&self, _root: &Path, _pattern: &str) -> anyhow::Result<Vec<PathBuf>> {

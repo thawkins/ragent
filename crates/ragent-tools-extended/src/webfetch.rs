@@ -276,5 +276,5 @@ fn html_to_text(html: &str) -> String {
 
 /// Minimal fallback tag stripper for when html2text fails.
 ///
-/// Re-exported from [`ragent_types::html::strip_tags`] (DUPPLAN.md Milestone F).
+/// Re-exported from [`ragent_types::html::strip_tags`].
 pub use ragent_types::html::strip_tags;

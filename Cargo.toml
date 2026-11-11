@@ -108,7 +108,7 @@ double_must_use = "allow"
 # `unwrap_used` is deliberately NOT set here. The clippy lint cannot express
 # "no unwrap on user-facing production paths" because every `.unwrap()` in a
 # `#[cfg(test)]` module, a benchmark, or a test-support fixture is legitimate
-# and would trip a deny-level lint. Enforcing the AGENTS-RUST rule with clippy
+# and would trip a deny-level lint. Enforcing the AGENTS-LANGUAGE.md rule with clippy
 # would therefore require per-function `#[allow]` noise across thousands of
 # test sites.
 #

@@ -8,7 +8,7 @@ use ragent_types::strutil::floor_char_boundary;
 /// Maximum output size in bytes before truncation (100 KB).
 pub const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 
-/// Re-export of the shared path-resolution helper (DUPPLAN.md Milestone B).
+/// Re-export of the shared path-resolution helper.
 ///
 /// See [`ragent_tools_core::path_util::resolve_path`] for the canonical
 /// implementation and argument documentation.

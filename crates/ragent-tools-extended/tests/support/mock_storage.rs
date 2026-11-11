@@ -3,7 +3,7 @@
 //! Provides an in-memory [`MockStorage`] that implements
 //! [`ragent_tools_extended::storage::StorageBackend`] for the todo CRUD
 //! methods.  Previously copy-pasted as identical `MockStorage` (in 3 test
-//! files) and `DemoStorage` (in 1 example) - see `DUPPLAN.md` Milestone H.
+//! files) and `DemoStorage` (in 1 example).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

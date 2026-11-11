@@ -1015,7 +1015,7 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_todos_session_created
             ON todos(session_id, created_at, id);
 
-            -- Durable initiatives (JCODEPLAN M8): long-lived goals that
+            -- Durable initiatives (jcodeport spec M8): long-lived goals that
             -- survive across sessions, with JSON milestone tracking.
             CREATE TABLE IF NOT EXISTS initiatives (
             id TEXT PRIMARY KEY,
@@ -2670,7 +2670,7 @@ impl Storage {
             .collect())
     }
 
-    // -- Durable Initiatives (JCODEPLAN M8) --------------------------
+    // -- Durable Initiatives (jcodeport spec M8) --------------------------
 
     /// Inserts a new durable initiative.
     ///
@@ -4774,7 +4774,7 @@ pub struct SessionRow {
     pub summary: Option<String>,
 }
 
-// -- Initiatives (JCODEPLAN M8) --------------------------------------
+// -- Initiatives (jcodeport spec M8) --------------------------------------
 
 /// A serialisable milestone within a durable initiative.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

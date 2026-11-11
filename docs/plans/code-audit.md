@@ -221,7 +221,7 @@ external test crate can reach.
 
 ## Milestone M8 - Standards and cosmetic cleanup
 
-**Goal**: Bring code into line with AGENTS.md / AGENTS-RUST.md conventions.
+**Goal**: Bring code into line with AGENTS.md / AGENTS-LANGUAGE.md conventions.
 **Exit criteria**: naming/doc/emoji rules satisfied; no `unwrap()` on user-facing paths.
 
 **Status: COMPLETE.** T-801..T-811 implemented and verified (`cargo check --workspace --tests`,

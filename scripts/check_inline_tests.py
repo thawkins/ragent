@@ -2,7 +2,7 @@
 """CI guard (ANTIPAT M2.17): reject *genuine* inline ``#[cfg(test)]`` modules in
 library and binary sources.
 
-AGENTS-RUST.md requires tests to live in each crate's ``tests/`` directory. The
+AGENTS-LANGUAGE.md requires tests to live in each crate's ``tests/`` directory. The
 workspace migration (REMPLAN Milestone 5) relocated every test body out of the
 source tree, leaving only ``#[cfg(test)] #[path = "../tests/inline/.."] mod x;``
 hooks behind -- an idiomatic, allowlisted pattern that names an external file.
@@ -181,7 +181,7 @@ def main() -> int:
             f"ERROR: {len(offenders)} file(s) declare a genuine inline "
             f"#[cfg(test)] module (baseline: {INLINE_BASELINE})"
         )
-        print("New inline test blocks are not allowed in src/ files (AGENTS-RUST.md).")
+        print("New inline test blocks are not allowed in src/ files (AGENTS-LANGUAGE.md).")
         print("Move the test body to the crate's tests/ directory and keep only a")
         print('#[cfg(test)] #[path = "../tests/inline/<name>.rs"] mod tests; hook.')
         print("")

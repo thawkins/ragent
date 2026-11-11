@@ -217,7 +217,7 @@ fn extract_from_visible_text(html: &str) -> Option<DateTime<Utc>> {
 /// Parse a date or datetime string into a UTC `DateTime`.
 ///
 /// Uses [`ragent_types::html::strip_tags`] to remove HTML markup before
-/// attempting date extraction (DUPPLAN.md Milestone F).
+/// attempting date extraction.
 ///
 /// Tries, in order:
 ///
