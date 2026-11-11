@@ -343,9 +343,10 @@ struct CreateResearchRequest {
     #[serde(default)]
     max_concurrent_research_units: Option<usize>,
     /// `--evaluate` - run the deterministic self-evaluation scorecard and
-    /// append it to the assembled report (FR-008 / T-015).
+    /// append it to the assembled report (FR-008 / T-015). Omitted means
+    /// "use `research.evaluate.enabled`"; an explicit `false` turns it off.
     #[serde(default)]
-    evaluate: bool,
+    evaluate: Option<bool>,
     /// `--url-cloak` - defang web URLs in the generated `RESEARCH.md`
     /// (`Sources` bullets and the `References Index`) and `CORPA.md`
     /// (`Sources Reference`) so they are written as plain text rather than
@@ -477,7 +478,7 @@ impl CreateResearchRequest {
         if let Some(v) = self.max_concurrent_research_units {
             parts.push(format!("--max-concurrent-research-units {v}"));
         }
-        if self.evaluate {
+        if self.evaluate == Some(true) {
             parts.push("--evaluate".to_string());
         }
         if self.url_cloak {
@@ -531,7 +532,7 @@ impl CreateResearchRequest {
             compression_model: self.compression_model.clone(),
             final_report_model: self.final_report_model.clone(),
             max_concurrent_research_units: self.max_concurrent_research_units,
-            evaluate: Some(self.evaluate),
+            evaluate: self.evaluate,
             url_cloak: self.url_cloak,
             max_age: self.max_age.clone(),
             invocation: Some(self.invocation_summary()),

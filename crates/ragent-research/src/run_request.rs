@@ -294,7 +294,8 @@ impl ResearchRunRequest {
                     research_model,
                     compression_model,
                     final_report_model,
-                    evaluate: Some(evaluate),
+                    // Omitted -> None, so `research.evaluate.enabled` applies.
+                    evaluate: evaluate.then_some(true),
                     url_cloak,
                     max_age,
                     // Keep the recorded command verbatim so the replayed run

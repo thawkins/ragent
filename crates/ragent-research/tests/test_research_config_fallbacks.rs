@@ -59,3 +59,20 @@ fn test_research_defaults_without_config() {
     );
     assert!(!cfg.evaluate);
 }
+
+/// Through the invocation adapter (replay path): an omitted `--evaluate`
+/// leaves the field unset, so the configured value applies; the flag forces it.
+#[test]
+fn test_research_evaluate_config_reaches_replayed_runs() {
+    let omitted =
+        ResearchRunRequest::from_invocation(r#"ragent research create n "topic""#).expect("parses");
+    assert_eq!(omitted.evaluate, None);
+    assert!(build_session_config(&omitted, Some(&configured())).evaluate);
+    assert!(!build_session_config(&omitted, None).evaluate);
+
+    let flagged =
+        ResearchRunRequest::from_invocation(r#"ragent research create n "topic" --evaluate"#)
+            .expect("parses");
+    assert_eq!(flagged.evaluate, Some(true));
+    assert!(build_session_config(&flagged, None).evaluate);
+}

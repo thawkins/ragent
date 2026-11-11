@@ -11,6 +11,12 @@
   used (#39).
 - `ragent research continue` now loads `ragent.json` like `create`; it passed
   no config, so every research setting fell back to built-in defaults there.
+- Omitting `--evaluate` (CLI, TUI, HTTP, replayed invocations) now leaves
+  evaluation to `research.evaluate.enabled` instead of forcing it off; the
+  HTTP `evaluate` field is optional, so an explicit `false` still wins.
+- Docs now say the per-phase model overrides (`--research-model`,
+  `--compression-model`, `--final-report-model` and `research.models.*`) are
+  recorded but not yet used to choose a phase's model.
 
 ### Changed - function_analyzer.py follows CODE_INDEX_SPEC
 

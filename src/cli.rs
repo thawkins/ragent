@@ -907,7 +907,9 @@ pub async fn handle_research_command_with_model(
                 compression_model,
                 final_report_model,
                 max_concurrent_research_units,
-                evaluate: Some(evaluate),
+                // `--evaluate` given -> Some(true); omitted -> None, so the
+                // configured `research.evaluate.enabled` applies.
+                evaluate: evaluate.then_some(true),
                 url_cloak,
                 max_age,
                 // Record the verbatim command line for frontmatter replay.

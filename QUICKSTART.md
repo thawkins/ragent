@@ -2284,9 +2284,10 @@ Configuration" for the full schema):
   and `research.evaluate.enabled` set the default for every run. A per-run
   flag wins (`--research-model`, `--compression-model`,
   `--final-report-model`, `--max-concurrent-research-units`, and `--evaluate`
-  on the TUI `/research create`). The per-page summarization model has no
-  config key; pass `--summarization-model` to the TUI `/research create`
-  command.
+  on the TUI `/research create`). The three model overrides are recorded but
+  not yet used to choose a phase's model: every phase calls the active model.
+  The per-page summarization model has no config key; pass
+  `--summarization-model` to the TUI `/research create` command.
 
 ```jsonc
 {
