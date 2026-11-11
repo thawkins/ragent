@@ -733,6 +733,12 @@ Re-running on the same day targets the same `DECK-<today>.md`. Without
 `--force` that is refused rather than overwritten, naming the existing path;
 `--force` overwrites it. A same-day rerun under `--force` is byte-identical.
 
+When a connected MCP server can create presentation files (for example
+DeckCraft), the `export` stage also writes a `.pptx` copy of the deck beside the
+markdown file, one slide per planned slide. The export is best-effort: the
+markdown deck is already on disk, and an absent or failing server is reported
+(`no presentation capability connected`) rather than failing the run.
+
 #### Narrowing and flags
 
 Restrict the deck to specific elements with `--elements`, a comma-separated list

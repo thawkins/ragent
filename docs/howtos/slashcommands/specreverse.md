@@ -48,7 +48,10 @@ optional group: none of them, or all of `--language` + `--type` (+ optional
 | `--github` / `--gitlab` | with scaffold flags, create a private remote, set it as `origin`, and push the initial commit (mutually exclusive) |
 
 Both identifier forms are accepted by the same command; pick whichever you
-have at hand.
+have at hand. The full set of accepted `<repo>` forms is `owner/repo`,
+`github:owner/repo`, `github:<github-url>`, `gitlab:namespace/project`,
+`gitlab:host/namespace/project`, HTTPS URLs (`https://github.com/owner/repo`,
+`https://gitlab.com/ns/proj`), and SSH URLs (`git@github.com:owner/repo.git`).
 
 `--language`, `--type`, and `--stack` are the `/new` scaffold flags, parsed
 and validated by the same `/new` parser, so they take exactly the same values

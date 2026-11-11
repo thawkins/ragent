@@ -389,7 +389,7 @@ The built-in allowlist is currently empty by design — it can be extended
 with commonly safe patterns like `target/**` or `.git/**` in future
 releases.
 
-### 4.4 Directory Escape Prevention (Bash Layer 4)
+### 4.4 Directory Escape Prevention (Bash Layer 3)
 
 Even if a bash command passes all other checks, it is rejected if it
 attempts to `cd` or `pushd` outside the working directory. See
@@ -407,219 +407,47 @@ canonicalized working directory. This prevents tricks like
 
 ## 5. The 7-Layer Bash Security Model
 
-Shell commands get the most intensive scrutiny because they can do anything
-on your system. The `BashTool` (defined in
-`crates/ragent-tools-core/src/bash.rs`) runs every command through seven
-sequential security layers. If any layer rejects the command, execution
-stops immediately. All seven layers are enforced regardless of the
-underlying shell (Bash on Unix, Git Bash or PowerShell on Windows).
+Before a shell command reaches the permission system, the `BashTool`
+(`crates/ragent-tools-core/src/bash.rs`) validates it through seven layers in
+this order; any rejection stops execution. The layer-by-layer reference
+(`SAFE_COMMANDS`, `BANNED_COMMANDS`, the denied lists, examples) lives in
+[bash.md - The seven-layer security model](bash.md#the-seven-layer-security-model).
 
-```
-Command String
-    │
-    ▼
-Layer 1: Safe Command Whitelist  ── auto-approve if safe
-    │
-    ▼
-Layer 2: Banned Commands         ── reject curl, wget, nc, nmap, etc.
-    │
-    ▼
-Layer 3: Denied Patterns         ── reject rm -rf /, mkfs, sudo, etc.
-    │
-    ▼
-Layer 4: Directory Escape Check  ── reject cd .., cd ~, cd /absolute
-    │
-    ▼
-Layer 5: Syntax Validation       ── bash -n pre-check
-    │
-    ▼
-Layer 6: Obfuscation Detection   ── reject base64|bash, eval$(...), `$'\\xNN'`
-    │
-    ▼
-Layer 7: User Allow/Deny Lists   ── /bash add|remove allow|deny
-    │
-    ▼
-Permission Check (PermissionChecker + interactive prompt)
-```
+| Order | Layer | Bypassed by YOLO | Bypassed by allowlist |
+| ----- | ----- | ---------------- | --------------------- |
+| 1 | [Safe-command whitelist](bash.md#layer-1--safe-command-whitelist) | - | - |
+| 2 | [Banned commands](bash.md#layer-2--banned-commands) | yes | **yes** |
+| 3 | [Directory-escape prevention](bash.md#layer-3--directory-escape-prevention) | no | no |
+| 4 | [Syntax validation](bash.md#layer-4--syntax-validation) | no | no |
+| 5 | [Denied commands & patterns](bash.md#layer-5--denied-commands--patterns) | yes | no |
+| 6 | [User denylist](bash.md#layer-6--user-denylist) | yes | no |
+| 7 | [Obfuscation detection](bash.md#layer-7--obfuscation-detection) | yes | no |
 
-### Layer 1 — Safe Command Whitelist
+How the layers meet the permission system:
 
-A built-in list (`SAFE_COMMANDS` in `crates/ragent-tools-core/src/bash.rs`: `ls`, `cat`, `grep`, `rg`, `diff`, `echo`, ...),
-mostly read-only but including the file-modifying `mkdir`, `touch`, `cp` and
-`mv`, skips the permission prompt. It does **not** skip validation: the command
-still passes through every later layer of `validate_shell_command` (banned
-tools, denied patterns, directory escape and so on). The check is prefix-based: a command is safe if it equals the entry
-exactly OR starts with the entry followed by a space, and a command containing a
-shell separator or redirection is never safe. The list contains no version-control,
-build, package-manager or interpreter commands (`git`, `cargo`, `npm`, `python3`,
-`sed`, `awk`, ...), so those always reach the permission check. `rm` is also
-excluded; destructive variants are caught by Layer 3.
-
-The full list is maintained in
-[bash.md - Layer 1](bash.md#layer-1--safe-command-whitelist).
-
-### Layer 2 — Banned Commands
-
-These commands are **never allowed** unless the user explicitly allowlists
-them (via `/bash add allow <cmd>`) or YOLO mode is enabled. They are
-high-risk tools that could exfiltrate data or connect to external systems.
-
-```rust
-const BANNED_COMMANDS: &[&str] = &[
-    // Network tools
-    "curl", "wget", "nc", "netcat", "telnet",
-    "axel", "aria2c", "lynx", "w3m",
-    // Attack and exploitation tools
-    "nmap", "masscan", "nikto", "sqlmap", "hydra",
-    "john", "hashcat", "aircrack",
-    "metasploit", "msfconsole", "msfvenom",
-    "burpsuite", "ettercap", "arpspoof",
-    // Network capture
-    "tcpdump", "wireshark",
-];
-```
-
-Banned commands are detected with **word-boundary matching** to avoid false
-positives (e.g. `curl` does not match inside `scroll`).
-
-To re-enable a banned command without entering YOLO mode, add it to the
-user allowlist:
-
-```
-/bash add allow curl
-```
-
-This persists to `.ragent/ragent.json` and exempts `curl` from Layer 2.
-
-### Layer 3 — Denied Patterns
-
-Three sub-lists catch dangerous command structures:
-
-**Denied command names** (word-boundary matched):
-```rust
-const DENIED_COMMANDS: &[&str] = &[
-    "mkfs", "wipefs",        // Disk / partition destruction
-    "insmod",                // Kernel modifications
-    "useradd", "usermod", "groupadd",  // User/group manipulation
-    "visudo",                // System configuration
-    "grub-install", "efibootmgr",     // Boot/firmware
-];
-```
-
-**Denied command patterns** (command + arguments):
-```rust
-const DENIED_COMMAND_PATTERNS: &[&str] = &[
-    "sudo ", "sudo\t", "su -", "su root", "doas ",  // Privilege escalation
-    "passwd ",                                       // User manipulation
-    "crontab -",                                     // System configuration
-];
-```
-
-**Denied patterns** (substring matched — composite patterns, arguments,
-paths):
-```rust
-const DENIED_PATTERNS: &[&str] = &[
-    "rm -rf /", "rm -r -f /", "rm -fr /", "rm -Rf /", "rmdir /",
-    "dd if=", "shred /dev",
-    "> /dev/sd", "> /dev/nvme", "> /dev/vd",
-    ":(){ :|:& };:",                          // Fork bomb
-    "chmod -R 777 /", "chown -R",
-    "curl.*etc/shadow", "wget.*etc/shadow",   // Network exfiltration
-    ".bash_history", ".ssh/id_",             // Credential file theft
-    "modprobe -r", "sysctl -w",              // Kernel modifications
-    "git push --force", "git push -f ",      // Destructive git
-    "git push origin --delete",
-    "rm -rf ~", "rm -rf $HOME", "rm -rf .",
-    "chmod 000 /", "chmod -R 000",
-    "> /dev/tcp", "bash -i >&",              // Data exfiltration
-    "/dev/tcp/", "/dev/udp/",
-    "systemctl disable", "systemctl mask",
-    "chattr +i",
-];
-```
-
-Denied commands are checked with heredoc-body stripping to prevent false
-positives from string literals inside heredocs.
-
-### Layer 4 — Directory Escape Check
-
-Rejects `cd` and `pushd` commands that try to leave the working directory:
-
-```rust
-fn is_directory_escape_attempt(cmd: &str, working_dir: &Path) -> bool
-```
-
-The check rejects:
-- `cd ..` — parent directory
-- `cd ~`, `cd $HOME`, `cd ${HOME}` — home directory
-- `cd /absolute/path` — absolute paths outside the working directory
-  (paths inside the working directory are allowed after canonicalization)
-- On Windows: `cd C:\...` (drive-letter paths) and `cd \` (root of drive)
-
-Single-segment slash-prefixed tokens (e.g. `/help`, `/start`) are treated as
-commands, not file paths, and excluded from the escape check.
-
-### Layer 5 — Syntax Validation
-
-Before execution, the command is pre-checked with `bash -n -c` (or the
-discovered Git Bash executable on Windows). This catches syntax errors
-without running the command, so the agent gets a clear error message
-instead of a runtime failure. The check has a 1-second timeout.
-
-PowerShell has its own runtime parser, so this layer is skipped on
-PowerShell.
-
-### Layer 6 — Obfuscation Detection
-
-Rejects commands that use encoding, eval, or dynamic variable expansion to
-bypass the denylist:
-
-```rust
-fn validate_no_obfuscation(command: &str) -> Result<()> {
-    // base64 decode piped into shell
-    if command.contains("base64") && (command.contains("| bash") || command.contains("| sh")) { ... }
-
-    // Python/perl one-liners executing encoded payloads
-    if (command.contains("python") || command.contains("perl"))
-        && (command.contains("exec(") || command.contains("eval(")) { ... }
-
-    // `$'\\xNN'` hex escape sequences used to build commands
-    if command.contains("$'\\x") { ... }
-
-    // eval with command substitution
-    if command.contains("eval ") && command.contains("$(") { ... }
-}
-```
-
-### Layer 7 — User Allow/Deny Lists
-
-The user can supplement the built-in lists with their own patterns via the
-`Bash` config block or the `/bash` slash command:
-
-```json
-{
-  "bash": {
-    "allowlist": ["curl", "kubectl"],
-    "denylist": ["docker rm", "terraform destroy"]
-  }
-}
-```
-
-- **allowlist**: command prefixes that bypass the banned-command check
-  (Layer 2). Use this to re-enable tools like `curl` without YOLO mode.
-- **denylist**: substring patterns that always reject a command,
-  supplementing the built-in denied-patterns list (Layer 3).
-
-Changes are persisted immediately to `.ragent/ragent.json` (project) or
-`~/.config/ragent/ragent.json` (global with `--global`).
+- **Layer 1 only skips the prompt.** A whitelisted command (`SAFE_COMMANDS` in
+  `crates/ragent-tools-core/src/bash.rs`; prefix matched, never one containing a
+  shell separator or redirection) is
+  auto-approved at the permission check but still runs every later layer.
+  `git`, `cargo`, `npm`, interpreters and `rm` are not on the list, so they
+  always reach the permission check.
+- **The allowlist only exempts Layer 2.** `/bash add allow curl` (or a
+  `bash.allowlist` entry) re-enables a banned tool without YOLO mode; it does
+  not exempt the command from Layers 5-7.
+- **The denylist adds to Layer 5.** `/bash add deny <pattern>` (or a
+  `bash.denylist` entry) rejects any command containing the pattern.
+- `/bash` changes persist immediately to `.ragent/ragent.json` (project) or
+  `~/.config/ragent/ragent.json` (with `--global`); see
+  [bash.md - The `/bash` slash commands](bash.md#the-bash-slash-commands).
+- After all seven layers pass, the command goes to the permission check
+  (`PermissionChecker` plus the interactive prompt) like any other tool call.
 
 ### YOLO Interaction with Bash Layers
 
-When YOLO mode is enabled, Layers 2, 3, 6, and the user denylist (Layer 7)
-are **bypassed** — the command is logged as a warning but allowed to run.
-Layer 1 (safe whitelist), Layer 4 (directory escape), and Layer 5 (syntax
-validation) remain active even in YOLO mode. See [Section 7](#7-yolo-mode).
-
+When YOLO mode is enabled, Layers 2, 5, 6 and 7 are **bypassed** (the command
+is logged as a warning but allowed to run). Layer 1 (safe whitelist), Layer 3
+(directory escape) and Layer 4 (syntax validation) remain active even in YOLO
+mode. See [Section 7](#7-yolo-mode).
 ---
 
 ## 6. Autopilot Mode
@@ -768,14 +596,14 @@ the following safety checks are skipped:
 | Check                              | Bypassed? | Notes                                    |
 |------------------------------------|-----------|------------------------------------------|
 | Bash banned commands (Layer 2)    | Yes       | curl, wget, nc, nmap, etc. allowed       |
-| Bash denied commands (Layer 3)     | Yes       | mkfs, insmod, useradd, etc. allowed      |
-| Bash denied patterns (Layer 3)     | Yes       | rm -rf /, sudo, dd if=, etc. allowed     |
-| User bash denylist (Layer 7)       | Yes       | User-defined deny patterns ignored       |
-| Obfuscation detection (Layer 6)    | Yes       | base64\|bash, eval$(), `$'\\xNN'` allowed    |
+| Bash denied commands (Layer 5)     | Yes       | mkfs, insmod, useradd, etc. allowed      |
+| Bash denied patterns (Layer 5)     | Yes       | rm -rf /, sudo, dd if=, etc. allowed     |
+| User bash denylist (Layer 6)       | Yes       | User-defined deny patterns ignored       |
+| Obfuscation detection (Layer 7)    | Yes       | base64\|bash, eval$(), `$'\\xNN'` allowed    |
 | Interactive permission prompts     | Yes       | All tools auto-approve                   |
 | Safe command whitelist (Layer 1)  | No        | Still checked (but has no blocking effect) |
-| Directory escape check (Layer 4)   | No        | Still enforced                           |
-| Syntax validation (Layer 5)        | No        | Still enforced                           |
+| Directory escape check (Layer 3)   | No        | Still enforced                           |
+| Syntax validation (Layer 4)        | No        | Still enforced                           |
 
 The bypass is implemented as early returns in the Bash tool and
 `check_permission_with_prompt`:
@@ -1201,7 +1029,7 @@ entries from all sources are combined.
     { "permission": "edit", "pattern": "secrets/**", "action": "deny" }
   ],
 
-  // Bash command allow/deny lists (Layer 7)
+  // Bash command allow/deny lists (Layers 2 and 6)
   "bash": {
     "allowlist": ["curl", "kubectl"],
     "denylist": ["docker rm", "terraform destroy"]

@@ -1,9 +1,9 @@
 # Tools — Shell
 
 Tools for running shell commands and managing shell tasks. `Bash`
-commands pass through a 7-layer security model: safe-command whitelist,
-banned-command checks, denied patterns, directory-escape prevention, syntax
-validation, obfuscation detection, and user allowlist/denylist.
+commands pass through a 7-layer security model; see
+[bash.md - The seven-layer security model](../bash.md#the-seven-layer-security-model)
+for the layers, their order and what YOLO or the allowlist bypasses.
 
 | Tool | Description |
 |------|-------------|

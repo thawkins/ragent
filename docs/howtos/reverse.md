@@ -112,35 +112,14 @@ Fetch a public GitHub repository and generate a synthetic creation prompt.
 /spec reverse <repo> --language <lang> --type <type> [--stack <name>] [--folder <path>] [--github | --gitlab]
 ```
 
-#### Arguments
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<repo>` | Yes | Repository identifier. Accepts `owner/repo`, `github:owner/repo`, `github:<github-url>`, `gitlab:namespace/project`, `gitlab:host/namespace/project`, HTTPS URLs (`https://github.com/owner/repo`, `https://gitlab.com/ns/proj`), and SSH URLs (`git@github.com:owner/repo.git`) |
-
-#### Flags
-
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--language <lang>` | No | Target language for the generated prompt — the same values `/new` accepts (`rust`, `python`, `go`, `typescript`, ...). Must be supplied with `--type` |
-| `--type <type>` | No | Target app type — the same values `/new` accepts: `library`, `cmdline`, `tui`, `gui`, `webapp`. Must be supplied with `--language` |
-| `--stack <name>` | No | Optional framework stack layer — the same values `/new` accepts (`axum`, `warp`, `raylib`, `gtk4`, `ratatui`). Requires `--language` and `--type` |
-| `--create <name>` | No | Chain into `/spec create` using the generated prompt. With `--folder`, the spec is written to `<folder>/specs/<name>/` |
-| `--depth <N>` | No | Directory levels to fetch from the tree (1–10, default 1). See [Section 10](#10-the---depth-flag). |
-| `--folder <path>` | No | With scaffold flags, scaffold the project in `<path>` (created if missing; default: the current directory). See [Section 6.1](#61-scaffolding-with---folder) |
-| `--github` | No | With scaffold flags, create a private GitHub repository, set it as `origin`, and push the initial commit. Mutually exclusive with `--gitlab` |
-| `--gitlab` | No | With scaffold flags, create a private GitLab repository, set it as `origin`, and push the initial commit. Mutually exclusive with `--github` |
-
-`--language`, `--type`, and `--stack` are the `/new` scaffold flags, parsed and
-validated by the same `/new` parser, so they take exactly the same values and
-have the same purpose: they steer the generated prompt towards a target
-project shape. `--language` and `--type` are all-or-nothing — supplying one
-without the other (or a lone `--stack`) is a usage error, exactly as with
-`/new`. Run `/new help` for the full accepted-value lists.
-
-`--folder`, `--github`, and `--gitlab` only take effect when the scaffold
-flags are present — supplying any of them without `--language` and `--type` is
-a usage error.
+The `<repo>` forms, every flag and the flag-combination rules are in
+[slashcommands/specreverse.md](slashcommands/specreverse.md#options). In short:
+`--language`/`--type`/`--stack` are the `/new` scaffold flags (`--language` and
+`--type` together, `--stack` optional); `--create <name>` chains into
+`/spec create`; `--depth <N>` (1-10, default 1) is covered in
+[Section 10](#10-the---depth-flag); `--folder <path>` and `--github` /
+`--gitlab` take effect only with the scaffold flags (see
+[Section 6.1](#61-scaffolding-with---folder)).
 
 `<repo>` must be the first argument after `reverse`. An invocation that starts
 with a flag (e.g. `/spec reverse --language rust --type cmdline`) is a usage

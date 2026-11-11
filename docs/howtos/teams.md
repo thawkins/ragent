@@ -181,20 +181,10 @@ In the Teams panel, click the `[T]` button next to a teammate to open their outp
 
 ## 5) Complete slash command reference
 
-| Command | Arguments | Description |
-|---|---|---|
-| `/team help` | none | Show command reference table. |
-| `/team status` | none | Show the currently active team in this session. |
-| `/team show [name]` | optional `name` | Show one team in detail, or all registered teams when no name is given. |
-| `/team create <blueprint> [name]` | required `blueprint`, optional `name` | Create a new project-local team (blueprint mandatory) and set it active. |
-| `/team close` | none | Close the active team in this session (does not delete on disk). |
-| `/team delete <name>` | required `name` | Delete a team from disk (also clears active state if it is active). |
-| `/team blueprint [name]` | optional `name` | List all installed blueprints, or show details of a specific blueprint. |
-| `/team message <teammate-name> <text>` | required `teammate-name`, `text` | Send a mailbox message from lead to a teammate. |
-| `/team tasks` | none | Show the task table for the active team. |
-| `/team clear` | none | Clear/remove the active team task list file. |
-| `/team cleanup` | none | Clean up the active team (requires no working teammates). |
-| `/team forcecleanup` | none | Force-clean the active team: deactivate and remove all teammates even if still active, then clear team state. Prompts for confirmation. |
+The full `/team` syntax and subcommand table (`help`, `status`, `show`,
+`create`, `close`, `delete`, `blueprint`, `message`, `tasks`, `clear`,
+`cleanup`, `forcecleanup`, `focus`) is in
+[slashcommands/team.md](slashcommands/team.md#options--subcommands).
 
 Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams blueprint`).
 
@@ -797,13 +787,9 @@ creates an ephemeral team, and orchestrates parallel execution.
 
 ### Swarm commands
 
-| Command | Description |
-|---|---|
-| `/swarm <prompt>` | Decompose a goal into parallel subtasks and spawn a team |
-| `/swarm --agent <type> <prompt>` | Same as above, but sets a default agent type for all subtasks |
-| `/swarm status` | Show live progress of the active swarm |
-| `/swarm cancel` | Cancel the active swarm and clean up |
-| `/swarm help` | Show the swarm help message |
+`/swarm <prompt>`, `/swarm --agent <type> <prompt>`, `/swarm status`,
+`/swarm cancel` and `/swarm help`; see
+[slashcommands/swarm.md](slashcommands/swarm.md#options--subcommands).
 
 ### How it works
 

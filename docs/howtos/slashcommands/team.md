@@ -44,8 +44,8 @@ separate `/teams` command surface.
 | `status` | Team and task status summary for the active team. |
 | `show [name]` | Shows team details; an optional team name may be given. |
 | `create <blueprint> [name]` | Creates a team from a blueprint. Without `[name]` the team is auto-named `<blueprint>-<YYYYMMDD-HH-MM-SS>` using the current UTC time. |
-| `close` | Closes the active team. |
-| `delete <name>` | Deletes the named team's state. |
+| `close` | Closes the active team in this session (does not delete it on disk). |
+| `delete <name>` | Deletes the named team from disk (also clears the active state if it is the active team). |
 | `blueprint [name]` | Shows or selects the team blueprint. |
 | `message <teammate-name> <text>` | Sends a mailbox message to the named teammate. |
 | `tasks` | Lists the shared team task list. |
