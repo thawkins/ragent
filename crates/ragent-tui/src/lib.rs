@@ -508,12 +508,15 @@ pub async fn run_tui(
 
                 // Announce the project instruction files. No model call: they
                 // already reach the model through the system prompt (#38).
-                if let Err(e) = app
-                    .session_processor
-                    .announce_instruction_files(&session_id)
-                {
-                    tracing::warn!(error = %e, "Instruction-file announcement failed");
-                }
+                // Discovery walks the project tree, so it runs on a blocking
+                // thread and the notice arrives over the event bus; startup
+                // does not wait for it.
+                let proc = Arc::clone(&app.session_processor);
+                drop(tokio::task::spawn_blocking(move || {
+                    if let Err(e) = proc.announce_instruction_files(&session_id) {
+                        tracing::warn!(error = %e, "Instruction-file announcement failed");
+                    }
+                }));
             }
             Err(e) => {
                 startup.record("Session create (DB)", t_db.elapsed());
