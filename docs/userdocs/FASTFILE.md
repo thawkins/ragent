@@ -87,7 +87,7 @@ Acceptance criteria for each milestone
 - M2 accepted when core primitives compile, pass unit tests and can run a dry-run multi-file edit with no disk writes.
 - M3 accepted when example and wrapper compile and are exercised manually.
 - M4 accepted when CI runs pass and benchmark shows performance improvement vs baseline.
-- M5 accepted when docs are published and CHANGELOG & RELEASE.md updated.
+- M5 accepted when docs are published and CHANGELOG updated.
 
 Risk assessment
 ---------------
@@ -117,7 +117,6 @@ Checklist before merging
 - [ ] Benchmarks added and baseline recorded
 - [ ] Docs updated in docs/
 - [ ] CHANGELOG.md updated
-- [ ] RELEASE.md updated with summary
 
 Owners & stakeholders
 ---------------------

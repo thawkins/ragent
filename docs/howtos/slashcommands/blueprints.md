@@ -75,5 +75,4 @@ blueprints.
 - `/team create <blueprint> [name]` -- create a team from a listed blueprint
 - `/team blueprint [name]` -- show or select the active team's blueprint
 - `/team` -- full team command surface
-- docs/userdocs/TEAMS.md -- teams user guide
 - docs/howtos/teams.md -- teams how-to manual

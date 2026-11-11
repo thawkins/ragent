@@ -106,5 +106,4 @@ same task and messaging tools the lead uses.
 - `/blueprints` -- list installed team blueprints
 - `/swarm` -- auto-decompose a goal into parallel subtasks
 - `team_*` tools -- spawn, task, and messaging tools used inside a team
-- docs/userdocs/TEAMS.md -- teams user guide
 - docs/howtos/teams.md -- teams how-to manual

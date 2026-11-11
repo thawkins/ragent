@@ -841,7 +841,6 @@ With a default agent type:
 
 ## 16) Related docs and examples
 
-- Team guide: `docs/userdocs/TEAMS.md`
 - Quickstart: `QUICKSTART.md` (Teams section)
 - Blueprint location: `[PROJECT]/.ragent/blueprints/teams/`, `~/.config/ragent/blueprints/teams/`, or `~/.ragent/blueprints/teams/`
 - Blueprints installed in this repository:

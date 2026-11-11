@@ -930,7 +930,6 @@ Quick flow:
 
 Docs and examples:
 
-- Guide: [`docs/userdocs/TEAMS.md`](docs/userdocs/TEAMS.md)
 - How-to manual: [`docs/howtos/teams.md`](docs/howtos/teams.md)
 - Blueprints: [`docs/howtos/slashcommands/blueprints.md`](docs/howtos/slashcommands/blueprints.md)
   (`/blueprints list` shows the team blueprints installed locally)

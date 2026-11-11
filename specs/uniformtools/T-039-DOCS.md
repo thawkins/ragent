@@ -98,7 +98,7 @@ The mechanical half, by document, with the shape of each change:
 | `docs/howtos/config.md` | the permission-type table mixed tool names into permission types (`Edit` / `Write` / `bash` / `EnterPlanMode` / `ExitPlanMode` in the *Name* column). Those are permission types and FR-028 keeps them, so the column now spells the permission spelling (`edit`, `write`, `bash`, `plan_enter`, `plan_exit`) with a note naming the tool |
 | `docs/howtos/sandbox-backends.md` | the worked example's prompt `List the files ... with \`bash: ls -la\`` |
 | `docs/howtos/slashcommands/{bash,editlog,task,yolo}.md` | "the bash tool's 7-layer model", the edit-log's list of tools it records, `task_create`/`task_update`/`task_get` in the `/task` transcripts |
-| `docs/userdocs/introduction.md`, `docs/userdocs/TEAMS.md` | the built-in-tool sentence and the three plan-mode rows that said "no write/bash tools active" |
+| `docs/userdocs/introduction.md`, the former `userdocs` teams guide (superseded by `docs/howtos/teams.md`) | the built-in-tool sentence and the three plan-mode rows that said "no write/bash tools active" |
 | `crates/ragent-config/src/config.rs` | `ToolVisibilityConfig::plan`'s doc comment named `plan_enter, plan_exit` |
 | `crates/ragent-agent/src/skill/mod.rs` | a doc comment naming "the `skill_manage reload` action" |
 | `crates/ragent-agent/src/tool/skill_manage.rs` | the not-found hint a *user* reads: "run skill_manage action=reload" -> "run Skill action=reload" |
@@ -270,7 +270,8 @@ another task's edits and are not this task's):
 `docs/howtos/tools/interactive.md`, `docs/howtos/tools/planning.md`,
 `docs/howtos/tools/search.md`, `docs/howtos/tools/shell.md`,
 `docs/howtos/tools/skills.md`, `docs/howtos/tools/task-management.md`,
-`docs/userdocs/TEAMS.md`, `docs/userdocs/introduction.md`.
+the former `userdocs` teams guide (superseded by `docs/howtos/teams.md`),
+`docs/userdocs/introduction.md`.
 
 `CHANGELOG.md` (the `Renamed` section).
 
