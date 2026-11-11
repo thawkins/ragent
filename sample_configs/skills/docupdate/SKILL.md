@@ -29,9 +29,16 @@ Steps:
   - `CHANGELOG.md` — add a new entry for each commit and, when the `uncommitted`/`uncommited` argument is used, an additional "uncommitted" entry summarising the worktree changes, including the commit hash or "uncommitted" marker and a short description.
   - `README.md` — update any relevant sections to reflect recent changes.
   - `STATS.md` — Update the project stats.
-  - `SPEC.md` - Update the master spec file.
-  - `QUICKSTART.md` - Update the quickstart file.
-  - `TUI-QUICKSTART.md` - Update the tui info file.
+  - `SPEC.md` - Update the master spec file's feature content only.
+  - `QUICKSTART.md` - Update the quickstart file's feature content only.
+  - `TUI-QUICKSTART.md` - Update the tui info file's feature content only.
+
+  Release history has one home: `CHANGELOG.md`. Do **not** add "Version x",
+  "Highlights (vX)", "Release Highlights" or version-history sections or table
+  rows to `SPEC.md`, `QUICKSTART.md` or `TUI-QUICKSTART.md`; each of them carries
+  a single link to `CHANGELOG.md` instead. In those three files, edit the live
+  section that describes the changed feature (command syntax, flags, config
+  keys, behaviour) so it states the current behaviour, without release prose.
 
   ###### Update the following files in the docs/howtos folder:
 

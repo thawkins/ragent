@@ -696,40 +696,19 @@ Generic OpenAI-compatible endpoint (including custom port) can be configured in
 ```
 ragent [OPTIONS] [COMMAND]
 
-Commands:
   run          Execute agent with prompt
   serve        Start HTTP server only
-  orchestrate  Run a small orchestration example (demonstrates multi-agent coordinator)
-  session      Manage sessions (list, resume, export-archive, import)
-  db           Inspect and compact the session database (prune)
-  memory       Manage persistent memory (list)
-  auth         Configure provider authentication
+  session      Manage sessions
   models       List available models
-  config       Show resolved configuration (show, check)
+  config       Show resolved configuration
   research     Manage research items under `research/`
   spec         Run spec commands from the CLI (the `/spec` slash-command parity surface)
-  plugins      Manage plugins (the `/plugins` slash-command parity surface)
-  connectors   Manage connectors (the `/connectors` slash-command parity surface)
-  openapi      Emit the OpenAPI 3.1 document (or `--client` for the generated typed client)
-  automation   Manage automations (the `/automation` slash-command parity surface)
-  acp-server   Serve the ACP endpoint on stdio for IDE clients (features acp-server)
   new          Scaffold a new project in the current directory (the `/new` command)
-
-Options:
-      --model <MODEL>          Override model (provider/model format)
-      --agent <AGENT>          Override agent [default: general]
-      --log-level <LOG_LEVEL>  Log level, trace..error or all [default: info]
-      --no-tui                 Disable TUI, use plain stdout
-      --yes                    Auto-approve all permissions
-      --log                    Show the log panel in the TUI
-      --config <CONFIG>        Path to config file
-      --maxsteps <MAXSTEPS>    Maximum number of agentic loop steps (default: 500)
-      --dry-run                Run a readiness check without invoking any model or tool
-      --json                   Emit the dry-run readiness report as JSON
-      --no-git-context         Disable automatic git context injection
-      --no-readme-context      Disable automatic README context injection
-  -V, --version                Print the ragent version and exit
 ```
+
+With no command, `ragent` launches the interactive TUI. Run `ragent --help` for
+the full list of commands and options, and `ragent <command> --help` for one
+command.
 
 `ragent run --dry-run` is the fastest way to confirm a machine is set up: it loads
 config, resolves the provider, lists the registered skills and tools by category, and

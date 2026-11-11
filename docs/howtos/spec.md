@@ -1302,13 +1302,9 @@ The `sdd.feedback_loop` flag enables this feature:
 Specs are also accessible to the agent as first-class LLM tools, so a
 coding agent can read and track specs without slash commands:
 
-| Tool | Purpose |
-|------|---------|
-| `spec_read` | Read a specification by ID (full SPEC.md content, requirements, tasks, status) |
-| `spec_list` | List specifications, optionally filtered by status |
-| `spec_search` | Keyword search across spec titles and content |
-| `spec_task_update` | Update a task's status (`pending`/`in_progress`/`completed`/`blocked`) within a spec |
-| `spec_coverage` | Generate a requirement-coverage report showing which requirements are linked to completed tasks |
+`spec_read`, `spec_list`, `spec_search`, `spec_task_update` and
+`spec_coverage`; their arguments and examples are in
+[tools/spec-management.md](tools/spec-management.md).
 
 ---
 

@@ -160,8 +160,9 @@ const SAFE_COMMANDS: &[&str] = &[
 
 ### Layer 2 — Banned commands
 
-A word-boundary match against `BANNED_COMMANDS`. These are network / exfiltration and
-attack tools that are almost never legitimate inside an agent:
+A word-boundary match against `BANNED_COMMANDS` (so `curl` does not match inside
+`scroll`). These are network / exfiltration and attack tools that are almost never
+legitimate inside an agent:
 
 ```rust
 const BANNED_COMMANDS: &[&str] = &[
@@ -194,8 +195,10 @@ if contains_banned_command(command) {
 
 `is_directory_escape_attempt(command, &ctx.working_dir)` rejects commands that `cd` or
 `pushd` out of the working directory via `..`, `~`, `$HOME`, `${HOME}`, or absolute `/`
-paths (and, on Windows, `C:\` / `\` drive roots). This keeps the agent's filesystem view
-inside its sandbox. This layer is **never** overridden.
+paths (and, on Windows, `C:\` / `\` drive roots). Absolute paths that stay inside the
+working directory are allowed after canonicalization, and single-segment slash-prefixed
+tokens (e.g. `/help`, `/start`) are treated as commands rather than paths. This keeps the
+agent's filesystem view inside its sandbox. This layer is **never** overridden.
 
 ### Layer 4 — Syntax validation
 
@@ -213,9 +216,11 @@ Syntax validation is **skipped for PowerShell** (which has its own runtime parse
 
 ### Layer 5 — Denied commands & patterns
 
-Three sub-checks that are **never** bypassed by the allowlist (only by YOLO):
+Three sub-checks that are **never** bypassed by the allowlist (only by YOLO). Denied
+commands are checked after heredoc bodies are stripped, so string literals inside a
+heredoc do not cause false positives.
 
-**3a. Denied commands** (word-boundary):
+**5a. Denied commands** (word-boundary):
 
 ```rust
 const DENIED_COMMANDS: &[&str] = &[
@@ -227,7 +232,7 @@ const DENIED_COMMANDS: &[&str] = &[
 ];
 ```
 
-**3b. Denied command patterns** (prefix patterns):
+**5b. Denied command patterns** (prefix patterns):
 
 ```rust
 const DENIED_COMMAND_PATTERNS: &[&str] = &[
@@ -237,7 +242,7 @@ const DENIED_COMMAND_PATTERNS: &[&str] = &[
 ];
 ```
 
-**3c. Denied substring patterns** — the most destructive forms:
+**5c. Denied substring patterns** — the most destructive forms:
 
 ```rust
 const DENIED_PATTERNS: &[&str] = &[
@@ -281,7 +286,7 @@ if !ragent_config::yolo::is_enabled()
 
 > **Important asymmetry:** an allowlist entry only exempts a command from **Layer 2
 > (banned commands)**. It does **not** exempt it from the denylist (Layer 6) or the
-> denied-pattern checks (Layer 3). That is by design.
+> denied-pattern checks (Layer 5). That is by design.
 
 ### Layer 7 — Obfuscation detection
 
@@ -373,9 +378,9 @@ terminal password prompt.
 ## YOLO mode
 
 YOLO mode (`crates/ragent-config/src/yolo.rs`) is an escape hatch for trusted,
-single-user environments. It bypasses **Layers 2, 3, 6, and 7** (banned commands, denied
-commands/patterns, user denylist, and obfuscation detection). Layers 1, 4, and 5
-(directory-escape and syntax validation) remain active — YOLO does **not** let the agent
+single-user environments. It bypasses **Layers 2, 5, 6, and 7** (banned commands, denied
+commands/patterns, user denylist, and obfuscation detection). Layers 1, 3, and 4
+(safe-command whitelist, directory-escape and syntax validation) remain active — YOLO does **not** let the agent
 escape its working directory or run syntactically-invalid commands.
 
 Enable it with `/yolo`, `Alt+Y`, or by setting `"yolo": true` in config. Once enabled in
@@ -385,7 +390,7 @@ either the global or project config it stays enabled (OR merge semantics).
 
 ## Platform notes
 
-- **PowerShell:** syntax pre-validation (Layer 5) is skipped; the runtime parser inside
+- **PowerShell:** syntax pre-validation (Layer 4) is skipped; the runtime parser inside
   the wrapper handles it. All other layers apply.
 
 ---
@@ -411,7 +416,7 @@ either the global or project config it stays enabled (OR merge semantics).
 | ----------------------- | ------------------- | -------- | ----------------------------------------------------------- |
 | `bash.allowlist`        | `string[]`          | `[]`     | Command prefixes that bypass the banned-command check        |
 | `bash.denylist`         | `string[]`          | `[]`     | Substring patterns that always reject a command              |
-| `yolo`                  | `bool`              | `false`  | Master switch that bypasses security layers 2, 3, 6, 7       |
+| `yolo`                  | `bool`              | `false`  | Master switch that bypasses security layers 2, 5, 6, 7       |
 
 ### Examples
 
