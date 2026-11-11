@@ -11,12 +11,11 @@
 //! 2. [`Self::build_turn_system_prompt`] - assemble the system prompt.
 //! 3. [`Self::build_turn_chat_messages`] - load history, optionally compress,
 //!    convert to `ChatMessage`s.
-//! 4. [`Self::run_inline_init_acknowledgement`] - AGENTS.md init exchange.
-//! 5. (loop) [`Self::call_llm_step`] - call the LLM with retry + stream
+//! 4. (loop) [`Self::call_llm_step`] - call the LLM with retry + stream
 //!    event handling.
-//! 6. (loop) [`Self::dispatch_tool_calls`] - execute tool calls and collect
+//! 5. (loop) [`Self::dispatch_tool_calls`] - execute tool calls and collect
 //!    results.
-//! 7. [`Self::finalize_assistant_message`] - final save + timing + hooks.
+//! 6. [`Self::finalize_assistant_message`] - final save + timing + hooks.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -47,10 +46,9 @@ use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent, ToolDefinition};
 use crate::message::{Message, MessagePart, Role};
 use crate::session::history::{
-    PendingToolCall, chat_request_payload_bytes, estimate_request_bytes_with_tool_bytes,
-    history_to_chat_messages, history_version_of, is_permanent_llm_api_error,
-    is_token_overflow_error_message, should_retry_stream_error,
-    stream_has_meaningful_partial_output,
+    PendingToolCall, estimate_request_bytes_with_tool_bytes, history_to_chat_messages,
+    history_version_of, is_permanent_llm_api_error, is_token_overflow_error_message,
+    should_retry_stream_error, stream_has_meaningful_partial_output,
 };
 use crate::session::processor::SessionProcessor;
 use crate::session::prompt_builders::{
@@ -889,121 +887,6 @@ impl SessionProcessor {
         // P-3: return `context_window` so the orchestrator can reuse it
         // instead of resolving the identical value a second time.
         Ok((chat_messages, last_reported_input_tokens, context_window))
-    }
-
-    /// Run the display-only AGENTS.md acknowledgement exchange (streams to the
-    /// TUI but is NOT added to `chat_messages`). Skips subagent/teammate
-    /// sessions and sessions that already have an assistant turn.
-    pub(crate) async fn run_inline_init_acknowledgement(
-        &self,
-        session_id: &str,
-        agent: &AgentInfo,
-        history: &[Message],
-        system_prompt: &Arc<str>,
-        client: &Arc<dyn crate::llm::LlmClient>,
-        model_ref: &crate::agent::ModelRef,
-        working_dir: &std::path::Path,
-    ) -> Result<()> {
-        let has_tools = agent.max_steps.is_none_or(|s| s > 1);
-        let has_prior_exchange = history.iter().any(|m| m.role == Role::Assistant);
-        let is_subagent = agent.mode == crate::agent::AgentMode::Subagent;
-        if !has_prior_exchange && has_tools && !is_subagent {
-            let agents_md_path = working_dir.join("AGENTS.md");
-            if agents_md_path.is_file() {
-                let init_text = "AGENTS.md project guidelines have been loaded.\n\n\
-                                 Please acknowledge them briefly.";
-                let init_messages = vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: ChatContent::Text(init_text.to_string()),
-                }];
-                let init_request = ChatRequest {
-                    model: model_ref.model_id.clone(),
-                    messages: Arc::new(init_messages),
-                    tools: Arc::new(Vec::new()),
-                    temperature: agent.temperature,
-                    top_p: agent.top_p,
-                    max_tokens: Some(200),
-                    system: Some(std::sync::Arc::clone(system_prompt)),
-                    options: (*agent.options).clone(),
-                    session_id: Some(session_id.to_string()),
-                    request_id: Some(Uuid::new_v4().to_string()),
-                    stream_timeout_secs: None,
-                    thinking: agent.thinking.clone(),
-                };
-                self.event_bus.publish(Event::RequestStarted {
-                    session_id: session_id.to_string(),
-                    outbound_bytes: chat_request_payload_bytes(&init_request),
-                });
-                match client.chat(init_request).await {
-                    Ok(mut stream) => {
-                        // Per-event stall guard, matching the main loop's
-                        // stall detection (`stream_config.timeout_secs`)
-                        // instead of a fixed 60s: slow providers (e.g. a
-                        // local reasoning model that thinks for over a
-                        // minute before its first token) were aborted
-                        // mid-ack even though the stream was healthy. Hoisted
-                        // above the per-event loop: the value is loop-invariant.
-                        let stall_secs = self.stream_config.timeout_secs;
-                        loop {
-                            let ev = match tokio::time::timeout(
-                                std::time::Duration::from_secs(stall_secs),
-                                stream.next(),
-                            )
-                            .await
-                            {
-                                Ok(Some(event)) => event,
-                                Ok(None) => break,
-                                Err(_) => {
-                                    tracing::warn!(
-                                        session_id = %session_id,
-                                        stall_secs,
-                                        "AGENTS.md init exchange stream stalled - no data"
-                                    );
-                                    break;
-                                }
-                            };
-                            match ev {
-                                StreamEvent::TextDelta { text } => {
-                                    self.event_bus.publish(Event::TextDelta {
-                                        session_id: session_id.to_string(),
-                                        text: text.clone(),
-                                    });
-                                }
-                                StreamEvent::Usage {
-                                    input_tokens,
-                                    output_tokens,
-                                } => {
-                                    self.event_bus.publish(Event::TokenUsage {
-                                        session_id: session_id.to_string(),
-                                        input_tokens,
-                                        output_tokens,
-                                    });
-                                }
-                                _ => {}
-                            }
-                        }
-                        self.event_bus.publish(Event::MessageEnd {
-                            session_id: session_id.to_string(),
-                            message_id: "init".to_string(),
-                            reason: FinishReason::Stop,
-                        });
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            session_id = %session_id,
-                            error = %e,
-                            "AGENTS.md init exchange failed - skipping acknowledgement"
-                        );
-                        self.event_bus.publish(Event::MessageEnd {
-                            session_id: session_id.to_string(),
-                            message_id: "init".to_string(),
-                            reason: FinishReason::Stop,
-                        });
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Call the LLM with retry on transient failures, process stream events,

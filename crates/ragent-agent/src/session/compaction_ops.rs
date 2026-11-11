@@ -37,8 +37,7 @@ impl SessionProcessor {
     ///
     /// Unlike [`SessionProcessor::process_message`], this never enters the
     /// agent loop: no tool definitions are sent, no system prompt is built,
-    /// the AGENTS.md init acknowledgement exchange is skipped, and the
-    /// current model's thinking configuration is not applied.
+    /// and the current model's thinking configuration is not applied.
     ///
     /// # Arguments
     ///

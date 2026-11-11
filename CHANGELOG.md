@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Removed - AGENTS.md acknowledgement exchange
+
+- A new session no longer asks the model to acknowledge `AGENTS.md`. That
+  exchange resent the whole system prompt (about 13.7k tokens) on every new
+  session only to get a greeting back. The TUI still lists the instruction
+  files it found at startup, with no model call (#38).
+- `SessionProcessor::run_init_exchange` is replaced by the synchronous
+  `announce_instruction_files(session_id)`.
+
 ### Fixed - CLI handlers honour `--config`
 
 - `ragent research` (`create`, `continue`, `update`, `deck`) and

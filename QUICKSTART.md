@@ -669,8 +669,8 @@ On session start, ragent automatically loads this file into the system prompt fo
 multi-step agents (general, build, plan, explore). The `ask` agent and internal utility
 agents skip it.
 
-The model will acknowledge the guidelines with a brief greeting in the message window
-before processing your first message. Example `AGENTS.md` content:
+At session start the message window lists the instruction files that were found.
+Example `AGENTS.md` content:
 
 ```markdown
 # Agent Guidelines

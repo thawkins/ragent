@@ -6,11 +6,11 @@
 //! `test_loop_steps_harness.rs` (an external `tests/` crate cannot call the
 //! `pub(crate)` loop-step methods, so every path is driven through the public
 //! `process_message` / `process_user_message` entry points and the public
-//! `run_init_exchange`) and widens it to reach branches the existing
+//! `announce_instruction_files`) and widens it to reach branches the existing
 //! `test_processor_loop_paths.rs` and `test_loop_steps_extra.rs` files do not:
 //!
-//! - the display-only AGENTS.md init acknowledgement (and its second-turn skip);
-//! - the public `run_init_exchange` path (persisted ack);
+//! - a first turn with AGENTS.md present makes a single request (#38);
+//! - `announce_instruction_files` makes no model call;
 //! - reasoning-only stream events and the `ReasoningDelta` publish;
 //! - `RateLimit` / `QuotaUpdate`, `ToolsSent`, `ToolCallArgs`, `ToolCallBatch`;
 //! - `FinishReason::Length` (truncation notice) and `FinishReason::ContentFilter`
@@ -710,22 +710,17 @@ async fn test_finish_tool_use_without_calls_records_truncation() -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// AGENTS.md init acknowledgement
+// AGENTS.md: no acknowledgement exchange
 // ---------------------------------------------------------------------------
 
-/// With an AGENTS.md present and no prior assistant turn, the display-only init
-/// acknowledgement issues an extra request before the main turn; a second turn
-/// skips it because an assistant message now exists.
+/// With an AGENTS.md present, the first turn makes exactly one model request:
+/// no separate acknowledgement exchange resends the system prompt (#38).
 #[tokio::test]
-async fn test_init_acknowledgement_runs_then_skips() -> Result<()> {
+async fn test_first_turn_with_agents_md_makes_one_request() -> Result<()> {
     let event_bus = Arc::new(EventBus::new(4096));
     let (processor, working_dir, captured, _dir) = make_plain(
         event_bus.clone(),
-        vec![
-            ScriptedReply::Text("acknowledged".to_string()),
-            ScriptedReply::Text("first reply".to_string()),
-            ScriptedReply::Text("second reply".to_string()),
-        ],
+        vec![ScriptedReply::Text("first reply".to_string())],
     )?;
     std::fs::write(working_dir.join("AGENTS.md"), "# Guidelines\n\nBe nice.\n")
         .expect("write AGENTS.md");
@@ -744,34 +739,15 @@ async fn test_init_acknowledgement_runs_then_skips() -> Result<()> {
         .await
         .expect("first turn succeeds");
     assert_eq!(first.text_content(), "first reply");
-    assert_eq!(
-        captured_count(&captured),
-        2,
-        "init ack + main request on the first turn"
-    );
-
-    let second = processor
-        .process_message(
-            &session.id,
-            "turn two",
-            &make_agent(),
-            Arc::new(AtomicBool::new(false)),
-        )
-        .await
-        .expect("second turn succeeds");
-    assert_eq!(second.text_content(), "second reply");
-    assert_eq!(
-        captured_count(&captured),
-        3,
-        "the init ack is skipped once an assistant turn exists"
-    );
+    assert_eq!(captured_count(&captured), 1, "only the main request");
     Ok(())
 }
 
-/// The public `run_init_exchange` resolves the model, streams the ack, and
-/// persists the user trigger plus the assistant acknowledgement.
+/// With an `AGENTS.md` present, `announce_instruction_files` publishes the
+/// discovery notice but makes no model request and persists no messages: the
+/// guidelines already reach the model through the system prompt (#38).
 #[tokio::test]
-async fn test_run_init_exchange_persists_ack() -> Result<()> {
+async fn test_announce_instruction_files_makes_no_model_call() -> Result<()> {
     let event_bus = Arc::new(EventBus::new(4096));
     let mut rx = event_bus.subscribe();
     let (processor, working_dir, captured, _dir) = make_plain(
@@ -785,19 +761,14 @@ async fn test_run_init_exchange_persists_ack() -> Result<()> {
         .expect("session created");
 
     processor
-        .run_init_exchange(&session.id, &make_agent(), Arc::new(AtomicBool::new(false)))
-        .await
-        .expect("run_init_exchange succeeds");
-    assert_eq!(captured_count(&captured), 1, "one init request");
-
+        .announce_instruction_files(&session.id)
+        .expect("announcement succeeds");
+    assert_eq!(captured_count(&captured), 0, "no init request");
     let stored = processor
         .session_manager
         .get_messages(&session.id)
         .expect("messages");
-    assert!(
-        stored.iter().any(|m| m.text_content() == "hello"),
-        "the ack is persisted for a well-formed history"
-    );
+    assert!(stored.is_empty(), "nothing is persisted");
     assert!(collect_events(&mut rx).agent_notice);
     Ok(())
 }

@@ -395,10 +395,6 @@ pub async fn run_tui(
 
     // Subscribe to the event bus before starting background services.
     //
-    // This includes the startup init exchange. If we spawn that exchange before
-    // subscribing, streamed startup deltas can be treated as "dropped" and
-    // produce a large burst of warning logs.
-    //
     // The startup MCP connect loop (`src/main.rs`) publishes its per-server
     // `McpStatusChanged` events from a task spawned *before* `run_tui` is
     // called, so those sends can land before this subscribe and be discarded
@@ -510,30 +506,17 @@ pub async fn run_tui(
                 terminal.draw(|frame| layout::render(frame, &mut app))?;
                 startup.record("Session create (render)", t_render.elapsed());
 
-                // Kick off the AGENTS.md acknowledgement exchange in the background
-                let t_init = Instant::now();
+                // Announce the project instruction files. No model call: they
+                // already reach the model through the system prompt (#38).
+                // Discovery walks the project tree, so it runs on a blocking
+                // thread and the notice arrives over the event bus; startup
+                // does not wait for it.
                 let proc = Arc::clone(&app.session_processor);
-                let mut init_agent = app.agent_info.clone();
-                if !init_agent.model_pinned || init_agent.model.is_none() {
-                    if let Some(ref model_str) = app.selected_model {
-                        if let Some((p, m)) = model_str.split_once('/') {
-                            init_agent.model = Some(ragent_agent::agent::ModelRef {
-                                provider_id: p.to_string(),
-                                model_id: m.to_string(),
-                            });
-                        }
+                drop(tokio::task::spawn_blocking(move || {
+                    if let Err(e) = proc.announce_instruction_files(&session_id) {
+                        tracing::warn!(error = %e, "Instruction-file announcement failed");
                     }
-                }
-                let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                tokio::spawn(async move {
-                    if let Err(e) = proc
-                        .run_init_exchange(&session_id, &init_agent, cancel)
-                        .await
-                    {
-                        tracing::warn!(error = %e, "Startup init exchange failed");
-                    }
-                });
-                startup.record("Session create (init exchange)", t_init.elapsed());
+                }));
             }
             Err(e) => {
                 startup.record("Session create (DB)", t_db.elapsed());
@@ -749,7 +732,7 @@ pub async fn run_tui(
     app.startup_timings = Some(startup);
     app.append_assistant_text("\n[ok] **Ready**\n");
     app.status = "ready".to_string();
-    app.status_set_at = None; // Ensure the init exchange response starts a new message bubble
+    app.status_set_at = None; // Ensure the first response starts a new message bubble
     app.force_new_message = true;
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 

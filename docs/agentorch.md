@@ -21,7 +21,6 @@ SessionProcessor::process_user_message        (session/processor.rs:459)
    ├─ 2. prepare_client                        (session/loop_steps.rs:125)
    ├─ 3. build_turn_system_prompt              (loop_steps.rs:364)
    ├─ 4. build_turn_chat_messages              (loop_steps.rs:602)
-   ├─ 5. run_inline_init_acknowledgement       (loop_steps.rs:689)
    │
    ▼  main loop  (processor.rs:675)
    ├─ compaction trigger check                 (processor.rs:756)
@@ -166,13 +165,7 @@ Returns an `Arc<str>` (PERF-006). The builders live in `session/prompt_builders.
 
 Returns `(chat_messages, compressed, last_reported_input_tokens, context_window)`.
 
-### 4.6 run_inline_init_acknowledgement (`loop_steps.rs:689`)
-
-Display-only AGENTS.md acknowledgement exchange: streams a one-shot "guidelines
-loaded" turn to the TUI. It is **not** persisted to history. Skipped for
-subagents and when an assistant turn already exists.
-
-### 4.7 The main loop (`processor.rs:675`)
+### 4.6 The main loop (`processor.rs:675`)
 
 The loop body per iteration:
 
@@ -181,15 +174,15 @@ The loop body per iteration:
    (`processor.rs:697`).
 2. **Publish `ToolsSent`** on step 1 only (PERF-004) — `processor.rs:734`.
 3. **Pre-send compaction check** — `processor.rs:756` (see §5).
-4. **call_llm_step** — `processor.rs:853` (see §4.8).
+4. **call_llm_step** — `processor.rs:853` (see §4.7).
 5. **Collect response parts** (reasoning + text) — `processor.rs:876`.
-6. **No-tool decision** — `processor.rs:914` (see §4.10).
-7. **Tool dispatch** — `processor.rs:947` (see §4.11).
+6. **No-tool decision** — `processor.rs:914` (see §4.9).
+7. **Tool dispatch** — `processor.rs:947` (see §4.10).
 8. **Background task / shell injection** — `processor.rs:1544` / `1587`.
 9. **Interim save** — `processor.rs:1622` (hash-compare to avoid redundant
    writes).
 
-### 4.8 call_llm_step (`loop_steps.rs:782`)
+### 4.7 call_llm_step (`loop_steps.rs:782`)
 
 The largest single step. With `max_retries` + linear backoff:
 
@@ -213,14 +206,14 @@ The largest single step. With `max_retries` + linear backoff:
 6. Return `LlmStepResult` (`loop_steps.rs:105`) with text/reasoning/tool-call
    buffers and token counts.
 
-### 4.9 Stream buffering & stall detection (`session/stream_buffer.rs`)
+### 4.8 Stream buffering & stall detection (`session/stream_buffer.rs`)
 
 - `StreamBuffer` (`stream_buffer.rs:50`) coalesces small deltas; flush on
   `256` chars or `50` ms (`stream_buffer.rs:14-16`).
 - `stall_pattern_set()` (`stream_buffer.rs:24`) — a `OnceLock<RegexSet>` of
   Ollama "planning" phrases used to nudge the model.
 
-### 4.10 handle_no_tool_decision (`loop_steps.rs:1265`)
+### 4.9 handle_no_tool_decision (`loop_steps.rs:1265`)
 
 When the LLM returned no tool calls:
 
@@ -232,7 +225,7 @@ When the LLM returned no tool calls:
 3. Post-compaction continuation nudge (once per turn) — `loop_steps.rs:1351`.
 4. Otherwise return `false` (break).
 
-### 4.11 Tool dispatch (`processor.rs:947`)
+### 4.10 Tool dispatch (`processor.rs:947`)
 
 - Build a single `ToolContext` per step and clone it per call (PERF-008/009) —
   `processor.rs:969`.
@@ -255,18 +248,18 @@ When the LLM returned no tool calls:
 - Auto spec-task update on file-write tools — `processor.rs:1489`.
 - Append assistant + tool-result `ChatMessage`s to history — `processor.rs:1534`.
 
-### 4.12 Background task / shell injection
+### 4.11 Background task / shell injection
 
 - Sub-agent completions drained from `AgentManager` and injected as a user
   `ContentPart::Text` — `processor.rs:1544`.
 - Background shell task completions drained from `bg_service` — `processor.rs:1587`.
 
-### 4.13 Interim save (`processor.rs:1622`)
+### 4.12 Interim save (`processor.rs:1622`)
 
 Hashes the assistant parts (`FxHasher`) and only writes when the hash changes
 (PERF-012), avoiding redundant SQLite updates every step.
 
-### 4.14 Finalize
+### 4.13 Finalize
 
 - Final save (moving the message into the closure, PERF-020) — `processor.rs:1682`
 - Publish `MessageEnd` (`FinishReason::Stop`) — `processor.rs:1716`
