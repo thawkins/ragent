@@ -17,7 +17,7 @@ ragent offers a rich set of features designed to enhance developer productivity:
 
 ### Comprehensive Tool System
 - File operations, shell execution, search and code-index tools
-- Web fetch/search, planning, task management, document (PDF/Office) and VCS (Git, GitHub, GitLab) tools
+- Web fetch/search, planning, task management, PDF document and VCS (Git, GitHub, GitLab) tools
 - Sub-agent and team tools for background and parallel work
 - See [the tools reference](../howtos/tools/INDEX.md) for every category and the command that lists the live registry
 
