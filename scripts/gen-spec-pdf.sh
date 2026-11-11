@@ -70,13 +70,20 @@ generate() {
 
     cd "$PROJECT_ROOT"
 
-    # md-to-pdf derives output name from input (SPEC.md → SPEC.pdf).
-    # We generate into the project root then optionally rename.
-    local tmp_out="$PROJECT_ROOT/SPEC.pdf"
+    # md-to-pdf does not render Mermaid, so pre-render first: given a Markdown
+    # input, mmdc writes each ```mermaid block out as an SVG next to the output
+    # file and replaces the block with an image link to it. The intermediate
+    # Markdown and SVGs live in target/temp so the repository stays clean.
+    local work_dir="$PROJECT_ROOT/target/temp/spec-pdf"
+    rm -rf "$work_dir"
+    mkdir -p "$work_dir"
+    local rendered="$work_dir/SPEC.md"
+    mmdc -i "$INPUT" -o "$rendered" -e svg
 
-    rm -f "$tmp_out"
+    # md-to-pdf derives the output name from its input (SPEC.md -> SPEC.pdf).
+    local tmp_out="$work_dir/SPEC.pdf"
 
-    md-to-pdf "$INPUT" \
+    md-to-pdf "$rendered" \
         --pdf-options '{
             "format": "A4",
             "margin": {

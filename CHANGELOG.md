@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed - audit follow-ups
+
+- `scripts/gen-spec-pdf.sh` now pre-renders SPEC.md's Mermaid diagrams with
+  `mmdc` before `md-to-pdf`; previously it required `mmdc` but never ran it,
+  so diagrams came out as raw code. Intermediate files go to
+  `target/temp/spec-pdf`, and `SPEC.pdf` is git-ignored (#32).
+- Source comments and guard scripts no longer cite deleted docs
+  (`AGENTS-RUST.md`, `DUPPLAN.md`, `JCODEPLAN.md`, `COMPLIANCE.md`, root
+  `RMPLAN.md`) (#30).
+
+### Added
+
+- BUG, FEATURE, TASK and CHANGE issue templates in `.github/ISSUE_TEMPLATE`
+  (#37).
+
 ### Fixed - small audit defects
 
 - Release workflow: the release-notes regex matched a literal `\Z` instead of
