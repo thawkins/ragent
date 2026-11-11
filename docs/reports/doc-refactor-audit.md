@@ -47,7 +47,7 @@ The largest root files:
 | AGENTS-LANGUAGE.md | 26,921 | 6,730 | Pulled in by the column-0 `@AGENTS-LANGUAGE.md` line (`expand_includes`) |
 | **Per session** | **54,767** | **~13,700** | ragent's first turn sends it twice: once as the system prompt and once in the init-ack request (`processor.rs`, `loop_steps.rs`) |
 | `.claude/skills/cargo-nextest/SKILL.md` | 8,167 | 2,042 when invoked | Its description loads every session (Claude Code and ragent `.claude` skill dir) |
-| graphify `SKILL.md` + 8 references | 41,276 | 10,319 when invoked | Embedded with `include_str!`. `/skillgen` installs it **globally**, so its description is listed in every project. |
+| graphify `SKILL.md` + 8 references | 41,276 | 10,319 when invoked | Embedded with `include_str!`. `/codeindex skillgen` installs it **globally**, so its description is listed in every project. |
 
 ### 1.3 Check table at baseline
 
@@ -127,7 +127,7 @@ These rank above every other category: a reader acts on them.
 
 | ID | Where | False claim | Check → truth |
 |---|---|---|---|
-| HOWTO-01 | bash.md and permissions.md `SAFE_COMMANDS` block | git, gh, cargo, npm, python, docker-compose, find, sed, awk, xargs, chmod, jq, patch are auto-approved | `bash.rs` list is 26 read/navigation commands with no VCS/build/interpreter commands. **This is a security-relevant misstatement.** |
+| HOWTO-01 | bash.md and permissions.md `SAFE_COMMANDS` block | git, gh, cargo, npm, python, docker-compose, find, sed, awk, xargs, chmod, jq, patch are auto-approved | `bash.rs` list is 26 commands, mostly read/navigation but including the file-modifying `mkdir`, `touch`, `cp` and `mv`, with no VCS/build/interpreter commands. A listed command skips only the permission prompt; `validate_shell_command` still runs. **This is a security-relevant misstatement.** |
 | HOWTO-06 | tools/gitlab.md; tools/planning.md | get_pipeline takes `id`; plan tools take no args | `pipeline_id`; EnterPlanMode `task`/`context`, ExitPlanMode `summary` |
 | HOWTO-08 | research.md POST body | `"from_file": "…"` | `from_files: Vec<String>`, no alias |
 | HOWTO-09 | research.md | `ragent research create … --from-file` | `--from-files` |
@@ -149,7 +149,7 @@ These rank above every other category: a reader acts on them.
 | DOCS-06 | JCODEPLAN gap matrix | apply_patch, bg, open, conversation_search … "Not present" | all present |
 | DOCS-09 | reports/code-audit.md High Priority | dry-run lacks `redact_secrets`, etc. | fixed at HEAD; the report has no per-finding status |
 | DOCS-16/22 | simplify-review.md; roocode_research.md | dated 2025 | commits/siblings are 2026 |
-| DOCS-24 | CODE_INDEX_SPEC "Applies to: function_analyzer" | analyzer emits effective LOC/`violates` | emits `line_count` only |
+| DOCS-24 | CODE_INDEX_SPEC "Applies to: function_analyzer" | analyzer implements the contract (effective LOC, `violates`) | emits `line_count`, `sloc` and `exceeds_threshold`; the verdict uses physical lines (`line_count`), not effective LOC, and the field names differ from the contract |
 | DOCS-25/27/28 | userdocs/introduction.md, TEAMS.md | presets `coder/architect/debug…`; MCP "in development"; `~/.ragent/teams`; `teams` config block in ragent.json; `team_task_update`; `/team create <name>` | none true. Teams live in `~/.config/ragent/teams/`, settings in the team's config.json, syntax `/team create <blueprint> [name]`. |
 | SPEC-03/04 | specs/otel, agentloop, compact | `ragent-types/src/event.rs`; `CompactionStarted`/`Finished` events | now `event/mod.rs`; events never existed |
 | TOOL-01 | CHANGELOG, SPEC | gen-spec-pdf.sh "uses Pandoc" | it uses md-to-pdf |
@@ -262,14 +262,14 @@ Fix by removing the number, or by keeping it next to its command. Never by updat
 
 ## 8. Gaps (category 7), found by walking clone → build → run → change
 
-1. README and QUICKSTART never say to install `cargo-nextest`; only TOOLCHAIN.md does.
-2. No doc gives `serve`'s default address (`127.0.0.1:3000`). The QUICKSTART curl examples assume `:9100`.
+1. README and QUICKSTART never say to install `cargo-nextest`; only TOOLCHAIN.md does. (README now mentions nextest after DOC-01; QUICKSTART still does not.)
+2. `serve`'s default address (`127.0.0.1:3000`): fixed in QUICKSTART by DOC-01. No new doc needed.
 3. `/i18n` has no howto or INDEX row (HOWTO-18).
-4. `/research deck` is undocumented (HOWTO-21).
-5. `/team forcecleanup`, `approve` and `reject` are undocumented (HOWTO-22).
-6. The `gcf` config section is undocumented (HOWTO-16).
+4. `/research deck` is documented in `docs/howtos/research.md` but missing from the command reference `slashcommands/research.md` (HOWTO-21). Add it there or link it; don't write a new guide.
+5. `/team forcecleanup`, `approve` and `reject` are documented in `docs/howtos/teams.md` but missing from `slashcommands/team.md` (HOWTO-22). Same narrowing as item 4.
+6. `gcf` is documented in `slashcommands/gcf.md` (including the `gcf.enabled` key) but not in `config.md`'s key reference (HOWTO-16). A one-line cross-reference is enough.
 7. Many tool parameters are missing from the docs (HOWTO-07: gitlab, teams, memory, TaskUpdate, AskUserQuestion, mf_screenshot).
-8. The `{{GIT_STATUS}}` and `{{README}}` prompt template variables are undocumented.
+8. The `{{GIT_STATUS}}` and `{{README}}` placeholders are already documented in `docs/howtos/custom-agents.md`. No new doc needed.
 9. Four crates have no `DOCS.md` (connectors, hyperresearch, plugins, surface), yet the convention says "every crate".
 10. `docs/performance/hasher-policy.md`, an active policy, has no inbound link.
 
@@ -281,7 +281,7 @@ Fix by removing the number, or by keeping it next to its command. Never by updat
 | CODE-02 | `ragent memory` about-text advertises export/import; only `list` exists | src/main.rs |
 | CODE-03 | `/status` is registered in `SLASH_COMMANDS` but has no dispatch arm, so it answers "Unknown command" | state.rs, slash.rs |
 | CODE-04 | `/router help` and its description advertise `stats` and `tier …`; the dispatcher has no such arms | slash.rs, state.rs |
-| CODE-05 | `/yolo` description advertises `help`; there is no arm. `/team` description advertises `open`; there is no arm. | state.rs |
+| CODE-05 | `/team` description advertises `open`; there is no arm. (`/yolo help` is handled in the fallback arm, so it is not a defect.) | state.rs |
 | CODE-06 | Generated TS client header says `ragent openapi --client typescript`; the flag is a bool | crates/ragent-server/src/routes/openapi.rs |
 | CODE-07 | Guard scripts and a Cargo.toml comment cite missing docs: `AGENTS-RUST.md`, `RMPLAN.md` (no `docs/` prefix), `DUPPLAN.md` | scripts/check_inline_tests.py, check-dead-code-reasons.sh, check-vcs-duplication.sh, Cargo.toml |
 | CODE-08 | release.yml note-extraction regex uses `\\Z` in a raw string, i.e. a literal `\Z` | .github/workflows/release.yml |
@@ -292,6 +292,7 @@ Fix by removing the number, or by keeping it next to its command. Never by updat
 | CODE-13 | No doc QA in CI: no link or anchor check, no `cargo doc -D warnings` | .github/workflows/ci.yml |
 | CODE-14 | AGENTS.md requires BUG/FEATURE/TASK/CHANGE issue templates; `.github/ISSUE_TEMPLATE` does not exist | .github/ |
 | CODE-15 | The init-ack round trip resends the full ~13.7k-token system prompt each session only to elicit an acknowledgement line | processor.rs, loop_steps.rs |
+| CODE-16 | `research.models.*`, `research.supervisor.max_concurrent_research_units` and `research.evaluate.enabled` are parsed but never applied: `build_session_config` reads only per-run request fields | crates/ragent-research/src/run_request.rs |
 
 ## 10. Pins: check before moving or renaming anything
 
@@ -368,6 +369,12 @@ Statuses: `Proposed` → `Approved` → `In progress` → `Done`. Cars marked �
 |---|---|
 | HOWTO-17 | config.md §7.2 lists `defaultAgent` as canonical with `default_agent` as alias; serde has it the other way round (`config.rs` `alias = "defaultAgent"`) |
 | HOWTO-26 | slashcommands/yolo.md omits the `show` alias of `/yolo status` |
+| HOWTO-14 | Stale `file.rs:NNN` line references in reactagent.md, bash.md and quit.md; replace them with symbol names |
+| INSTR-05 | AGENTS.md "Hi I'm RAgent…" and AGENTS-LANGUAGE.md "Rust language instructions loaded." opening lines. They conflict with ADHD rules 1 and 10 (lead with the action, no preamble) and leak into generated artifacts (`docs/research-phase2-plan.md` starts with them). Behavioral delta of removal: outputs stop opening with boilerplate. Code already confirms loading (`[ok] LOADED` in discovery, init-ack). |
+| INSTR-17 | AGENTS.md "no such thing as a pre-existing test failure… fix it" conflicts with "Touch only what you must / every changed line should trace to the request". Proposed: fix pre-existing failures in a separate commit and report them. Delta: predictable diff scope. |
+| INSTR-18 | AGENTS.md General Preferences "6. No unsafe code." contradicts the AGENTS-LANGUAGE approved-unsafe-sites table (which is accurate: 5 sites, all listed). Proposed: "No new unsafe; see the approved-sites table." Delta: removes a rule that cannot be satisfied. |
+| INSTR-19 | The ADHD block sits untitled under "4. Goal-Driven Execution" (heading "##### Persistence"), calls itself "this skill", and has two rule 4s and no rule 3. Proposed: give it a `##` title and fix the numbering; keep the "stop adhd mode"/"normal mode" toggles verbatim. Delta: rules become addressable. |
+| INSTR-27 | docupdate skill frontmatter key `arguments: true` is not a `SkillFrontmatter` field (silently ignored); ship skill has an unbalanced quote `'rust-hygiene"` (fixed by DOC-04) |
 | DOCS-02 | agentorch.md line-number references (about 250 `file.rs:NNN`) have rotted; `handle_no_tool_decision` no longer exists |
 | DOCS-05b | sqlite.md anchors `#appendix-a--measurement-harness` and `#t-09--remove-…` need the `---` slug (= LINK-08) |
 | DOCS-26 | introduction.md bare tool counts ("Built-in Tools (8)" etc.) and a "Document Structure" list of sections that do not exist |
