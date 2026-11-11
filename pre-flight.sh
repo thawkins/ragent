@@ -99,6 +99,11 @@ print_step "Inline test guard..."
 bash "$(dirname "$0")/scripts/check-inline-tests.sh" || print_failure "Inline test guard failed"
 bash "$(dirname "$0")/scripts/check-inline-tests.sh" --self-test || print_failure "Inline test guard self-test failed"
 
+# Markdown link and anchor check
+print_step "Doc link check..."
+python3 "$(dirname "$0")/scripts/check-doc-links.py" --self-test || print_failure "Doc link check self-test failed"
+python3 "$(dirname "$0")/scripts/check-doc-links.py" || print_failure "Doc link check failed"
+
 # Dead-code reason guard (docs/RMPLAN.md Milestone 7 / T7.2)
 print_step "Dead-code reason guard..."
 bash "$(dirname "$0")/scripts/check-dead-code-reasons.sh" || print_failure "Dead-code reason guard failed"

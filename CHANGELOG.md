@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added - doc link check in CI
+
+- `scripts/check-doc-links.py` checks every relative link and `#anchor` in
+  tracked Markdown offline, using GitHub's slug rules (keeps `_`, `--flag`
+  hyphens and `-1`/`-2` duplicate suffixes; ignores code). It runs in the new
+  `Doc links and anchors` CI job and in `pre-flight.sh`, with a `--self-test`
+  that seeds broken links (#36).
+
 ### Fixed - audit follow-ups
 
 - `scripts/gen-spec-pdf.sh` now pre-renders SPEC.md's Mermaid diagrams with
