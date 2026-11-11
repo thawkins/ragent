@@ -54,7 +54,7 @@ Each `content.elements` item:
 | `level` | integer | no | Heading level 1-3 (`heading`, default 1) |
 | `headers` | array | no | Column headers (`table`) |
 | `rows` | array | no | Rows, each an array of cell strings (`table`) |
-| `image_path` | string | no | PNG or JPEG file (`image`) |
+| `image_path` | string | yes, for `image` | PNG or JPEG file. An `image` element without it fails the whole `pdf_write` call |
 | `width_mm` | number | no | Display width in mm (`image`, default: fit page width) |
 | `caption` | string | no | Caption below the image (`image`) |
 
