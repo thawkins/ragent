@@ -5327,7 +5327,7 @@ working. Test names keep a `test_<file>::<fn>` shape, so one file is run with
 the filter form `cargo test -p <crate> --test all test_foo::`. The workspace
 compiles **one integration test target per crate plus one for the root package**
 (`ls crates/*/tests/all.rs tests/all.rs`) instead of one per test file, and
-`BUILDSTATS.md` records the resulting test cost and the re-measured line
+[`docs/BUILDSTATS.md`](docs/BUILDSTATS.md) records the resulting test cost and the re-measured line
 coverage.
 
 Three consequences are part of the contract:

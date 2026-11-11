@@ -127,7 +127,7 @@
 | Tests defined | 15,774 (`#[test]` / `#[tokio::test]` attributes, including `flavor = ...` variants, across `crates/`, `src/`, and root `tests/`) |
 | Test files | 1,253 under crate `tests/` trees (1,089 consolidated `test_*.rs` + 130 `tests/inline/*` modules, 19 `tests/all.rs` roots and the 15 shared support/prelude helpers); the 19 `tests/all.rs` roots are the per-crate targets |
 | Test binaries | 38 (19 consolidated `[[test]] name = "all"` integration targets - one per crate, 18 crate lib targets and the 1 root bin) |
-| Tests executed | 15,240 passed / 0 failed / 16 ignored across **40 reporting targets** (`cargo test --workspace --all-targets`, see `BUILDSTATS.md`) |
+| Tests executed | 15,240 passed / 0 failed / 16 ignored across **40 reporting targets** (`cargo test --workspace --all-targets`, see [`docs/BUILDSTATS.md`](docs/BUILDSTATS.md)) |
 | Line coverage | 86.7% (146,001 of 168,392 instrumented lines; not re-measured for the telemetry review) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 150 in 21 families (`mf_screenshot` engine-gated above the shown count); unchanged by the spec repair and the telemetry review |
@@ -311,7 +311,7 @@ suites around the block cursor; the setup-dialog chrome work adds
 and the connector-catalogue rebuild grows `test_connector_catalogue_*` to 54
 cases across the panel, mouse and acceptance suites.
 
-`BUILDSTATS.md` records that a full `cargo test --workspace --all-targets` run
+[`docs/BUILDSTATS.md`](docs/BUILDSTATS.md) records that a full `cargo test --workspace --all-targets` run
 executes **15,240 passed / 0 failed / 16 ignored** across 40 reporting test
 targets (the 19 consolidated `tests/all.rs` integration targets, 18 crate
 `src/lib.rs` targets, the 1 root `src/main.rs` target and the doc-test targets
@@ -336,7 +336,7 @@ cargo llvm-cov --workspace --all-targets --no-fail-fast \
 ```
 
 The figures below were **re-measured 2026-11-01** against the current working
-tree (`BUILDSTATS.md`), with `--ignore-filename-regex
+tree ([`docs/BUILDSTATS.md`](docs/BUILDSTATS.md)), with `--ignore-filename-regex
 '(^|/)(tests|benches|examples)/|target/'` so test, bench and example sources are
 excluded from both numerator and denominator.
 

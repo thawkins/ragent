@@ -30,7 +30,7 @@ ragent --version    # or: ragent -V
 ```
 
 Build requirements, the incremental-build setting and expected build cost are in
-[README.md - From source](README.md#from-source); `BUILDSTATS.md` records the
+[README.md - From source](README.md#from-source); [`docs/BUILDSTATS.md`](docs/BUILDSTATS.md) records the
 measured numbers.
 
 ---
