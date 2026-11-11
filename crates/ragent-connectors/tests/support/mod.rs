@@ -37,6 +37,12 @@ impl TempTree {
             "../../target/temp/connectors-test/shared-{name}-{}-{unique}",
             std::process::id()
         ));
+        // Under nextest every test is its own process, so the counter is always 0
+        // and the name is name + pid. CI restores `target/` from cache, so a
+        // directory from an earlier run with a reused pid may still exist.
+        if path.exists() {
+            std::fs::remove_dir_all(&path).expect("stale temp dir removable");
+        }
         std::fs::create_dir_all(&path).expect("temp tree creatable");
         std::fs::create_dir_all(path.join(".ragent")).expect("tree .ragent creatable");
         Self(path)

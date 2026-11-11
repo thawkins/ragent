@@ -48,6 +48,12 @@ fn empty_workdir(tag: &str) -> std::path::PathBuf {
         "../../target/temp/plugin-store-browser/{tag}-{}-{unique}",
         std::process::id()
     ));
+    // Under nextest every test is its own process, so the counter is always 0
+    // and the name is name + pid. CI restores `target/` from cache, so a
+    // directory from an earlier run with a reused pid may still exist.
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).expect("stale temp dir removable");
+    }
     std::fs::create_dir_all(&dir).expect("scratch workdir creatable");
     dir
 }

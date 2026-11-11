@@ -536,6 +536,12 @@ fn parse_plugin_dir_end_to_end_with_nested_claude_manifest() {
         "../../target/temp/plugins-test/manifest-e2e-{}-{unique}",
         std::process::id()
     ));
+    // Under nextest every test is its own process, so the counter is always 0
+    // and the name is name + pid. CI restores `target/` from cache, so a
+    // directory from an earlier run with a reused pid may still exist.
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).expect("stale temp dir removable");
+    }
     std::fs::create_dir_all(dir.join(".claude-plugin")).expect("fixture creatable");
     std::fs::write(
         dir.join(".claude-plugin/plugin.json"),
