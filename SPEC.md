@@ -5975,7 +5975,7 @@ All documentation markdown files are located in `docs/` except for these root fi
 - Azure AI Foundry provider — New `azure_foundry` provider for Microsoft Azure AI Foundry models
 - Azure endpoint logging — Full resolved endpoint URL displayed in TUI log panel
 - `/config show` slash command — Displays current resolved configuration
-- gen-spec-pdf.sh script — Pandoc + Chromium-based Markdown-to-PDF conversion
+- gen-spec-pdf.sh script — `md-to-pdf` (Chromium-based) Markdown-to-PDF conversion
 - Startup ASCII art banner — Application name in ASCII art with compile timestamp
 - `/codeindex lang` filtering — Optional language parameter for code index results
 - Instruction file discovery logging — Tracks AGENTS.md-style file discovery with summary
