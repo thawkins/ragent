@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed - small audit defects
+
+- Release workflow: the release-notes regex matched a literal `\Z` instead of
+  end-of-text, so the oldest CHANGELOG section extracted nothing (#31).
+- The generated TypeScript client header now names the working regeneration
+  command, `ragent openapi --client > docs/openapi/ragent-client.d.ts` (#29).
+- The embedded graphify skill (installed by `/codeindex skillgen`) only claims
+  codebase questions when `graphify-out/` exists or a knowledge graph is
+  requested, instead of every code question in every project (#35).
+- `ragent-config` crate docs no longer mention `ragent.jsonc`, which is never
+  loaded (#34).
+
 ### Fixed - CLI help and argument parsing
 
 - `ragent research create <name> <topic> --depth deep` now parses `--depth`
