@@ -3,7 +3,7 @@
 **Version:** 1.0  
 **Status:** Active — source-of-truth for any scan, report, or remediation that references "a 1000-line function" or "a 1000-line module"  
 **Owner:** ragent team  
-**Applies to:** `function_analyzer`, code-index scanner, `FUNCPLAN`, `PERFPLAN`, and any ad-hoc audit script
+**Applies to:** code-index scanner, `FUNCPLAN`, `PERFPLAN`, and any ad-hoc audit script. `scripts/function_analyzer.py` does **not** implement this contract: it flags on physical `line_count` (optional `sloc`) and emits no `violates` field
 
 ---
 
@@ -73,7 +73,7 @@ For both modules and functions:
    - A line that has code followed by a trailing comment counts as 1 (it is a code line).
 4. **Effective formula:** `LOC = total physical lines − blank lines − comment-only lines`, scoped to the entity (file for module, body span for function).
 
-Implementation note: for accuracy, parse with tree-sitter / language-aware tooling rather than regex. A line-count helper MUST accept both the raw text and a way to identify comment/blank lines; a reference implementation is `scripts/function_analyzer.py`.
+Implementation note: for accuracy, parse with tree-sitter / language-aware tooling rather than regex. A line-count helper MUST accept both the raw text and a way to identify comment/blank lines; `scripts/function_analyzer.py` computes an `sloc` figure but flags on physical `line_count`, so it is not a reference implementation of this section.
 
 ---
 

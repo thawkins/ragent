@@ -32,9 +32,9 @@ ragent offers a rich set of features designed to enhance developer productivity:
 - Configurable permission system for secure operation
 
 ### Advanced Capabilities
-- Customizable agent presets (coder, task, architect, ask, debug, code-review)
+- Built-in agents (ask, general, build, plan, explore, plus specialists such as rust-coder, security-auditor and test-writer) and custom agents
 - Automatic loading of project guidelines from `AGENTS.md`
-- Model Context Protocol (MCP) client support (in development)
+- Model Context Protocol (MCP) client support
 - File snapshotting and rollback functionality
 - Real-time event bus for UI updates
 - Background agent spawning for parallel task execution

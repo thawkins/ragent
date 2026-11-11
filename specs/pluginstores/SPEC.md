@@ -616,7 +616,7 @@ navigator row `1`, directly after the `ALL` sentinel and before any derived stor
 category, in both the Codex and the Claude browse panels. The row shall not be derived
 from an entry's `category` field: selecting it shall filter the result list to the loaded
 entries whose id is present in the store scan
-([`PluginStoreBrowser::installed`](crates/ragent-tui/src/app/state.rs)), so a plugin that
+([`PluginStoreBrowser::installed`](../../crates/ragent-tui/src/app/state.rs)), so a plugin that
 declares no category at all is still listed under it. The row shall be present in every
 state, including a still-loading browser and an index that declares no category, and its
 counted label (`Installed (<N>)`) shall count the loaded entries the scan matches. The row

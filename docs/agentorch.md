@@ -492,10 +492,30 @@ lives in `team/` and `task/` and routes through `SessionProcessor`'s
 
 ---
 
-## 9. Quick reference: key line numbers
+## 9. Quick reference: key symbols
 
-| Concern | File:line |
-| ------- | --------- |
+Line numbers drift with every edit, so this table names symbols instead; find
+them with `codeindex_search` or `grep -n`.
+
+| Concern | Symbol (file) |
+| ------- | ------------- |
+| Loop entry point | `SessionProcessor::process_message` (`session/processor.rs`) |
+| Tool dispatch | `dispatch_tool_with_permissions` (`session/processor.rs`) |
+| Finalize | `finalize_assistant_message` (`session/loop_steps.rs`) |
+| prepare_client | `prepare_client` (`session/loop_steps.rs`) |
+| build_turn_system_prompt | `build_turn_system_prompt` (`session/loop_steps.rs`) |
+| build_turn_chat_messages | `build_turn_chat_messages` (`session/loop_steps.rs`) |
+| call_llm_step | `call_llm_step` (`session/loop_steps.rs`) |
+| Storage bridge | `SessionProcessor::storage_op` (`session/processor.rs`) |
+| Event bus | `EventBus` (`crates/ragent-types/src/event/mod.rs`) |
+| Compaction runner | `compact` (`compaction/runner.rs`) |
+| Emergency compaction | `emergency_compact` (`compaction/runner.rs`) |
+| Token estimator | `RequestTokenTracker`, `estimate_request_tokens` (`compaction/estimator.rs`) |
+| Trigger decision | `TriggerDecision` (`compaction/estimator.rs`) |
+| Coordinator | `Coordinator` (`orchestrator/coordinator.rs`) |
+| Agent registry | `AgentRegistry` (`orchestrator/registry.rs`) |
+
+------- | --------- |
 | Loop entry point | `session/processor.rs:459` |
 | Loop body | `session/processor.rs:675` |
 | Compaction trigger (pre-send) | `session/processor.rs:756` |
@@ -572,7 +592,7 @@ test in the crate's `tests/` directory (or a bench) behind them.
 | PERF-075 | M6 | Data layer | `ragent-codeindex/src/search.rs` | shipped |
 | PERF-076 | M6 | Data layer | `ragent-agent/src/mcp/mod.rs` | shipped |
 | PERF-077 | M6 | Data layer | `ragent-research/src/web_gatherer.rs` | shipped |
-| PERF-078 | M7 | Guardrails | `scripts/check-perf-regression.sh` | shipped |
+| PERF-078 | M7 | Guardrails | `scripts/check-perf-regression.sh` (not created) | open |
 | PERF-079 | M7 | Guardrails | `crates/*/benches/` | shipped |
 | PERF-080 | M7 | Guardrails | hasher policy (Appendix C sites) | shipped |
 | PERF-081 | M7 | Guardrails | `docs/agentorch.md` (this table) | shipped |
@@ -588,7 +608,9 @@ Notes:
   tool pairing, the single-buffer compaction prompt, the memoised memory-entry
   token costs, the background activity-log writer, and the single-copy TUI
   viewers are all described in §5.1 and §5.3 above.
-- **PERF-078/079** are the guardrail pair: the regression gate in
-  `scripts/check-perf-regression.sh` runs the crate baselines, and the benches
+- **PERF-078/079** are the guardrail pair. PERF-079 shipped: the benches
   under `crates/ragent-agent/benches/` cover the M1 turn-loop targets
-  (`turn_loop`, `hot_paths`, `m3_hot_paths`, `agent_loop`).
+  (`turn_loop`, `hot_paths`, `m3_hot_paths`, `agent_loop`). PERF-078 is open:
+  `scripts/check-perf-regression.sh` was never added; the only regression
+  script is `scripts/check-bench-regression.sh`, which covers `agent_loop`
+  alone and is not wired into CI.

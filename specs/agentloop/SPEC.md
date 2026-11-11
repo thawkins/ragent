@@ -324,7 +324,7 @@ checkpoint tunables shall be documented in `QUICKSTART.md` (or
   dispatch, termination publication.
 - `crates/ragent-config/src/config.rs` — `AgentConfig::max_steps` (existing)
   and loop defaults (cost limit, retry allowance, checkpoint behaviour).
-- `crates/ragent-types/src/event.rs` — loop lifecycle events (termination
+- `crates/ragent-types/src/event/mod.rs` — loop lifecycle events (termination
   status, change summary).
 - `crates/ragent-storage/` — pre-loop snapshot capture and rollback.
 - `crates/ragent-telemetry/` — `agent_loop_duration` / `agent_loop_iterations`

@@ -571,7 +571,7 @@ findings through `hookSpecificOutput.additionalContext` / a blocking `exit 2` â€
 none of which the bridge honoured.
 
 - `manifest`: new `HOOKS_FILE = "hooks.json"` and
-  [`read_plugin_hooks_file`](crate::read_plugin_hooks_file), which reads the root
+  `read_plugin_hooks_file` (`crates/ragent-plugins/src/manifest.rs`), which reads the root
   and `hooks/` locations, unwraps the top-level `hooks` envelope, and returns each
   `(trigger, entries)` pair. Both dialect parsers merge it with the inline section.
   `extract_hooks` now takes the plugin root, unwraps the group shape (inheriting a

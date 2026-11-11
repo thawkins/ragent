@@ -1,7 +1,9 @@
 # Test-consolidation review and plan
 
-Status: step 1 of the rollout is DONE (8 safe crates consolidated, 221 top-level
-test files -> 8 binaries); steps 2-3 (medium/high-risk crates) await go-ahead.
+Status: all rollout steps are DONE (written at `ea7ac0da`, 2026-10-18;
+re-checked at `7e1d91e6`). Every crate under `crates/` and the root `ragent`
+package set `autotests = false` and declare exactly one `[[test]]` target
+(`tests/all.rs`), so the workspace builds 20 integration-test binaries.
 Scope: reduce the number of discrete integration-test binaries from 904 to
 <= 90 (10%) by consolidation, without losing test coverage or changing what any
 test asserts.

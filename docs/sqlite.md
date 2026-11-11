@@ -3,10 +3,13 @@
 Scope: every `rusqlite` use in the ragent workspace. Five stores, five files,
 236 SQL sites. Findings below are evidence-backed: query plans and timings were
 measured against this repository's own live databases (see
-[Appendix A](#appendix-a--measurement-harness)).
+[Appendix A](#appendix-a---measurement-harness)).
 
-Status: analysis complete, no code changed. Each remediation item is a separate,
-independently verifiable task.
+Analysed at `fba05a8e` (2026-10-27). Status (re-checked at `7e1d91e6`): T-01, T-03 (resolved by
+dropping `memories_fts`), T-05, T-06, T-11 and T-14 have landed in
+`crates/ragent-storage/src/storage.rs` (each marked `SQLITE T-NN` in the code).
+T-04, T-07, T-08, T-10 and T-12 are open; T-02, T-09 and T-13 have not been
+re-verified. Each remediation item is a separate, independently verifiable task.
 
 ---
 
@@ -83,7 +86,7 @@ Three migration idioms coexist. Only `Storage` has a version-gated fast path.
 | `ContentCache` | `ContentCache::init` (`cache.rs:258`) | none; `SELECT col LIMIT 0` probes then `ALTER` |
 
 `IndexStore::init_schema` writes a version row but never compares it, so it
-re-runs all 27 DDL statements on every open. See [T-09](#t-09--remove-the-unread-schema-version-write).
+re-runs all 27 DDL statements on every open. See [T-09](#t-09---remove-the-unread-schema-version-write-in-the-code-index).
 
 ### 1.4 Pragmas - current state
 

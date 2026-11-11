@@ -7,7 +7,7 @@ audit:
 
 ## Executive Summary
 
-The `openharness` research (`research/openharness/RESEARCH.md`, 21 findings, 58
+The `openharness` research (`research/openharness/RESEARCH.md`, not checked into this repository; 21 findings, 58
 sources) studied [HKUDS/OpenHarness](https://github.com/HKUDS/OpenHarness), a
 lightweight, composable, provider-agnostic Python agent harness developed at
 the University of Hong Kong. OpenHarness ships ~11,700 lines covering ~98% of
@@ -45,7 +45,7 @@ platform integration are in scope.
 
 This spec was informed by the following research items:
 
-- [`openharness`](../research/openharness/RESEARCH.md) — see the captured references for context.
+- `openharness` (`research/openharness/RESEARCH.md`; not checked into this repository).
 
 ## Scope & Objectives
 
