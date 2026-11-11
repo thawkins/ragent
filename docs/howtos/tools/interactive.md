@@ -23,6 +23,7 @@ user picks from a multiple-choice dialog; otherwise they type free text.
 |----------|------|----------|-------------|---------------|
 | `question` | string | yes | The prompt shown to the user | `"Which build profile?"` |
 | `options` | array | no | Fixed choices; the returned value will be one of these strings | `["Debug","Release","Check only"]` |
+| `default` | string | no | Option pre-selected in the dialog and used if the question times out; must match one of `options`. When absent, an option marked "recommended" is used, otherwise the first option | `"Debug"` |
 
 **Example:**
 ```text

@@ -407,7 +407,7 @@ Before publishing or reviewing Rust code, ensure:
 #### Safety and Quality
 
 - [ ] **Safety**: No unnecessary `unsafe` code, proper error handling
-- [ ] **Performance**: Efficient use of iterators, minimal allocations
+- [ ] **Performance**: Efficient use of iterators, minimal allocations; hashers per [`docs/performance/hasher-policy.md`](docs/performance/hasher-policy.md)
 - [ ] **API Design**: Functions are predictable, flexible, and type-safe
 - [ ] **Future Proofing**: Private fields in structs, sealed traits where appropriate
 - [ ] **Tooling**: Code passes `cargo fmt`, `cargo clippy`, and `cargo nextest run`

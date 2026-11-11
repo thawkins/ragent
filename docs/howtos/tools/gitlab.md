@@ -37,6 +37,7 @@ Native GitLab tools for issues, merge requests, pipelines, and jobs. Requires
 |----------|------|----------|-------------|---------------|
 | `state` | enum | no | `opened` (default), `closed`, `all` | `"opened"` |
 | `labels` | string | no | Comma-separated label names | `"bug"` |
+| `limit` | integer | no | Max issues to return (default 20, max 100) | `20` |
 
 ---
 
@@ -62,6 +63,7 @@ Get full issue details, or close an issue.
 | `title` | string | yes | Issue title | `"Pipeline failing on main"` |
 | `description` | string | no | Description in markdown | — |
 | `labels` | string | no | Comma-separated labels | `"bug"` |
+| `assignee_ids` | string | no | Comma-separated user IDs to assign | `"42,57"` |
 
 ---
 
@@ -82,6 +84,7 @@ Get full issue details, or close an issue.
 |----------|------|----------|-------------|---------------|
 | `state` | enum | no | `opened` (default), `merged`, `closed`, `all` | `"opened"` |
 | `target_branch` | string | no | Filter by target branch | `"main"` |
+| `limit` | integer | no | Max MRs to return (default 20, max 100) | `20` |
 
 ---
 
@@ -103,6 +106,7 @@ Get full issue details, or close an issue.
 | `source_branch` | string | yes | Source branch | `"feature/greet"` |
 | `target_branch` | string | yes | Target branch | `"main"` |
 | `description` | string | no | Description in markdown | — |
+| `draft` | boolean | no | Create as a draft MR | `true` |
 
 ---
 
@@ -111,6 +115,9 @@ Get full issue details, or close an issue.
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
 | `iid` | integer | yes | Merge request internal ID |
+| `squash` | boolean | no (merge) | Squash commits on merge (default `false`) |
+| `delete_source_branch` | boolean | no (merge) | Delete the source branch after merge (default `false`) |
+| `message` | string | no (merge) | Merge commit message |
 
 ---
 
@@ -119,6 +126,8 @@ Get full issue details, or close an issue.
 | Argument | Type | Required | Description | Typical value |
 |----------|------|----------|-------------|---------------|
 | `status` | enum | no (`list`) | `running`, `pending`, `success`, `failed`, `canceled` | `"failed"` |
+| `ref` | string | no (`list`) | Filter by branch or tag name | `"main"` |
+| `limit` | integer | no (`list`) | Max pipelines to return (default 20, max 100) | `20` |
 | `pipeline_id` | integer | yes (`get`) | Pipeline ID (the global ID from the pipeline URL, not an IID) | — |
 
 ---
@@ -129,8 +138,10 @@ Get full issue details, or close an issue.
 |----------|------|----------|-------------|
 | `pipeline_id` | integer | yes (`list_jobs`) | Pipeline to list jobs for |
 | `job_id` | integer | yes (`get_job`, `get_job_log`) | Job ID |
+| `scope` | enum | no (`list_jobs`) | `created`, `pending`, `running`, `failed`, `success`, `canceled`, `skipped`, `manual` |
+| `tail` | integer | no (`get_job_log`) | Lines from the end of the log to return (default 200, max 2000) |
 
-`gitlab_get_job_log` returns the job's trace output (may be large).
+`gitlab_get_job_log` returns the tail of the job's trace output (see `tail`).
 
 ---
 

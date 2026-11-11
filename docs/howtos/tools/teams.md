@@ -44,6 +44,9 @@ every teammate's spawn prompt with the specific request details.
 |----------|------|----------|-------------|---------------|
 | `blueprint` | string | yes | Team template | `"code-review"` |
 | `context` | string | yes | Task details: target files, what to do, where to write output | `"Review crates/ragent-server for security issues. Write findings to docs/COMPLIANCE.md"` |
+| `name` | string | no | Team name (lowercase, hyphens OK); generated from the blueprint and a timestamp when omitted | `"review-2026-09"` |
+| `project_local` | boolean | no | Store the team under `[PROJECT]/.ragent/teams/` (default `true`); `false` uses the global teams directory | `true` |
+| `seed_only` | boolean | no | Apply the blueprint to an existing team instead of creating one (used by `/team create`; default `false`) | `false` |
 
 **Workflow:** `team_create` -> `team_wait` (blocks until all teammates idle)
 -> `team_status` to collect findings.
@@ -62,6 +65,9 @@ Add a teammate for one scoped task.
 | `teammate_name` | string | yes | Unique teammate name | `"reviewer-1"` |
 | `agent_type` | string | yes | Agent profile to run | `"coder"` |
 | `prompt` | string | yes | Scoped task prompt | — |
+| `model` | string | no | Model override as `provider_id/model_id`; inherits the lead's model when omitted | `"anthropic/claude-sonnet-4-20250514"` |
+| `task_id` | string | no | Task to pre-assign (claimed on the teammate's behalf) | `"task-001"` |
+| `memory` | enum | no | Persistent memory scope: `user`, `project`, or `none` (default) | `"project"` |
 
 ---
 
@@ -128,6 +134,8 @@ The same facts appear in the result metadata (`pending_plans`,
 |----------|------|----------|------------|-------------|
 | `team_name` | string | yes | all | Team name |
 | `title` | string | yes | `team_task_create` | Shared task title |
+| `description` | string | no | `team_task_create` | Full description of the work |
+| `depends_on` | array | no | `team_task_create` | Task IDs that must complete before this task can be claimed |
 | `task_id` | string | yes | `team_task_complete`, `team_assign_task` | Task identifier |
 | `to` | string | yes | `team_assign_task` | Teammate to assign to |
 
@@ -170,6 +178,7 @@ rewritten - fix the edge and the write proceeds.
 | `plan` | string | yes | `team_submit_plan` | Plan text proposed by a teammate |
 | `teammate` | string | yes | `team_approve_plan` | Teammate whose plan is judged |
 | `approved` | boolean | yes | `team_approve_plan` | Approve or reject |
+| `feedback` | string | no (required when rejecting) | `team_approve_plan` | Feedback message for the teammate |
 
 ---
 
@@ -179,6 +188,12 @@ rewritten - fix the edge and the write proceeds.
 |----------|------|----------|------------|-------------|
 | `team_name` | string | yes (optional for `team_wait`, uses active team) | all | Team name |
 | `teammate` | string | yes | `team_shutdown_teammate` | Teammate to shut down |
+| `reason` | string | no | `team_shutdown_teammate` | Reason for the shutdown |
+| `immediate` | boolean | no | `team_shutdown_teammate` | Cancel the agent loop now and mark the teammate Stopped instead of waiting for `team_shutdown_ack` (default `false`) |
+| `agent_ids` | array | no | `team_wait` | Agent IDs (e.g. `tm-001`) to wait for; omit to wait for all working teammates |
+| `timeout_secs` | number | no | `team_wait` | Max seconds to wait before returning partial results (default 300) |
+| `summary` | string | no | `team_idle` | Summary of work completed before going idle |
+| `force` | boolean | no | `team_cleanup` | Remove even if teammates are still live or shutting down (default `false`) |
 
 `team_wait` blocks until spawned teammates finish — always use it after
 `team_create`/`team_spawn`. `team_cleanup` tears down team state after all
@@ -192,3 +207,5 @@ teammates have stopped.
 |----------|------|----------|------------|-------------|
 | `team_name` | string | yes | both | Team name |
 | `content` | string | yes | `team_memory_write` | Content stored in the shared memory bucket |
+| `path` | string | no | both | Memory bucket/path (default `MEMORY.md`) |
+| `mode` | enum | no | `team_memory_write` | `append` (default) creates a new memory; `overwrite` updates the latest in the bucket |
