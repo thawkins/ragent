@@ -66,8 +66,8 @@ source of truth for Rust formatting is the `cargo fmt` command itself. Use it.
 ## Technology Stack
 
 - **Language**: Rust edition 2024 or greater. Verified: the root `Cargo.toml` and
-  all crates declare `edition = "2024"` (workspace-inherited), which requires
-  Rust 1.85+.
+  all crates declare `edition = "2024"` (workspace-inherited). The minimum
+  supported Rust version is the workspace `rust-version` in the root `Cargo.toml`.
 
 ## Build Commands
 
@@ -284,7 +284,7 @@ Use the `Bash` tool to run the following cargo commands:
   `std::env::set_var`/`remove_var` migration; that is the only sanctioned test use.
 * **Exhaustive Pattern Matching:** Always match enums and results exhaustively; avoid wildcard `_` fallbacks unless handling non-exhaustive external types.
 * **Explicit Cloning:** Call `.clone()` explicitly on non-`Copy` types; forbid hidden or cascading clones inside intensive iterators or closures.
-* **No Silent Error Swallowing:** Never use `.unwrap()` or `.expect()` in production code paths on user-facing paths; always propagate or handle `Result` and `Option`. Test and bench code may use them freely. The workspace clippy config sets `unwrap_used = "allow"` so the compiler does not enforce this; treat it as a review-enforced rule and keep the T-006 sites fixed.
+* **No Silent Error Swallowing:** Never use `.unwrap()` or `.expect()` in production code paths on user-facing paths; always propagate or handle `Result` and `Option`. Test and bench code may use them freely. Clippy's `unwrap_used` is deliberately not set (see the root `Cargo.toml` lints comment); the rule is enforced by the shrink-only gates `scripts/check-security-unwraps.sh` and `scripts/check-silent-errors.sh`, which scan production sources only. Exempt an intentional production `.unwrap()`/`.expect()` with a same-line `// no-panic-ok: <reason>` comment. An intentionally masked error (`let _ =`, `.ok()`) takes `// INTENTIONAL: <reason>` or `// no-error-ok: <reason>` for the silent-errors gate.
 
 ### Code Style & Formatting
 

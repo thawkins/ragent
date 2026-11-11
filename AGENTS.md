@@ -208,13 +208,18 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 - `memory_recall` — Search structured memories using full-text query with optional category/tag filters.
 - `memory_forget` — Delete structured memories by ID or filter criteria.
 - `EnterPlanMode` — Delegate to the plan agent for read-only codebase analysis.
+- `AskUserQuestion` — Ask the user a question and get feedback from user.
+
+### Code Index Tools (only when the codebase index is active)
+
+When the index is disabled these tools return "not available"; use `Grep` instead.
+
 - `codeindex_search` — Search the codebase index for symbols, functions, types, and documentation.
 - `codeindex_symbols` — Query symbols (functions, structs, enums, traits) from the codebase index.
 - `codeindex_references` — Find all references to a symbol by name across the indexed codebase.
 - `codeindex_dependencies` — Query file-level dependencies from the code index.
 - `codeindex_status` — Show the current status and statistics of the codebase index.
 - `codeindex_reindex` — Trigger a full re-index of the codebase.
-- `AskUserQuestion` — Ask the user a question and get feedback from user.
 
 ### Tool Use — Critical Instructions
 
@@ -248,7 +253,8 @@ There is no `search` or `search_in_repo` tool. Use `Grep` for every text search 
 ### Shell Execution Rules
 
 - For simple commands or code snippets, use `Bash` with the `command` parameter.
-- Timeout defaults to 1500 seconds.
+- Timeout defaults to 120 seconds. Pass an explicit `timeout` (in seconds, e.g. `1500`) for
+  `cargo build`, `cargo nextest run` and other long commands, or they are killed at 120 s.
 - The `bash_reset` tool resets the persistent shell state.
 
 ### Important
@@ -322,8 +328,8 @@ When reading files with the `read` tool:
   in the `all` binary's single process alongside every other child. `cargo nextest` runs every test in its own process and removes most of that, but it is
   not a licence to share a mutable global: a `static` registry or a shared
   scratch directory is still one object per binary, and tests within one crate
-  can still interleave over a filesystem path. Every crate's `tests/all.rs`
-  therefore defines one binary-wide lock:
+  can still interleave over a filesystem path. A crate that needs a shared
+  lock defines one binary-wide lock in its `tests/all.rs`:
 
   ```rust
   pub fn global_env_mutex() -> &'static std::sync::Mutex<()> { /* OnceLock */ }
@@ -352,9 +358,8 @@ When reading files with the `read` tool:
   `[[profile.default.overrides]]` (and a `profile.ci` twin) whose `filter`
   selects those tests, and keep the in-process lock for `cargo test` runs.
   `test_tool_rename_guard` / group `tool-rename-guard` is the worked example.
-- **Every crate must actually declare that lock, and every mutating test must
-  take the SAME one.** Two tests in one crate that each hold a *different*
-  private mutex — or one that is `#[serial]` while the other takes a file-local
+- **Every mutating test must take the SAME lock as its siblings.** Two tests in
+  one crate that each hold a *different* private mutex — or one that is `#[serial]` while the other takes a file-local
   mutex — do not exclude each other, and that is precisely how a
   `set_var("RAGENT_CONFIG", …)` in one child file came to be observed by a
   `Config::load()` in another (roughly one failure per 40 unsharded
@@ -363,7 +368,8 @@ When reading files with the `read` tool:
   carry `#[serial]`, take a `MutexGuard` (preferably `crate::global_env_lock()`),
   or — when a shared helper already holds the lock for it — say so with a
   `// env-isolation: <reason>` marker. A crate that mixes `#[serial]` with
-  file-local mutexes and declares no `global_env_lock` is rejected outright.
+  file-local mutexes and declares no `global_env_lock` in `tests/all.rs` is
+  rejected outright; that is the only case where declaring the lock is required.
   Do not hold `crate::global_env_lock()` twice in one test: `std::sync::Mutex`
   is not reentrant and the second acquisition self-deadlocks the whole test
   binary (74 `/slash` cases in `test_slash_arms_deep.rs` did exactly that by
@@ -452,7 +458,7 @@ team_status                        ← read what they found
 ## Task Tracking
 
 - Use `TaskCreate`, `TaskUpdate`, `TaskGet`, and `TaskList` to track tasks.
-- Always mark the task as "in-progress" when work on a task is started.
+- Always mark the task as `in_progress` when work on a task is started.
 - Always mark the task as "completed" when work on a task is done.
 
 For more details, see README.md and QUICKSTART.md.
