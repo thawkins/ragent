@@ -131,8 +131,10 @@ summarises them in the order the checks actually execute, full detail follows.
 
 ### Layer 1 — Safe-command whitelist
 
-A built-in list of 26 read-only and navigation commands is prefix-matched and
-auto-approved (it just logs `"Safe bash command auto-approved"`). A command is safe if
+A built-in list of 26 commands, mostly read-only but including the
+file-modifying `mkdir`, `touch`, `cp` and `mv`, is prefix-matched and skips the
+permission prompt (`validate_shell_command` just logs
+`"Safe bash command auto-approved"` and still runs every later layer). A command is safe if
 it **equals** an entry or **starts with the entry followed by a space**, so `ls` matches
 `ls -la`. A command that contains a shell separator or redirection (`;`, `|`, `&`, a
 backtick, `$(`, a newline, `>` or `<`) is never treated as safe, because the whitelist

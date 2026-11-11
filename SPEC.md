@@ -1269,7 +1269,7 @@ call's output, not a refusal.
 
 | Agent | Role |
 |-------|------|
-| `ask` | Quick Q&A - answers questions without tools |
+| `ask` | Quick Q&A agent with read-only permissions (tools stay available; the prompt asks it to answer directly) |
 | `general` | General-purpose coding agent |
 | `build` | Build and test agent with full tool access |
 | `plan` | Planning agent that creates implementation plans |
@@ -6033,8 +6033,10 @@ but these are not `ragent.json` keys: `ResearchConfig` has no `few_shot` or
 
 ### `research.models.*` (string, optional)
 
-Per-phase default model overrides. All fields are optional; when omitted the
-phase falls back to the configured default model.
+Per-phase model overrides. **Parsed but not yet applied:** the run builder
+(`build_session_config` in `ragent-research` `run_request.rs`) copies only the
+per-run request fields (`--research-model`, `--compression-model`,
+`--final-report-model`), so these config keys currently have no effect.
 
 - `research_model` — model used by research agents / sub-topic workers.
 - `compression_model` — model used to compress or summarise intermediate findings.
@@ -6047,14 +6049,16 @@ command (FR-002).
 ### `research.supervisor.max_concurrent_research_units` (integer, default 5)
 
 Maximum number of researcher agents that may run concurrently in `supervisor`
-and `competitive` modes (FR-012).
+and `competitive` modes (FR-012). **Parsed but not yet applied:** runs use the
+per-run `--max-concurrent-research-units` value or the built-in default.
 
 ### `research.evaluate.enabled` (boolean, default `false`)
 
-When `true`, every research run appends a deterministic quality scorecard to
-the assembled `RESEARCH.md` (FR-015). This is equivalent to passing
-`--evaluate` on every TUI `/research create` call (the `ragent research create`
-CLI has no `--evaluate` flag).
+Intended to append a deterministic quality scorecard to every run's
+`RESEARCH.md` (FR-015). **Parsed but not yet applied:** the run builder reads
+only the per-run `evaluate` field, so pass `--evaluate` on the TUI
+`/research create` command (the `ragent research create` CLI has no
+`--evaluate` flag).
 
 ### Example stanza
 

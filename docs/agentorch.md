@@ -515,26 +515,6 @@ them with `codeindex_search` or `grep -n`.
 | Coordinator | `Coordinator` (`orchestrator/coordinator.rs`) |
 | Agent registry | `AgentRegistry` (`orchestrator/registry.rs`) |
 
-------- | --------- |
-| Loop entry point | `session/processor.rs:459` |
-| Loop body | `session/processor.rs:675` |
-| Compaction trigger (pre-send) | `session/processor.rs:756` |
-| Tool dispatch | `session/processor.rs:947` |
-| Finalize | `session/processor.rs:1682` |
-| prepare_client | `session/loop_steps.rs:125` |
-| build_turn_system_prompt | `session/loop_steps.rs:364` |
-| build_turn_chat_messages | `session/loop_steps.rs:602` |
-| call_llm_step | `session/loop_steps.rs:782` |
-| handle_no_tool_decision | `session/loop_steps.rs:1265` |
-| Storage bridge | `session/processor.rs:393` |
-| Event bus | `crates/ragent-types/src/event/mod.rs:850` |
-| Compaction runner | `compaction/runner.rs:337` |
-| Emergency compaction | `compaction/runner.rs:518` |
-| Token estimator | `compaction/estimator.rs:70` |
-| Trigger decision | `compaction/estimator.rs:236` |
-| Coordinator | `orchestrator/coordinator.rs:120` |
-| Agent registry | `orchestrator/registry.rs:57` |
-
 ---
 
 ## 10. Performance remediation register (PERF-032..082)
@@ -613,4 +593,5 @@ Notes:
   (`turn_loop`, `hot_paths`, `m3_hot_paths`, `agent_loop`). PERF-078 is open:
   `scripts/check-perf-regression.sh` was never added; the only regression
   script is `scripts/check-bench-regression.sh`, which covers `agent_loop`
-  alone and is not wired into CI.
+  alone; it runs in `pre-flight.sh` outside `--quick` mode, but no CI job
+  gates on it.
