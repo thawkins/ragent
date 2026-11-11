@@ -29,7 +29,7 @@ active team, and `team_name` is required by nearly every tool.
 | `team_memory_write` | Write team memory bucket. |
 
 **Visibility switch:** `teams`. See `docs/howtos/teams.md` for the full team
-manual and `docs/userdocs/TEAMS.md` for the guide.
+manual and guide.
 
 ---
 

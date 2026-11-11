@@ -862,7 +862,6 @@ Use `team_spawn` with a role-specific prompt:
 
 For full details and advanced workflows (plan approval, hooks, graceful shutdown), see:
 
-- [`docs/userdocs/TEAMS.md`](docs/userdocs/TEAMS.md)
 - [`docs/howtos/teams.md`](docs/howtos/teams.md)
 - [`docs/howtos/slashcommands/blueprints.md`](docs/howtos/slashcommands/blueprints.md)
   (`/blueprints list` shows the team blueprints installed locally)

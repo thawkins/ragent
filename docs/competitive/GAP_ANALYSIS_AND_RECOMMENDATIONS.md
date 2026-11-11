@@ -1,5 +1,7 @@
 # Competitive Gap Analysis and Feature Recommendations
 
+> Point-in-time snapshot (2026-04-01). Several gaps listed here have since closed (e.g. cost tracking, GitHub/GitLab tools); do not read it as the current state.
+
 **Document Type:** Strategic Analysis  
 **Analysis Date:** April 1, 2026  
 **Analyst:** swarm-s5  
