@@ -2053,7 +2053,6 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/yolo` | Toggle YOLO mode (`on`/`off` set and persist the state, `status` reports it, a bare `/yolo` toggles; the toggle writes the user-global config, or the `--config` file when one was loaded) |
 | `/task` | Toggle the TASKS side panel (also Alt+T); `/task list`, `/task help` |
 | `/team create <name>` | Create a team |
-| `/team open <name>` | Re-open existing team |
 | `/team close` | Close current team |
 | `/team clear` | Reset current team state |
 | `/team delete <name>` | Delete team on disk |
@@ -3486,7 +3485,6 @@ the bound manager drives another team.
 | Command | Purpose |
 |---------|---------|
 | `/team create <name>` | Create a new team |
-| `/team open <name>` | Open an existing team |
 | `/team close` | Close current team |
 | `/team clear` | Reset current team state |
 | `/team delete <name>` | Delete a team |

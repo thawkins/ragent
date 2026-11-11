@@ -3475,7 +3475,7 @@ impl App {
             "model" => Some("[show]".to_string()),
             "spec" => Some("[create|add|delete|list|search|validate|status|task|govcreate <specid> <content-ref> <target-folder> [--language <lang>] [--type <type>] [--stack <name>] [--github|--gitlab] [--force]|activate|deactivate|coverage|impl|jtbd|help]".to_string()),
             "router" => {
-                Some("[on|off|status|tiers|weights|boundaries|test|stats|reload|help]".to_string())
+                Some("[on|off|status|tiers|weights|boundaries|test|reload|help]".to_string())
             }
             "config" => Some("[show|save|list|help]".to_string()),
             "triggers" => Some("[list|enable|disable|remove|status|help]".to_string()),

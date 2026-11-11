@@ -53,7 +53,21 @@ pub const TOOLS_SUBS: &[&str] = &["list", "show", "help"];
 /// subcommands from `--flags`; the split here is purely lexical (a leading
 /// `--` or `-h` marks a flag).
 const TEAM_SUBS: &[&str] = &[
-    "create", "open", "close", "delete", "list", "spawn", "message", "tasks", "cleanup", "help",
+    "status",
+    "show",
+    "create",
+    "close",
+    "delete",
+    "blueprint",
+    "message",
+    "tasks",
+    "clear",
+    "cleanup",
+    "forcecleanup",
+    "approve",
+    "reject",
+    "focus",
+    "help",
 ];
 const MEMORY_SUBS: &[&str] = &["show", "clear", "help"];
 const AGENT_SUBS: &[&str] = &["list", "switch", "help"];
@@ -95,7 +109,6 @@ const ROUTER_SUBS: &[&str] = &[
     "weights",
     "boundaries",
     "test",
-    "stats",
     "reload",
 ];
 const CONFIG_SUBS: &[&str] = &["show", "save", "list", "help"];
@@ -526,7 +539,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "router",
-        description: "Model router management: /router on|off|status|tiers|weights|boundaries|test|stats|reload|help",
+        description: "Model router management: /router on|off|status|tiers|weights|boundaries|test|reload|help",
         subcommands: ROUTER_SUBS,
         flags: EMPTY,
     },
@@ -586,7 +599,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "team",
-        description: "Team management (/team help|status|show [name]|create/open/delete <name>|close|message <id> <text>|tasks|clear|cleanup)",
+        description: "Team management (/team help|status|show [name]|create/delete <name>|close|message <id> <text>|tasks|clear|cleanup)",
         subcommands: TEAM_SUBS,
         flags: EMPTY,
     },

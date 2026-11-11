@@ -599,3 +599,5 @@ mod test_window_scroll_wheel;
 mod test_panic_hook_thread_scope;
 #[path = "test_probe_t022.rs"]
 mod test_probe_t022;
+#[path = "test_slash_advertised_forms.rs"]
+mod test_slash_advertised_forms;

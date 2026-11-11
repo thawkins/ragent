@@ -901,7 +901,6 @@ mailbox messaging.
 Quick flow:
 
 - Create a team: `/team create <name>` (or `team_create`)
-- Re-open an existing team: `/team open <name>`
 - Spawn teammates: `team_spawn`
 - Add/list/claim/complete tasks: `team_task_create`, `team_task_list`,
   `team_task_claim`, `team_task_complete`

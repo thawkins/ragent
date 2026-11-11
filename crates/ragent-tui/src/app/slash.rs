@@ -919,15 +919,20 @@ impl App {
             "team" | "teams" => {
                 // Suggest team-related subcommands
                 vec![
+                    "status".to_string(),
+                    "show".to_string(),
                     "create".to_string(),
-                    "open".to_string(),
                     "close".to_string(),
                     "delete".to_string(),
-                    "list".to_string(),
-                    "spawn".to_string(),
+                    "blueprint".to_string(),
                     "message".to_string(),
                     "tasks".to_string(),
+                    "clear".to_string(),
                     "cleanup".to_string(),
+                    "forcecleanup".to_string(),
+                    "approve".to_string(),
+                    "reject".to_string(),
+                    "focus".to_string(),
                     "help".to_string(),
                 ]
             }
@@ -1097,9 +1102,7 @@ impl App {
                     "weights".to_string(),
                     "boundaries".to_string(),
                     "test".to_string(),
-                    "stats".to_string(),
                     "reload".to_string(),
-                    "help".to_string(),
                 ]
             }
             "config" => {
@@ -2786,6 +2789,46 @@ Usage: `/telemetry help|on|off|setup|counters|logs [<level>]`",
         }
     }
 
+    /// Handle `/status [clear]`: show the recorded status-line history, newest
+    /// first, or clear it.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - empty to show the history, `clear` to empty it.
+    fn handle_status_history_command(&mut self, args: &str) {
+        match args.trim() {
+            "" => {
+                let output = if self.status_history.is_empty() {
+                    "From: /status\n\nNo status messages recorded yet.".to_string()
+                } else {
+                    let lines: Vec<String> = self
+                        .status_history
+                        .recent(self.status_history.len())
+                        .into_iter()
+                        .map(|m| format!("- {}s ago: {}", m.age_secs(), m.formatted()))
+                        .collect();
+                    format!(
+                        "From: /status\n\n## Status history (newest first)\n\n{}",
+                        lines.join("\n")
+                    )
+                };
+                self.append_assistant_text(&output);
+                self.status = "status: history shown".to_string();
+            }
+            "clear" => {
+                self.status_history.clear();
+                self.append_assistant_text("From: /status clear\n\nStatus history cleared.");
+                self.status = "status: history cleared".to_string();
+            }
+            other => {
+                self.append_assistant_text(&format!(
+                    "From: /status\n\n[warn] Unknown argument `{other}`. Usage: /status [clear]"
+                ));
+                self.status = "status: usage".to_string();
+            }
+        }
+    }
+
     /// Handle the `/i18n` command: locale message catalog with English fallback
     /// (spec `openhands` T-014; FR-027).
     ///
@@ -2864,7 +2907,7 @@ Usage: `/telemetry help|on|off|setup|counters|logs [<level>]`",
                      | `/i18n <locale>` | Enable i18n with the given locale (e.g. `/i18n fr`) |\n\
                      | `/i18n status` | Show effective state, locale, and catalog availability |\n\
                      | `/i18n list` | Enumerate installed locale catalogs |\n\
-                     | `/i18n help` | Show this help (bare `/i18n` does the same) |\n\n\
+                     | `/i18n help` | Show this help (bare `/i18n` shows the status) |\n\n\
                      Catalogs live at `<project>/.ragent/locales/<locale>.json`\n\
                      (project) and `~/.config/ragent/locales/<locale>.json` (user).\n\
                      With no `i18n` section, a non-English ambient `LANG` with an\n\
@@ -5124,6 +5167,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
 
                 self.status = "cost summary".to_string();
             }
+            "status" => self.handle_status_history_command(args),
             "startup" => match &self.startup_timings {
                 Some(timings) => {
                     self.append_assistant_text(&timings.format_report());
@@ -12316,17 +12360,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                                        | `/router off` | Disable the router (set `enabled: false`) |\n\
                                                                        | `/router status` | Show router state, current tier, and enabled/disabled status |\n\
                                                                        | `/router tiers` | Display all tier mappings and their model lists |\n\
-                                                                       | `/router tier <name> set <provider>/<model>` | Set the primary model for a tier |\n\
-                                                                       | `/router tier <name> add <provider>/<model>` | Append a fallback model to a tier |\n\
-                                                                       | `/router tier <name> remove <provider>/<model>` | Remove a model from a tier's list |\n\
                                                                        | `/router weights` | Display the 15 dimension weights |\n\
                                                                        | `/router weights set <dimension> <value>` | Override a single dimension weight |\n\
                                                                        | `/router weights reset` | Restore built-in default weights |\n\
                                                                        | `/router boundaries` | Display the three tier boundary thresholds |\n\
                                                                        | `/router boundaries set <boundary> <value>` | Set a boundary threshold (0.0-1.0) |\n\
                                                                        | `/router test <prompt>` | Classify a prompt and show dimension scores, composite score, and selected tier |\n\
-                                                                       | `/router stats` | Display cumulative routing statistics |\n\
-                                                                       | `/router stats reset` | Zero out cumulative routing statistics |\n\
                                                                        | `/router reload` | Reload router config from `ragent.json` |\n\
                                                                        | `/router help` | Show this help |\n\n\
                                                                        The router analyses every prompt using a 15-dimension weighted classifier\n\

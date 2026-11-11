@@ -67,11 +67,6 @@ Lists which models belong to each tier under the loaded configuration.
 Re-reads `.ragent/ragent.json` after you edited the `provider.router` section,
 so the new weights and boundaries take effect without restarting the TUI.
 
-```
-/router stats
-```
-Not a supported form in this build - prints the unknown-subcommand warning.
-
 ## Output
 
 - `/router status`: a status block with the on/off state and the tier currently
