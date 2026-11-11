@@ -44,23 +44,23 @@ fn ragent_with_config(root: &Path, json: &str, args: &[&str]) -> Output {
 
 #[test]
 fn test_cli_config_flag_automation_run_reads_config_file() {
-    // A reload of the default config has no automation block, so it refuses
-    // with "the automation service is disabled". Reaching the per-definition
-    // check proves the `--config` file's enabled service was consulted.
+    // A reload of the default config yields an enabled service with no
+    // definitions, which refuses with "no enabled automation". Disabling the
+    // service in the `--config` file must instead hit the service-disabled
+    // refusal, which only the startup config can produce.
     let dir = scratch();
     let out = ragent_with_config(
         dir.path(),
-        r#"{ "automation": { "enabled": true, "automations": [
-            { "id": "off-in-file", "enabled": false, "prompt": "p",
-              "trigger": { "kind": "webhook" } }
+        r#"{ "automation": { "enabled": false, "automations": [
+            { "id": "in-file", "prompt": "p", "trigger": { "kind": "webhook" } }
         ] } }"#,
-        &["automation", "run", "off-in-file"],
+        &["automation", "run", "in-file"],
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success(), "disabled automation must not run");
+    assert!(!out.status.success(), "a disabled service must not run");
     assert!(
-        stderr.contains("no enabled automation `off-in-file`"),
-        "expected the --config definition to be consulted; stderr: {stderr}"
+        stderr.contains("the automation service is disabled"),
+        "expected the --config service state to be consulted; stderr: {stderr}"
     );
 }
 
