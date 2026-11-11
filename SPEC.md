@@ -1201,11 +1201,10 @@ Built-in default rules include:
 Environment variables matching `*KEY*`, `*SECRET*`, `*TOKEN*`, `*PASSWORD*`
 are redacted from tool outputs and logs.
 
-### 4.6a Critical-Hardening Guards (SECTASKS MS-01)
+### 4.6a Path and Argument-Injection Guards
 
-Five path/argument-injection guards close the Critical findings in
-`SECTASKS.md`. Each is a named helper (not an inline check) so later
-Milestone MS-05 work can migrate stragglers onto it.
+Each guard is a named helper rather than an inline check, so every call site
+shares one implementation.
 
 | Guard | Where it lives | What it rejects |
 |-------|----------------|-----------------|
@@ -1213,23 +1212,22 @@ Milestone MS-05 work can migrate stragglers onto it.
 | Team-name slugify (`slugify_team_name`) | `ragent-agent::team::store` | blueprint/timestamp-derived names are slugified before use so generation can never produce an invalid name |
 | `is_safe_git_argument` | `ragent-plugins::add` | a `git+` ref or subpath that is not `[A-Za-z0-9._/-]+`, begins with `-`, or contains `..`; `git_run` also passes `--` before every positional |
 | `sanitize_declared_id` / `confined_dest_dir` | `ragent-plugins::manifest` / `add` | a manifest `id` that is not a single `Component::Normal` matching `[A-Za-z0-9._-]+` (no separators, no `..`, not absolute) |
-| `check_path_within_allowed_roots_cached` | `ragent-tools-core` | a `multi_edit` target outside the workspace — the same containment check `Edit`/`read`/`Write` already applied |
+| `check_path_within_allowed_roots_cached` | `ragent-tools-core` | a `multi_edit` target outside the workspace — the same containment check `Edit`/`read`/`Write` apply |
 
-Two further Critical classes are handled in place rather than by a helper:
+Two further classes are handled in place rather than by a helper:
 
 - **Blueprint seed execution** — every tool named by `.ragent/blueprints/teams/<bp>/task-seed.json`
   or `spawn-prompts.json` is dispatched through `dispatch_seed_tool`, which consults
   the session permission checker: a category that is not explicitly `Allow` (or
   `Ask`-with-no-checker) refuses the seed and reports why, so a repository-supplied
-  blueprint can no longer reach `Bash`/`Write`/`rm` unpermissioned.
+  blueprint cannot reach `Bash`/`Write`/`rm` unpermissioned.
 - **`multi_edit` containment** — see the table row above; the check runs for every
   edit in the batch before any file is read or written, so a mixed batch is atomic
   and writes nothing.
 
-### 4.6b Host & Sandbox Hardening (SECTASKS MS-02)
+### 4.6b Host and Sandbox Guards
 
-The High-severity findings. Each is a named helper or an explicit bound so the
-later milestones can migrate remaining call sites onto the same shapes.
+Each guard is a named helper or an explicit bound.
 
 | Guard | Where it lives | What it enforces |
 |-------|----------------|------------------|
@@ -1241,23 +1239,22 @@ later milestones can migrate remaining call sites onto the same shapes.
 | `x-goog-api-key` header | `ragent-llm::providers::gemini` | the Gemini key is sent as a header, registered with the secret registry, and never interpolated into a logged URL |
 | `redirect::Policy::none()` | `ragent-llm::providers` | authenticated LLM requests do not follow redirects, so a non-standard auth header cannot be replayed cross-host |
 | `ResearchIo::template_path` -> `Option` | `ragent-research::io` | the `--template` name must be a single `[A-Za-z0-9_-]` component; an invalid name yields no template plus a warning |
-| `ConfigResponse` credential masking | `ragent-server::routes` | `GET /config` redacts every credential field before serialising |
+| `redact_config_secrets` | `ragent-server::routes` | `GET /config` (`get_config`) replaces every credential value before the response is returned |
 | `check_path_within_root` on `from_files` | `ragent-research` / `ragent-server` | research file seeds are canonicalised and rejected outside the project root |
 | ChaCha20-Poly1305 `v3:` credential store | `ragent-storage` | a per-install 0600 key file, an authenticated construction with a fresh nonce, and a hard error on a corrupt row (no empty-string downgrade) |
 | `sender_session_id` on `MailboxMessage` | `ragent-agent::team::mailbox` | the authenticated sender session id is recorded; a message claiming `from: "lead"` without one is rejected at the write boundary |
 | `tls-roots` OTLP transport | `ragent-telemetry` | the gRPC exporter is compiled with TLS, and a non-loopback `https://` endpoint is refused when TLS is unavailable |
 | Telemetry privilege stripping | `ragent-config` | telemetry enablement and endpoint overrides come from the user-global config only |
 | OTLP export health monitor | `ragent-telemetry` | every export outcome is classified and counted; 5 consecutive failures disable export instead of retrying a dead endpoint, and each failure surfaces as an `Agent Notice` with the masked endpoint |
-| Async-runtime periodic reader | `ragent-telemetry::subsystem::build_provider` | the OTLP `reqwest-client` exporter must be driven by `periodic_reader_with_async_runtime` on the Tokio runtime; the OS-thread reader panics with "there is no reactor running" on the first export |
+| Blocking OTLP exporter | `ragent-telemetry::subsystem::build_provider` | the OTLP exporter uses the blocking reqwest client (`reqwest-blocking-client`) under the default `PeriodicReader`, so an export needs no Tokio reactor and `flush` is safe from any thread |
 | Thread-aware TUI panic hook | `ragent-tui::run_tui` | terminal teardown runs only when the panicking thread is the UI thread, so a background-worker panic cannot destroy the alternate screen |
 | Safe-command allowlist + in-crate calculator | `ragent-tools-core` | the allowlist is read-only commands only, interpreters always go through the permission gate, banned tools are consulted first, and `calculator` evaluates arithmetic in-process (no `python3 -c`) |
 | VCS argument hardening | `ragent-tools-vcs` | `reject_option_like` on every ref/branch/tag/remote/path, `--` before positionals, `validate_clone_directory` confines the clone target, and a `gitlab:<host>` host is accepted only when it matches the configured instance |
 
-### 4.6c Network & Secret Hardening (SECTASKS MS-03)
+### 4.6c Network and Secret Bounds
 
-The Medium-severity findings. The recurring shapes are a **byte cap**, a
-**page/entry budget**, a **clamped delay**, and **origin-scoped credential
-attachment**.
+The recurring shapes are a **byte cap**, a **page/entry budget**, a **clamped
+delay**, and **origin-scoped credential attachment**.
 
 | Guard | Where it lives | What it enforces |
 |-------|----------------|------------------|
@@ -1265,10 +1262,10 @@ attachment**.
 | Benchmark download caps | `ragent-bench::data` | client timeout, streamed byte cap, pagination page/record budget, and `contained_join` for manifest `case_file`/`relative_path` |
 | `MAX_RETRY_AFTER` / `MAX_SSE_BUFFER_BYTES` / `MAX_ERROR_BODY_BYTES` | `ragent-llm::providers::http_client` | `Retry-After` is clamped to 30 s, the SSE accumulation buffer aborts the stream past 1 MiB, and error bodies are read under 64 KiB |
 | `MAX_TREE_REQUESTS` / `MAX_TREE_ENTRIES` / `MAX_JOB_PAGES` | `ragent-tools-vcs` | the GitHub tree walk and the GitLab jobs pagination are bounded |
-| `read_response_capped` / `MAX_FETCH_BODY_BYTES` / `MAX_CRAWL_PAGE_BYTES` | `ragent-tools-extended::masterfetch` | responses are streamed under a byte budget; `crawl_urls` is SSRF-validated at the tool boundary |
+| `read_body_capped` / `MAX_FETCH_BODY_BYTES` / `MAX_CRAWL_PAGE_BYTES` | `ragent-tools-extended::masterfetch` | responses are streamed under a byte budget; `crawl_urls` is SSRF-validated at the tool boundary |
 | Credential env seeding | binary startup | every credential env var is registered with the secret registry before any log can be written |
 | `redact_secrets` on tool output | `ragent-tools-core::bash`, `ragent-tools-vcs::github_actions` | bash partial/completed output and CI log excerpts are redacted before they reach the model or the session store |
-| `is_denied_request_header` | `ragent-tools-extended::http_request` | routing/credential headers (`Host`, `Cookie`, `Authorization`, `Proxy-*`, ...) are rejected |
+| `is_allowed_request_header` | `ragent-tools-extended::http_request` | only `accept`, `accept-language`, `content-type` and `user-agent` may be set; routing, hop-by-hop and credential headers are refused |
 | `mask_secret` | `ragent-tui::layout` | the provider-setup dialog masks the API key and the GitLab PAT |
 | `check_path_within_workspace` | `ragent-tools-extended::ToolContext` | `pdf_write` confines its output path |
 | `build_exclude_matcher` / `clear_index_dir` | `ragent-codeindex` | the configured exclusion globs are applied and the FTS recovery wipe refuses a symlinked directory |
@@ -1281,18 +1278,17 @@ attachment**.
 | `split_bash_command` substitution depth | `ragent-agent::session::permissions` | a `;`/`&&` inside `$( ... )` does not split the command into a separately-judged sub-command |
 | `same_origin_as` | `ragent-tools-vcs::github` | the Bearer token is attached only when the resolved URL matches the configured API origin |
 
-### 4.6d Defence in Depth (SECTASKS MS-04)
+### 4.6d Defence in Depth
 
-The Low-severity findings, delivered as the same guard shapes at the remaining
-call sites: an explicit **cap/budget**, a **containment check**, a **char-safe
-split**, or an **owner-only file mode**.
+The same guard shapes at the remaining call sites: an explicit **cap/budget**, a
+**containment check**, a **char-safe split**, or an **owner-only file mode**.
 
 | Guard | Where it lives | What it enforces |
 |-------|----------------|------------------|
 | `unpack_archive_checked` (`ARCHIVE_MAX_ENTRIES`, `ARCHIVE_MAX_TOTAL_BYTES`) | `ragent-agent::session::archive` | session-archive import refuses an entry-count or total-decompressed-size overrun and rejects an entry path that escapes the extraction directory |
 | `MAX_BENCH_SAMPLES` | `ragent-bench::model` | `--samples` is clamped to 100 before both the `Vec` pre-allocation and the generation loop |
 | `MAX_DOWNLOAD_BYTES` / `MAX_HUMANEVALPACK_PAGES` / `MAX_HUMANEVALPACK_ROWS` | `ragent-bench::data` | a dataset download is streamed under a 64 MiB cap and the pagination loop carries a page and row budget |
-| `base_url_override` run note | `ragent-bench::runner` | the resolved provider base URL is no longer written into the shareable workbook or run-state sidecar |
+| `base_url_override` run note | `ragent-bench::runner` | the resolved provider base URL is kept out of the shareable workbook and run-state sidecar |
 | `contained_join` | `ragent-bench::data` | manifest `case_file` and `relative_path` are joined inside the canonicalised data root |
 | read-then-check size | `ragent-codeindex::scanner` | the stored byte size is derived from the bytes actually read, closing the stat/read TOCTOU past `max_file_size` |
 | `build_exclude_matcher` | `ragent-codeindex::scanner` | `ScanConfig::extra_exclude_patterns` is compiled into a glob matcher and applied during the walk |
@@ -1309,7 +1305,7 @@ split**, or an **owner-only file mode**.
 | `SpecId` validating `Deserialize` | `ragent-specs::spec` | every deserialisation routes through `SpecId::new`, so a traversal id cannot be constructed |
 | `write_govcreate_spec` re-validation | `ragent-specs::commands` | the public write API validates the id before joining it into the output path |
 | `/spec create` / `/spec specify` name validation | `ragent-specs::commands` | an invalid spec name is a usage error |
-| char-boundary diff split | `ragent-storage::snapshot` | `apply_unified_diff` splits on the first char; a multibyte diff line no longer panics |
+| char-boundary diff split | `ragent-storage::snapshot` | `apply_unified_diff` splits on the first char, so a multibyte diff line cannot panic |
 | `is_safe_memory_component` | `ragent-agent::team::config` | `resolve_memory_dir` rejects a multi-component or `..` agent name |
 | `CardinalityCache::resolve` sanitisation | `ragent-telemetry::cardinality` | values are passed through `sanitize_attr_value` inside `resolve` and a poisoned lock fails closed to the unknown bucket |
 | `parse_alog_run_id_yes` validation | `ragent-tui::app::helpers` | `/alog export` accepts only `[A-Za-z0-9_-]+` run ids |
@@ -1319,11 +1315,11 @@ split**, or an **owner-only file mode**.
 | `redacted_event_debug` / SSE device-code masking | `ragent-server::sse` | credential-bearing events expose presence-only fields on the SSE stream and a redacted rendering for log sites |
 | `CrawlFetcher` SSRF contract | `ragent-tools-extended::masterfetch::crawl` | the SSRF obligation is stated on the trait and validated at the `mf_crawl` tool boundary |
 
-### 4.6e Shared Guards and Recurrence Prevention (SECTASKS MS-05)
+### 4.6e Shared Guards and CI Gates
 
-Every mitigation from 4.6a-4.6d is one of a small number of guard *shapes*. MS-05
-gives each shape a single implementation so a new call site cannot silently
-weaken it, and adds CI gates that fail a build which reintroduces a class.
+Every mitigation in 4.6a-4.6d is one of a small number of guard *shapes*. Each
+shape has a single implementation so a new call site cannot silently weaken it,
+and CI gates fail a build that reintroduces a class.
 
 **`ragent_types::guard`** (re-exported from the crate root, and as
 `ragent_tools_core::guard` for the tools crates) owns:
@@ -1334,10 +1330,10 @@ weaken it, and adds CI gates that fail a build which reintroduces a class.
 | `is_safe_operand(value)` | the predicate form: `[A-Za-z0-9._/-]+` and no leading `-` |
 | `validate_identifier(value, label)` | `^[A-Za-z0-9._-]+$`, at most `MAX_IDENTIFIER_LEN` (64) bytes, no `.`/`..`/separators |
 | `validate_relative_component(value, label)` | relative, no `\`, no `..`, no Windows drive or UNC prefix |
-| `contained_join(root, relative, label)` | the above plus a canonicalised-root check that catches a symlink escape; it canonicalises the **deepest existing ancestor** of the joined path, so a not-yet-created leaf can no longer escape through a symlinked intermediate component (SEC-059) |
-| `reject_symlink_components(path, label)` | no component of `path` (walking upward) is a symlink - refuses to write or delete through one (SEC-006/SEC-030/SEC-059) |
-| `reject_symlink_escape(path, root, label)` | `path` is not a symlink and canonicalises inside `root` (SEC-006) |
-| `open_owner_only(path)` | creates/truncates `path` owner-only (`0o600`), so a secret-bearing temp file is not world-readable (SEC-022/SEC-027) |
+| `contained_join(root, relative, label)` | the above plus a canonicalised-root check that catches a symlink escape; it canonicalises the **deepest existing ancestor** of the joined path, so a not-yet-created leaf cannot escape through a symlinked intermediate component |
+| `reject_symlink_components(path, label)` | no component of `path` (walking upward) is a symlink - refuses to write or delete through one |
+| `reject_symlink_escape(path, root, label)` | `path` is not a symlink and canonicalises inside `root` |
+| `open_owner_only(path)` | creates/truncates `path` owner-only (`0o600`), so a secret-bearing temp file is not world-readable |
 | `clamp_retry_after(hint)` | the 1 s floor and `MAX_RETRY_AFTER` (30 s) ceiling on a server-supplied delay |
 | `cap_read(bytes, max)` | a UTF-8-boundary-safe prefix of a buffered read |
 
@@ -1353,7 +1349,7 @@ second secret registry, so a credential registered anywhere is masked
 everywhere: `GET /config`, telemetry attributes, log lines, SSE payloads, and
 tool output all call the same `redact_secrets`.
 
-`Event` no longer derives `Debug`. Its hand-written impl renders through an
+`Event` does not derive `Debug`. Its hand-written impl renders through an
 internal `DebugProxy` that reports credential-bearing fields
 (`CopilotDeviceFlowComplete.token`, `CopilotDeviceFlowStartResult.device_code`)
 as presence flags and then pipes the whole rendering through `redact_secrets`,
@@ -1367,83 +1363,73 @@ asserts the gate fails it:
 | Gate | Command | Fails when |
 |------|---------|-----------|
 | Redaction tests | `cargo test -p ragent-types --test all test_unified_redaction::` | a second registry or a leaking `Event` `Debug` appears |
-| File-tool containment | `scripts/check-file-tool-containment.sh` | a registered file tool no longer calls the `allowed_roots`-aware `check_path_within_allowed_roots_cached` helper (a working-dir-only `check_path_within_root_cached` call no longer passes; see 4.6f) |
+| File-tool containment | `scripts/check-file-tool-containment.sh` | a registered file tool does not call the `allowed_roots`-aware `check_path_within_allowed_roots_cached` helper (a working-dir-only `check_path_within_root_cached` call fails the gate) |
 | Panic-free production paths | `scripts/check-security-unwraps.sh` | a file exceeds its `.unwrap()`/`.expect()` baseline in `scripts/security-unwrap-baseline.txt` |
 | One guard per rule | `scripts/check-shared-guards.sh` | a crate re-defines a shared guard or a second secret registry |
 | Git-argument guard | `scripts/check-vcs-duplication.sh` | the leading-dash check is re-derived or the shared delegation is dropped |
 
-The panic-free gate is a **baseline** gate: the 362 pre-existing panicking calls
-across 90 files are recorded per file and grandfathered, so the gate is
-enforceable today while still rejecting every *new* occurrence. An intentional
-call is exempted with a same-line `// no-panic-ok: <reason>` comment, which makes
-it visible in review. The grandfathered set is an accepted-risk entry in
-`SECTASKS.md`.
+The panic-free gate is a **shrink-only baseline** gate: existing panicking calls
+are recorded per file in `scripts/security-unwrap-baseline.txt`, and every *new*
+occurrence is rejected. An intentional call is exempted with a same-line
+`// no-panic-ok: <reason>` comment, which makes it visible in review.
 
-### 4.6f M0 Critical Defects and Security Holes (ANTIPAT M0)
+### 4.6f Containment, Redaction and Failure Reporting
 
-The first milestone of the workspace-wide anti-pattern remediation plan
-(`ANTIPAT.md`) closes the two shipping defects and the highest-severity
-containment gaps found by the 18-crate audit.
+**Startup and retry bounds.**
 
-**Two shipping defects.**
-
-- **Crash-marker ordering.** `async_main` now reads
+- **Crash-marker ordering.** `async_main` reads
   `crash_dump::previous_unclean_exit` *before* stamping the new `running`
-  marker. Previously the marker was overwritten first, so its pid always
-  matched the live process and the "previous session exited without unwinding"
-  warning was unreachable (ANTIPAT A-01).
-- **Search-retry shift overflow.** `WebGatherer::with_search_max_retries` clamps
+  marker, so the "previous session exited without unwinding" warning reports
+  the earlier process rather than the live one.
+- **Search-retry bound.** `WebGatherer::with_search_max_retries` clamps
   its argument to `MAX_SEARCH_RETRIES` (10) and the backoff uses
-  `checked_shl` capped by `MAX_SEARCH_RETRY_DELAY_MS` (60 s). A CLI-supplied
-  `--search-max-retries >= 64` previously panicked on `1u64 << 64`, and values
-  in the 40-63 range slept for days (ANTIPAT F-02).
+  `checked_shl` capped by `MAX_SEARCH_RETRY_DELAY_MS` (60 s), so any
+  CLI-supplied `--search-max-retries` value is safe.
 
 **Containment and argument-injection guards.**
 
 | Guard | Where it lives | What it rejects |
 |-------|----------------|-----------------|
-| `git::reject_option_like` on every operand | `ragent-tools-vcs::git` | `git_checkout` branch/source, every `git_cherry_pick` commit, every `git_add` path, and `git_remote` name/url — all 18 git tools now reject a leading-dash operand |
+| `git::reject_option_like` on every operand | `ragent-tools-vcs::git` | a leading-dash operand to any git tool, including the `git_checkout` branch/source, every `git_cherry_pick` commit, every `git_add` path, and the `git_remote` name/url |
 | `GitHubClient::validate_repo_segment` | `ragent-tools-vcs::github` | an `owner`/`repo` that is not `[A-Za-z0-9._~-]+`, so it cannot escape the request path |
-| `resolve_url` for `fetch_readme` | `ragent-tools-vcs::github` | a hardcoded `api.github.com`, which previously ignored a configured GitHub Enterprise `base_url` and sent the Bearer token to the public origin |
-| `check_path_within_allowed_roots_cached` in every file tool | `ragent-tools-core` | `diff_files`, `file_info`, `Glob`, `open`, and `apply_patch` previously checked `working_dir` only, so a whitelisted `allowed_roots` entry was rejected for the same path every other tool accepted (FUNC-068, ANTIPAT F-06) |
+| `resolve_url` for `fetch_readme` | `ragent-tools-vcs::github` | a request to the public origin when a GitHub Enterprise `base_url` is configured, so the Bearer token goes only to the configured API |
+| `check_path_within_allowed_roots_cached` in every file tool | `ragent-tools-core` | a path outside both `working_dir` and the `allowed_roots` entries; `diff_files`, `file_info`, `Glob`, `open`, and `apply_patch` accept the same paths as every other file tool |
 | `masterfetch::http::read_body_capped` / `read_bytes_capped` | `ragent-tools-extended` | an unbounded response body from search/robots/youtube reads (16 MiB ceiling; 512 KiB for small text bodies) |
-| `write_govcreate_spec` target-folder containment | `ragent-specs::commands` | a `target-folder` that climbs out of the invoking root, checked lexically *before* any directory is created (ANTIPAT H-1) |
-| `merged_dir_lists_for` / `builtin_only_dir_lists` | `ragent-config::dir_lists` | a config-load failure that previously returned an empty denylist, silently dropping the mandatory built-in system-directory protection (ANTIPAT H-3) |
+| `write_govcreate_spec` target-folder containment | `ragent-specs::commands` | a `target-folder` that climbs out of the invoking root, checked lexically *before* any directory is created |
+| `merged_dir_lists_for` / `builtin_only_dir_lists` | `ragent-config::dir_lists` | a config-load failure keeps the mandatory built-in system-directory denylist instead of returning an empty one |
 | plugin `content_digest` | `ragent-plugins::add` | an install with no integrity record: a SHA-256 over the staged tree is recorded in the store ledger, so a substituted archive or checkout is detectable |
 | aggregate archive cap (`MAX_EXTRACTED_BYTES`) | `ragent-plugins::add` | a decompression bomb made of many just-under-the-per-entry-cap entries |
-| symlink refusal in `copy_dir_recursive` | `ragent-plugins::add` | a symlink inside a source directory, previously dereferenced and copied into the store |
-| `read_body_capped` on every provider error path | `ragent-llm` | an unbounded 4xx/5xx error body (16 provider sites); malformed SSE frames in five parsers are now logged rather than silently dropped (FUNC-032 parity) |
+| symlink refusal in `copy_dir_recursive` | `ragent-plugins::add` | a symlink inside a source directory is refused, not dereferenced and copied into the store |
+| `read_body_capped` on every provider error path | `ragent-llm` | an unbounded 4xx/5xx error body; malformed SSE frames are logged rather than silently dropped |
 
 **Redaction and file permissions.**
 
-- `Config` no longer derives `Debug`; a hand-written impl renders a JSON form
+- `Config` does not derive `Debug`; a hand-written impl renders a JSON form
   routed through `ragent_types::sanitize::redact_secrets`, so an API key,
-  GitLab token, bot token, webhook URL, or client secret cannot be printed
-  (ANTIPAT H-2).
+  GitLab token, bot token, webhook URL, or client secret cannot be printed.
 - Crash markers, panic reports, and the stderr spool are created owner-only
   (`0o600`), and the `/bug-report` dump is written `0o600` too. The crash
   record's argv is redacted before serialisation, because
   `ragent auth openai sk-...` would otherwise persist a live credential to a
-  world-readable file (ANTIPAT A-02/A-03, MEDIUM-3).
+  world-readable file.
 
-**Silent-failure fixes.**
+**Failure reporting.**
 
-- Storage: the memory access-count bump logs its failure; the four
-  `conversation_stats` counts propagate instead of `unwrap_or(0)`; a legacy
-  nonce that cannot be converted now errors instead of decrypting under an
-  all-zero key (ANTIPAT D-1/D-2/D-4).
-- Server: ~23 HTTP 500 responses route through `internal_error_response`, so a
-  SQLite or filesystem error string is no longer returned to a caller; the
+- Storage: the memory access-count bump logs its failure; the
+  `conversation_stats` counts propagate errors instead of `unwrap_or(0)`; a legacy
+  nonce that cannot be converted is an error, never a decrypt under an
+  all-zero key.
+- Server: HTTP 500 responses route through `internal_error_response`, so a
+  SQLite or filesystem error string never reaches a caller; the
   `store_memory` fetch-after-write propagates its failure instead of answering
-  `201` with an empty body (ANTIPAT F-H3/F-H2).
+  `201` with an empty body.
 - Agent: a sub-agent report that cannot be persisted to
-  `log/subagents/<task-id>.md` now warns with the task id and target directory,
+  `log/subagents/<task-id>.md` warns with the task id and target directory,
   instead of silently reporting `output_file: None`.
 - Telemetry: `ToolRecorder`, `SessionRecorder`, `CoordinatorRecorder`, and
   `CompressionRecorder` honour the FR-027 per-metric toggles, and
   `InstrumentRegistry::noop()` builds from an explicit locally-owned provider
-  rather than the process-global one, so a disabled subsystem cannot export
-  (ANTIPAT HIGH-4/HIGH-5).
+  rather than the process-global one, so a disabled subsystem cannot export.
 
 **Regression suites.** `crates/ragent-research/tests/test_search_retry_clamp.rs`,
 `crates/ragent-tools-vcs/tests/test_ms0_git_arg_guards.rs`,
@@ -1453,12 +1439,9 @@ containment gaps found by the 18-crate audit.
 `crates/ragent-telemetry/tests/test_metric_toggles.rs` (all wired into the
 `ms0-regression` CI job).
 
-### 4.6g Standards Conformance: Tests, Docs, Unwraps (ANTIPAT M2)
+### 4.6g Standards Gates
 
-The second milestone of `ANTIPAT.md` closes the test-location, module-docblock,
-and production-`unwrap` debt found by the 18-crate audit.
-
-**Inline-test gate (M2.17).** `scripts/check-inline-tests.sh` is a wrapper
+**Inline-test gate.** `scripts/check-inline-tests.sh` is a wrapper
 over `scripts/check_inline_tests.py`, which distinguishes the two `#[cfg(test)]`
 shapes:
 
@@ -1467,33 +1450,14 @@ shapes:
 | `#[cfg(test)] #[path = ".../tests/inline/<name>.rs"] mod x;` | allowed (external body) |
 | `#[cfg(test)] mod x { ... }` | rejected (inline body) |
 
-The scanner covers `crates/*/src` **and** root `src/` (the old guard scanned
-neither the root tree nor the `#[path]` distinction), keeps a shrink-only
+The scanner covers `crates/*/src` **and** root `src/`, keeps a shrink-only
 baseline of `0`, and ships a `--self-test` that proves an inline body fails the
 gate while a `#[path]` hook passes. It runs in the `security-guards` CI job and
 in `pre-flight.sh`.
 
-**Test relocation.** The sole remaining genuine inline body
-(`ragent-tui/src/app/loop_dialog/loop_dialog_tests.rs`) moved under
-`tests/inline/`. Five `ragent-agent` modules that had shared a single
-`mod_tests.rs` now each own a per-module `*_mod_tests.rs` restored from history.
-
-**Production unwraps.** The nine `FtsIndex::from_index` schema lookups use a
-`resolve(name)?` helper; the five per-provider tool-cache `.expect` calls collapse
-into one `push_tool` helper that logs and skips on failure; `apply_patch`,
-`replace`, and `read` no longer panic on their production paths; and the TUI
-`/spec`/`/team`/`/triggers` handlers use `let Some(..) = .. else`. Remaining
-constant-regex `expect`/`unwrap` sites carry `// INVARIANT:` or `no-panic-ok`
-markers.
-
-**Docs.** `error.rs`/`spec.rs`/`router_client.rs` gained `//!` headers, the stale
-"populated by later tasks / T-00x" comments left `graph/mod.rs`, and
-`ragent-codeindex`, `ragent-bench`, `ragent-specs`, and `ragent-research` build
-with zero rustdoc warnings.
-
-**Vocabulary.** `sanitise_fts_query` was renamed to `sanitize_fts_query`, and
-`AGENTS-RUST.md` now documents the CLI presentation-surface exception to the
-`println!`/`eprintln!` tracing rule.
+**Production unwraps.** Constant-regex `expect`/`unwrap` sites that remain in
+production code carry `// INVARIANT:` or `no-panic-ok` markers; see
+`scripts/check-security-unwraps.sh` in 4.6e.
 
 ### 4.7 YOLO Mode
 
