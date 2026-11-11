@@ -127,7 +127,7 @@ These rank above every other category: a reader acts on them.
 
 | ID | Where | False claim | Check → truth |
 |---|---|---|---|
-| HOWTO-01 | bash.md and permissions.md `SAFE_COMMANDS` block | git, gh, cargo, npm, python, docker-compose, find, sed, awk, xargs, chmod, jq, patch are auto-approved | `bash.rs` list is 28 read/navigation commands with no VCS/build/interpreter commands. **This is a security-relevant misstatement.** |
+| HOWTO-01 | bash.md and permissions.md `SAFE_COMMANDS` block | git, gh, cargo, npm, python, docker-compose, find, sed, awk, xargs, chmod, jq, patch are auto-approved | `bash.rs` list is 26 read/navigation commands with no VCS/build/interpreter commands. **This is a security-relevant misstatement.** |
 | HOWTO-06 | tools/gitlab.md; tools/planning.md | get_pipeline takes `id`; plan tools take no args | `pipeline_id`; EnterPlanMode `task`/`context`, ExitPlanMode `summary` |
 | HOWTO-08 | research.md POST body | `"from_file": "…"` | `from_files: Vec<String>`, no alias |
 | HOWTO-09 | research.md | `ragent research create … --from-file` | `--from-files` |
@@ -250,7 +250,7 @@ These rank above every other category: a reader acts on them.
 | Count in docs | Where | True today | Deriving command |
 |---|---|---|---|
 | tools "149/150", "19/20 team tools", "~169-tool registry" | tools/INDEX.md, permissions.md, README, SPEC, TUI-QUICKSTART, agent DOCS.md | 150 default (151 with mf_screenshot); 21 `team_*` | `ragent --dry-run --json run x`, tools section |
-| "~50 safe commands" | bash.md | 28 | `SAFE_COMMANDS` in `bash.rs` |
+| "~50 safe commands" | bash.md | 26 | `SAFE_COMMANDS` in `bash.rs` |
 | "39 VCS tools" | tools-vcs DOCS.md | 48 | `registry.rs` registrations |
 | "17/18 crates", "16 crates", line counts per crate | SPEC §2.1, ANTIPAT, TOOLCHAIN, README "18 crates above 85%" | 19 | `ls crates` |
 | "18/19 test targets" | README, TOOLCHAIN, STATS | 20 | `ls crates/*/tests/all.rs tests/all.rs` |
@@ -361,6 +361,21 @@ Statuses: `Proposed` → `Approved` → `In progress` → `Done`. Cars marked �
 - **DOC-02 and DOC-06: Guard added.** Add an offline link and anchor check to CI. This is CODE-13, the cheapest independent proof, since 33 broken links accumulated with no gate. The script is already written at `target/temp/doc-audit/linkcheck.py`.
 - **DOC-03 and DOC-09: Ownership recorded.** Instruction files keep the behavioral-delta rule in their PR template.
 - **All other cars: No guard justified.**
+
+### 11.1 IDs cited in the ledger without a table row
+
+| ID | Finding |
+|---|---|
+| HOWTO-17 | config.md §7.2 lists `defaultAgent` as canonical with `default_agent` as alias; serde has it the other way round (`config.rs` `alias = "defaultAgent"`) |
+| HOWTO-26 | slashcommands/yolo.md omits the `show` alias of `/yolo status` |
+| DOCS-02 | agentorch.md line-number references (about 250 `file.rs:NNN`) have rotted; `handle_no_tool_decision` no longer exists |
+| DOCS-05b | sqlite.md anchors `#appendix-a--measurement-harness` and `#t-09--remove-…` need the `---` slug (= LINK-08) |
+| DOCS-26 | introduction.md bare tool counts ("Built-in Tools (8)" etc.) and a "Document Structure" list of sections that do not exist |
+| LINK-05 | docs/howtos/plugins.md `../../../specs/plugins/SPEC.md` escapes the repo |
+| LINK-06 | docs/howtos/skills.md `../tools/file-operations.md` → `tools/file-operations.md` |
+| LINK-07 | docs/howtos/reverse.md anchors for `--create`, `--depth`, `--folder` headings |
+| LINK-08 | docs/sqlite.md two anchors (as DOCS-05b) |
+| LINK-09 | specs/agentopt/PLAN.md, specs/openharness/SPEC.md, specs/pluginstores/SPEC.md relative links |
 
 ## 12. Lessons for the next audit
 
