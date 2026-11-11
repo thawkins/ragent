@@ -444,9 +444,11 @@ Permission Check (PermissionChecker + interactive prompt)
 
 ### Layer 1 — Safe Command Whitelist
 
-A built-in list of 26 read-only and navigation commands (`ls`, `cat`, `grep`,
-`rg`, `diff`, `echo`, ...) is auto-approved without any further checks or user
-prompting. The check is prefix-based: a command is safe if it equals the entry
+A built-in list of 26 commands (`ls`, `cat`, `grep`, `rg`, `diff`, `echo`, ...),
+mostly read-only but including the file-modifying `mkdir`, `touch`, `cp` and
+`mv`, skips the permission prompt. It does **not** skip validation: the command
+still passes through every later layer of `validate_shell_command` (banned
+tools, denied patterns, directory escape and so on). The check is prefix-based: a command is safe if it equals the entry
 exactly OR starts with the entry followed by a space, and a command containing a
 shell separator or redirection is never safe. The list contains no version-control,
 build, package-manager or interpreter commands (`git`, `cargo`, `npm`, `python3`,
