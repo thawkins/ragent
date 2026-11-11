@@ -7,7 +7,8 @@ GitHub API, then asks the currently selected LLM model to generate a synthetic
 "creation prompt" — a detailed prompt that, if fed to a coding agent, would
 reproduce the repository from scratch.
 
-The same functionality is available as the `ragent reverse` CLI subcommand.
+There is no `ragent reverse` CLI subcommand; the feature is TUI-only (see
+[Section 9](#9-cli-equivalents)).
 
 > **Scope:** `/spec reverse` slash commands, the `/new` scaffold flags
 > (`--language` / `--type` / `--stack`), the scaffold-only `--folder` and
@@ -125,8 +126,8 @@ Fetch a public GitHub repository and generate a synthetic creation prompt.
 | `--type <type>` | No | Target app type — the same values `/new` accepts: `library`, `cmdline`, `tui`, `gui`, `webapp`. Must be supplied with `--language` |
 | `--stack <name>` | No | Optional framework stack layer — the same values `/new` accepts (`axum`, `warp`, `raylib`, `gtk4`, `ratatui`). Requires `--language` and `--type` |
 | `--create <name>` | No | Chain into `/spec create` using the generated prompt. With `--folder`, the spec is written to `<folder>/specs/<name>/` |
-| `--depth <N>` | No | Directory levels to fetch from the tree (1–10, default 1). See [Section 10](#10-the-depth-flag). |
-| `--folder <path>` | No | With scaffold flags, scaffold the project in `<path>` (created if missing; default: the current directory). See [Section 6.1](#61-scaffolding-with-folder) |
+| `--depth <N>` | No | Directory levels to fetch from the tree (1–10, default 1). See [Section 10](#10-the---depth-flag). |
+| `--folder <path>` | No | With scaffold flags, scaffold the project in `<path>` (created if missing; default: the current directory). See [Section 6.1](#61-scaffolding-with---folder) |
 | `--github` | No | With scaffold flags, create a private GitHub repository, set it as `origin`, and push the initial commit. Mutually exclusive with `--gitlab` |
 | `--gitlab` | No | With scaffold flags, create a private GitLab repository, set it as `origin`, and push the initial commit. Mutually exclusive with `--github` |
 
@@ -370,7 +371,7 @@ produced, so the command is safe to re-run after fixing the cause.
 
 When `--create <name>` is supplied alongside `--folder`, the chained spec is
 written into the scaffolded project (`<folder>/specs/<name>/`), not the
-invoking directory — see [Section 7](#7-the-create-flag).
+invoking directory — see [Section 7](#7-the---create-flag).
 
 Examples:
 
@@ -514,42 +515,10 @@ avoid hitting the rate limit.
 
 ## 9. CLI equivalents
 
-The TUI `/spec reverse` command is the primary entry point; the equivalent
-`ragent reverse` CLI subcommand is not currently registered in the clap CLI
-(`run`, `serve`, `session`, `memory`, `auth`, `models`, `config`,
-`research` are the available subcommands). The examples below describe the
-intended CLI surface and will become accurate when the subcommand ships:
-
-```bash
-# Basic reverse-engineering
-ragent reverse thrivethrough/omitme
-
-# With technology constraint
-ragent reverse thrivethrough/omitme --language rust --type cmdline
-
-# With spec creation
-ragent reverse thrivethrough/omitme --create omitme-clone
-
-# Full GitHub URL
-ragent reverse https://github.com/thrivethrough/omitme
-
-# Both flags
-ragent reverse thrivethrough/omitme --language rust --type cmdline --create omitme-rust-port
-
-# Scaffold the project (and optionally a private hosting remote)
-ragent reverse thrivethrough/omitme --language rust --type cmdline --folder ./omitme-clone --github
-```
-
-The CLI command prints the generated prompt to stdout, making it easy to
-pipe into other tools or save to a file:
-
-```bash
-# Save the generated prompt to a file
-ragent reverse thrivethrough/omitme > omitme-prompt.md
-
-# Pipe through jq for structured output
-ragent reverse thrivethrough/omitme --language rust --type cmdline 2>&1 | tee omitme-rust.md
-```
+`/spec reverse` is available only inside the TUI. The clap CLI registers no
+`ragent reverse` subcommand, and `ragent spec` exposes only `govcreate`, so
+there is no command-line equivalent today. Run `ragent --help` for the
+subcommands that do exist.
 
 ---
 
@@ -745,7 +714,7 @@ approach using the specified testing tools.
 | `repository not found` | Invalid owner/repo or private repo | Check spelling; set `GITHUB_TOKEN` for private repos |
 | `rate limit exceeded` | Too many unauthenticated API calls | Set `GITHUB_TOKEN` environment variable |
 | `README not found` | Repository has no README | The command continues with metadata and tree only |
-| Empty or short prompt | LLM model not configured or down | Check provider setup with `/models` |
+| Empty or short prompt | LLM model not configured or down | Check provider setup with `/model` |
 | `network error` | Connection issue | Check network connectivity and retry |
 | `invalid repository format` | Malformed input | Use `owner/repo` or a full GitHub URL |
 | `spec already exists` | `--create` target name already used | Choose a different name or delete the existing spec |

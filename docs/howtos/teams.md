@@ -187,7 +187,6 @@ In the Teams panel, click the `[T]` button next to a teammate to open their outp
 | `/team status` | none | Show the currently active team in this session. |
 | `/team show [name]` | optional `name` | Show one team in detail, or all registered teams when no name is given. |
 | `/team create <blueprint> [name]` | required `blueprint`, optional `name` | Create a new project-local team (blueprint mandatory) and set it active. |
-| `/team open <name>` | required `name` | Re-open an existing team from disk and set it as the active team. |
 | `/team close` | none | Close the active team in this session (does not delete on disk). |
 | `/team delete <name>` | required `name` | Delete a team from disk (also clears active state if it is active). |
 | `/team blueprint [name]` | optional `name` | List all installed blueprints, or show details of a specific blueprint. |

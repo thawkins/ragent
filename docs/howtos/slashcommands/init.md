@@ -1,6 +1,6 @@
 # /init
 
-> "Analyse the project and optionally write a default config file" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
+> "Analyse the project and write a summary, or create a default config: /init [config|help]" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
 
 ## Overview
 

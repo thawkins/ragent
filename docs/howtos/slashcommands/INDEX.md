@@ -46,7 +46,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/skill` | [skill](skill.md) | Load or inspect skill packs: /skill \| /skill list \| /skill <name> [args] \| /skill help |
 | `/mcp` | [mcp](mcp.md) | MCP servers: /mcp [status] \| /mcp discover \| /mcp connect <id> \| /mcp disconnect <id> \| /mcp help |
 | `/task` | [task](task.md) | Toggle the TASKS side panel, or list/help tasks: /task [list\|help] |
-| `/team` | [team](team.md) | Team management (/team help\|status\|show [name]\|create/open/delete <name>\|close\|message <id> <text>\|tasks\|clear\|cleanup) |
+| `/team` | [team](team.md) | Team management (/team help\|status\|show [name]\|create/delete <name>\|close\|message <id> <text>\|tasks\|clear\|cleanup) |
 | `/swarm` | [swarm](swarm.md) | Auto-decompose a goal into parallel subtasks (/swarm <prompt> \| /swarm status \| /swarm help) |
 | `/spawn` | [spawn](spawn.md) | Launch a detached fire-and-forget background sub-agent: /spawn <agent> <prompt...> \| /spawn help |
 | `/bash` | [bash](bash.md) | Manage bash command lists: /bash add\|remove allow\|deny <entry> [--global] \| show \| help |

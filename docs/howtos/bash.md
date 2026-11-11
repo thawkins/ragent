@@ -91,11 +91,11 @@ When both a global and a project config exist, ragent merges them:
 ### Config flow
 
 The Bash tool does **not** read `Config` directly. At startup (and on `/reload`) ragent
-copies the merged config into an in-memory snapshot via `BashLists::load_from_config()`
+copies the merged config into an in-memory snapshot via `bash_lists::load_from_config()`
 (`crates/ragent-config/src/bash_lists.rs`):
 
-- TUI startup: `crates/ragent-tui/src/app/init.rs:397`
-- `/reload`: `crates/ragent-tui/src/app/slash.rs:3361`
+- TUI startup: `App::new` in `crates/ragent-tui/src/app/init.rs`
+- `/reload`: the `"reload"` arm in `crates/ragent-tui/src/app/slash.rs`
 
 ```rust
 pub fn load_from_config() {
@@ -131,30 +131,30 @@ summarises them in the order the checks actually execute, full detail follows.
 
 ### Layer 1 — Safe-command whitelist
 
-A built-in list of ~50 commands is prefix-matched and auto-approved (it just logs
-`"Safe bash command auto-approved"`). A command is safe if it **equals** an entry or
-**starts with the entry followed by a space**, so `ls` matches `ls -la` and `git` matches
-`git status`.
+A built-in list of 26 read-only and navigation commands is prefix-matched and
+auto-approved (it just logs `"Safe bash command auto-approved"`). A command is safe if
+it **equals** an entry or **starts with the entry followed by a space**, so `ls` matches
+`ls -la`. A command that contains a shell separator or redirection (`;`, `|`, `&`, a
+backtick, `$(`, a newline, `>` or `<`) is never treated as safe, because the whitelist
+only inspects the first token.
 
 ```rust
 const SAFE_COMMANDS: &[&str] = &[
-    // File management
+    // --- File management ---
     "ls", "cd", "pwd", "mkdir", "touch", "cp", "mv",
-    // File reading & search
-    "cat", "head", "tail", "grep", "egrep", "fgrep", "find", "rg", "wc",
-    // Version control
-    "git", "gh",
-    // Build / package management
-    "cargo", "rustc", "rustfmt", "clippy-driver", "npm", "yarn", "pnpm",
-    "node", "npx", "python3", "python", "pip", "pip3", "make", "docker-compose",
-    // Text / data utilities
-    "echo", "printf", "chmod", "jq", "yq", "sed", "awk", "sort", "uniq",
-    "cut", "tr", "xargs", "date", "which", "tree", "diff", "patch",
+    // --- File reading & search ---
+    "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", // ripgrep
+    "wc", "which", "tree", "diff", "file",
+    // --- Text formatting (read-only, no argument-driven execution) ---
+    "echo", "printf", "sort", "uniq", "cut", "tr", "date",
 ];
 ```
 
-> **Note:** `rm` is deliberately excluded from the whitelist so it always requires a
-> permission decision (and is caught by Layer 3 for destructive forms).
+> **Note:** The whitelist deliberately contains no version-control, build, package
+> manager or interpreter commands (`git`, `cargo`, `npm`, `python3`, `sed`, `awk`,
+> `find`, `xargs`, ...). Those always go through the normal permission gate. `rm` is
+> also excluded so it always requires a permission decision; its destructive forms are
+> caught by `DENIED_PATTERNS` (Layer 5).
 
 ### Layer 2 — Banned commands
 

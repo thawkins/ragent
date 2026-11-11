@@ -42,7 +42,7 @@ reports results in the message window as a table or status block.
 
 | Form | Description |
 |---|---|
-| `/spec` (bare) | Lists specs in the current status view. |
+| `/spec` (bare) | Same as `/spec help`: prints the subcommand table. |
 | `/spec help` | Prints the subcommand table. |
 | `/spec create <name>` | Creates a new spec folder with a starter SPEC.md. |
 | `/spec govcreate <specid> <content-ref> <target-folder>` | Authors a draft spec from architecture documentation (web URL or local file/folder) and scaffolds the project with the `/new` engine (see the govcreate section below). |

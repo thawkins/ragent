@@ -15,7 +15,7 @@ enable message lists; the full bypass surface is documented below.
 /yolo            Toggle YOLO mode on or off
 /yolo on         Enable YOLO mode
 /yolo off        Disable YOLO mode
-/yolo status     Show whether YOLO mode is enabled
+/yolo status     Show whether YOLO mode is enabled (alias: /yolo show)
 ```
 
 ## Options / Subcommands
@@ -25,7 +25,7 @@ enable message lists; the full bypass surface is documented below.
 | `/yolo` | Toggles the current YOLO state |
 | `/yolo on` | Enables YOLO mode |
 | `/yolo off` | Disables YOLO mode |
-| `/yolo status` | Prints the current state |
+| `/yolo status` (alias `/yolo show`) | Prints the current state |
 
 The flag is stored as a persistent runtime flag (`config.yolo`), so it
 persists across restarts. It is written to the **user-global** config

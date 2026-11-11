@@ -1,6 +1,6 @@
 # /startup
 
-> "Show startup timing report" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
+> "Show startup timing breakdown for the current session" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
 
 ## Overview
 

@@ -110,4 +110,4 @@ shows `[warn] No user message found to undo` and the log records
 
 - `/clear` - remove the whole conversation
 - `/compact` - summarise rather than delete history
-- `/session resume` - restore a previously stored session
+- `ragent session resume <id>` (CLI) - restore a previously stored session

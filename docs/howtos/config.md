@@ -313,10 +313,10 @@ These are used by the `/config backup` and `/config restore` slash commands.
 
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
-| `defaultAgent` (alias `default_agent`) | `String` | `"general"` | Name of the agent used when none is specified via `--agent`. |
+| `default_agent` (alias `defaultAgent`) | `String` | `"general"` | Name of the agent used when none is specified via `--agent`. |
 
 ```json
-{ "defaultAgent": "coder" }
+{ "defaultAgent": "rust-coder" }
 ```
 
 The loader tracks whether the user explicitly set this field

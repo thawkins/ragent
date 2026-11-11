@@ -105,7 +105,6 @@ prints a confirmation line and the status bar shows
 
 ## Related
 
-- `/models`  -  verify the provider and model a bench run will target
+- `/model`  -  verify the provider and model a bench run will target
 - `/telemetry`  -  runtime metric counters recorded during runs
 - `cargo bench -p ragent-tui` and friends for criterion micro-benchmarks
-- docs/performance/benchmark-guide.md

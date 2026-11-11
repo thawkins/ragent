@@ -1,6 +1,6 @@
 # /config
 
-> "Inspect, back up, and restore ragent configuration" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
+> "Configuration: /config show|save|list|help" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
 
 ## Overview
 

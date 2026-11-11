@@ -1240,5 +1240,5 @@ criteria and can be used as worked examples:
 - [`docs/howtos/slashcommands/plugins.md`](slashcommands/plugins.md) - the
   `/plugins` command reference.
 - [`docs/howtos/config.md`](config.md) section 7.31 - the `plugins` config block.
-- [`specs/plugins/SPEC.md`](../../../specs/plugins/SPEC.md) - the full
+- [`specs/plugins/SPEC.md`](../../specs/plugins/SPEC.md) - the full
   plugin-system specification.

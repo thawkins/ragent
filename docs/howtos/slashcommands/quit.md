@@ -1,6 +1,6 @@
 # /quit
 
-> "Quit the application" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
+> "Exit ragent" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
 
 ## Overview
 
@@ -72,6 +72,6 @@ this command's handler; it is documented in TUI-QUICKSTART instead.
 
 ## Related
 
-- `/session resume` - return to a stored session in a future run
+- `ragent session resume <id>` (CLI) - return to a stored session in a future run
 - `/name` - label the session before quitting so it is easy to find again
 - TUI-QUICKSTART.md - keyboard quit bindings and terminal handling

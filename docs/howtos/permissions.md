@@ -444,36 +444,17 @@ Permission Check (PermissionChecker + interactive prompt)
 
 ### Layer 1 — Safe Command Whitelist
 
-A curated list of low-risk command prefixes that are auto-approved without
-any further checks or user prompting. The check is prefix-based: a command is
-safe if it equals the entry exactly OR starts with the entry followed by a
-space.
+A built-in list of 26 read-only and navigation commands (`ls`, `cat`, `grep`,
+`rg`, `diff`, `echo`, ...) is auto-approved without any further checks or user
+prompting. The check is prefix-based: a command is safe if it equals the entry
+exactly OR starts with the entry followed by a space, and a command containing a
+shell separator or redirection is never safe. The list contains no version-control,
+build, package-manager or interpreter commands (`git`, `cargo`, `npm`, `python3`,
+`sed`, `awk`, ...), so those always reach the permission check. `rm` is also
+excluded; destructive variants are caught by Layer 3.
 
-```rust
-const SAFE_COMMANDS: &[&str] = &[
-    // File management
-    "ls", "cd", "pwd", "mkdir", "touch", "cp", "mv",
-    // NOTE: "rm" is intentionally excluded — prefix matching cannot distinguish
-    // safe "rm file.txt" from destructive "rm -rf /"
-    // File reading & search
-    "cat", "head", "tail", "grep", "egrep", "fgrep",
-    "find", "rg", "wc",
-    // Version control
-    "git", "gh",
-    // Build / package management
-    "cargo", "rustc", "rustfmt", "clippy-driver",
-    "npm", "yarn", "pnpm", "node", "npx",
-    "python3", "python", "pip", "pip3", "make", "docker-compose",
-    // Text / data utilities
-    "echo", "printf", "chmod", "jq", "yq", "sed", "awk",
-    "sort", "uniq", "cut", "tr", "xargs", "date", "which",
-    "tree", "diff", "patch",
-];
-```
-
-`rm` is deliberately excluded because prefix matching cannot distinguish
-`rm file.txt` from `rm -rf /`. Individual `rm` calls go through the normal
-permission flow, and destructive variants are caught by Layer 3.
+The full list is maintained in
+[bash.md - Layer 1](bash.md#layer-1--safe-command-whitelist).
 
 ### Layer 2 — Banned Commands
 

@@ -1,6 +1,6 @@
 # /team
 
-> Team management (/team help|status|show [name]|create/open/delete <name>|close|message <id> <text>|tasks|clear|cleanup)
+> Team management (/team help|status|show [name]|create/delete <name>|close|message <id> <text>|tasks|clear|cleanup)
 
 ## Overview
 

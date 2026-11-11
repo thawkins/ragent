@@ -63,5 +63,5 @@ error line.
 ## Related
 
 - `/doctor`  -  live environment diagnostics instead of a file report
-- `/debug`  -  reads session debug logs in-session
+- `/log`  -  the in-session log panel
 - Log directory `log/` also holds sub-agent reports

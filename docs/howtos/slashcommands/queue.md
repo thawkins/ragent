@@ -1,6 +1,6 @@
 # /queue
 
-> Inspect the message input queue (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
+> "Inspect the message input queue: /queue [list|clear|next|help]" (SlashCommandDef, crates/ragent-tui/src/app/state.rs).
 
 ## Overview
 
