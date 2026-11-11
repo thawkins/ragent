@@ -3050,9 +3050,9 @@ in-memory strings; the implementation contains no `unsafe` code and no
 |---------|---------|
 | `/research create ... --mode tiered|supervisor|competitive` | Select research execution strategy |
 | `/research create ... --summarization-model <provider:model>` | Use a lightweight model for per-page webpage summaries |
-| `/research create ... --research-model <provider:model>` | Intended model for sub-topic research agents; recorded, not yet used to select the model (see `research.models.*`) |
-| `/research create ... --compression-model <provider:model>` | Intended model for compressing findings; recorded, not yet used |
-| `/research create ... --final-report-model <provider:model>` | Intended model for the final report; recorded, not yet used |
+| `/research create ... --research-model <provider:model>` | Model for the sub-topic research loop (see `research.models.*`) |
+| `/research create ... --compression-model <provider:model>` | Model for compressing each researcher's findings |
+| `/research create ... --final-report-model <provider:model>` | Model for the final report synthesis |
 | `/research create ... --max-concurrent-research-units N` | Limit parallel researchers in supervisor/competitive modes |
 | `/research create ... --papers` | Include academically-classified backends (OpenAlex) in the search sweep. Scholarly engines are excluded by default; config `research.exclude_academic_engines` persists the exclusion |
 | `/research create ... --oa-enable` / `--no-oa` | Force open-access recovery on/off for the run, overriding `research.open_access_recovery` |
@@ -5399,13 +5399,15 @@ but these are not `ragent.json` keys: `ResearchConfig` has no `few_shot` or
 
 Per-phase model overrides, carried on every run's configuration. A per-run
 flag for the same phase (`--research-model`, `--compression-model`,
-`--final-report-model`) wins. **Not yet used to select a model:** every phase still calls the session's active
-model; `research_model` only appears as a `Model:` line in supervisor
-researcher reports, and the other two have no consumer.
+`--final-report-model`) wins. Values are `provider:model` (or
+`provider/model`); an unset phase uses the session's active model. The planner,
+page summarizer and concept extraction are not covered by these keys.
 
-- `research_model` — model used by research agents / sub-topic workers.
-- `compression_model` — model used to compress or summarise intermediate findings.
-- `final_report_model` — model used to write the final report.
+- `research_model` — the sub-topic research loop (iterative and supervisor
+  researchers).
+- `compression_model` — compressing each researcher's findings; unset, the
+  `research_model` engine compresses.
+- `final_report_model` — the final report synthesis.
 
 There is no `summarization_model` config key; the per-page summarization model
 is set per run with `--summarization-model` on the TUI `/research create`

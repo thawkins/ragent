@@ -312,6 +312,9 @@ impl SupervisorNode {
 pub struct IterativeResearcherNode {
     web: Option<WebGatherer>,
     analysis: Arc<dyn crate::analysis::AnalysisEngine>,
+    /// Engine for the per-researcher compression step (FR-013
+    /// `compression_model`). When `None`, `analysis` compresses.
+    compression: Option<Arc<dyn crate::analysis::AnalysisEngine>>,
     planner: Option<Arc<dyn Planner>>,
     critic: Option<Arc<dyn Critic>>,
     engine_config: EngineConfig,
@@ -339,6 +342,7 @@ impl IterativeResearcherNode {
         Self {
             web,
             analysis,
+            compression: None,
             planner: None,
             critic: None,
             engine_config: EngineConfig {
@@ -374,11 +378,21 @@ impl IterativeResearcherNode {
         self
     }
 
-    /// Override the model used by this researcher for internal synthesis.
+    /// Override the engine used to compress this researcher's findings
+    /// (FR-013 `compression_model`).
+    #[must_use]
+    pub fn with_compression_engine(
+        mut self,
+        engine: Arc<dyn crate::analysis::AnalysisEngine>,
+    ) -> Self {
+        self.compression = Some(engine);
+        self
+    }
+
+    /// Record the researcher model label shown in fallback summaries.
     ///
-    /// The model string is currently stored for reporting; swapping the actual
-    /// analysis engine mid-run is left to the session layer, which can build a
-    /// phase-specific engine from the provider registry.
+    /// The engine itself is chosen by the session, which builds it from
+    /// `research_model` (FR-013); this string is for reporting only.
     #[must_use]
     pub fn with_research_model(mut self, model: Option<String>) -> Self {
         self.research_model = model;
@@ -657,7 +671,9 @@ impl IterativeResearcherNode {
         }
 
         let (result, _outcome) = self
-            .analysis
+            .compression
+            .as_ref()
+            .unwrap_or(&self.analysis)
             .analyze_with_outcome(&topic_with_brief, &bodies)
             .await?;
 

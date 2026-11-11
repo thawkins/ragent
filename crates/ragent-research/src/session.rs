@@ -1292,7 +1292,17 @@ pub struct ResearchSession {
     /// (e.g. the page summarizer) without coupling the session to one
     /// global model (FR-013, T-013).
     provider_registry: Option<Arc<ragent_llm::provider::ProviderRegistry>>,
+    /// Builds the engine for a per-phase model override
+    /// (`research.models.*`, FR-013). When absent, every phase uses
+    /// `analysis`.
+    engine_factory: Option<AnalysisEngineFactory>,
 }
+
+/// Builds an [`AnalysisEngine`] for a `(provider_id, model_id)` pair.
+///
+/// The caller (the agent adapter) owns credential and base-URL resolution, so
+/// the session asks it for a phase engine instead of building one itself.
+pub type AnalysisEngineFactory = Arc<dyn Fn(&str, &str) -> Arc<dyn AnalysisEngine> + Send + Sync>;
 
 impl std::fmt::Debug for ResearchSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1354,6 +1364,7 @@ impl ResearchSession {
             summarizer: None,
             concepts_engine: None,
             provider_registry: None,
+            engine_factory: None,
         }
     }
 
@@ -1397,6 +1408,42 @@ impl ResearchSession {
     ) -> Self {
         self.provider_registry = Some(registry);
         self
+    }
+
+    /// Attach the factory that builds engines for per-phase model overrides
+    /// (`research_model`, `compression_model`, `final_report_model`; FR-013).
+    #[must_use]
+    pub fn with_analysis_engine_factory(mut self, factory: AnalysisEngineFactory) -> Self {
+        self.engine_factory = Some(factory);
+        self
+    }
+
+    /// The engine for a phase whose model override is `model`, written
+    /// `provider:model` (the documented flag form) or `provider/model`.
+    ///
+    /// Falls back to `fallback` when no override is set, no factory is
+    /// attached, or the override names no provider.
+    fn phase_engine(
+        &self,
+        model: Option<&str>,
+        fallback: &Arc<dyn AnalysisEngine>,
+    ) -> Arc<dyn AnalysisEngine> {
+        let (Some(model), Some(factory)) = (model, self.engine_factory.as_ref()) else {
+            return fallback.clone();
+        };
+        // `/` first, so `ollama/phi4:latest` keeps its tag in the model id.
+        match model.split_once('/').or_else(|| model.split_once(':')) {
+            Some((provider, model_id)) if !provider.is_empty() && !model_id.is_empty() => {
+                factory(provider, model_id)
+            }
+            _ => {
+                tracing::warn!(
+                    model,
+                    "research: phase model override is not `provider:model`; using the run model"
+                );
+                fallback.clone()
+            }
+        }
     }
 }
 
@@ -1664,7 +1711,14 @@ impl ResearchSession {
                 .with_provider_stats(provider_stats.clone())
         });
 
-        let node = IterativeResearcherNode::new(researcher_web, self.analysis.clone())
+        // FR-013: the researcher loop runs on `research_model`; compression
+        // runs on `compression_model`, else on the researcher's engine.
+        let research_engine =
+            self.phase_engine(config.models.research_model.as_deref(), &self.analysis);
+        let compression_engine =
+            self.phase_engine(config.models.compression_model.as_deref(), &research_engine);
+        let node = IterativeResearcherNode::new(researcher_web, research_engine)
+            .with_compression_engine(compression_engine)
             .with_planner(self.planner_or_default())
             .with_critic(self.critic_or_default())
             .with_engine_config(config.engine_config())
@@ -1767,7 +1821,13 @@ impl ResearchSession {
             }
         }
         let (analysis, engine_outcome) = self
-            .synthesize(&name, topic, &merged_sources, brief)
+            .synthesize(
+                &name,
+                topic,
+                &merged_sources,
+                brief,
+                config.models.final_report_model.as_deref(),
+            )
             .await
             .map_err(|e| {
                 ResearchError::EngineRunFailed(format!("supervisor synthesis failed: {e}"))
@@ -2569,6 +2629,7 @@ impl ResearchSession {
                 &topic,
                 &synthesis_sources,
                 effective_brief.as_deref(),
+                config.models.final_report_model.as_deref(),
             )
             .await
         {
@@ -3549,7 +3610,8 @@ impl ResearchSession {
         let engine = IterativeEngine::new(
             planner,
             engine_web,
-            self.analysis.clone(),
+            // FR-013: the iterative research loop runs on `research_model`.
+            self.phase_engine(config.models.research_model.as_deref(), &self.analysis),
             critic,
             config.engine_config(),
         )
@@ -3581,12 +3643,16 @@ impl ResearchSession {
     /// returning the [`AnalysisResult`] paired with an [`AnalysisOutcome`]
     /// so the caller can surface `SynthesizeOutcome::FallbackEmpty` when
     /// the LLM produced malformed output (FR-005 / T-005).
+    ///
+    /// `final_report_model` (`provider/model`) selects the engine for this
+    /// final synthesis (FR-013); `None` uses the run's engine.
     pub(crate) async fn synthesize(
         &self,
         name: &ResearchName,
         topic: &str,
         sources: &[Source],
         brief: Option<&str>,
+        final_report_model: Option<&str>,
     ) -> anyhow::Result<(AnalysisResult, AnalysisOutcome)> {
         let research_root = self.manager.root().to_path_buf();
         let name = name.clone();
@@ -3598,7 +3664,9 @@ impl ResearchSession {
         })
         .await
         .map_err(|e| anyhow::anyhow!("synthesis body loading failed: {e}"))?;
-        let analysis = self.analysis.with_brief(brief.map(String::from));
+        let analysis = self
+            .phase_engine(final_report_model, &self.analysis)
+            .with_brief(brief.map(String::from));
         analysis.analyze_with_outcome(topic, &bodies).await
     }
 

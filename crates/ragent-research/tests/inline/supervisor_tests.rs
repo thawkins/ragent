@@ -236,6 +236,37 @@ async fn iterative_researcher_node_compresses_findings_with_citations() {
     );
 }
 
+/// #55: a compression engine (FR-013 `compression_model`) compresses the
+/// researcher's findings; the research engine is not used for that step.
+#[tokio::test]
+async fn iterative_researcher_node_compresses_with_compression_engine() {
+    let hit = WebSearchHit {
+        url: "https://example.com/tokio".to_string(),
+        title: "Tokio async runtime".to_string(),
+        snippet: "A runtime for writing reliable network applications".to_string(),
+        matched_query: "Tokio async runtime".to_string(),
+        search_tool: "fake".to_string(),
+        search_engine: "fake".to_string(),
+        author: None,
+    };
+    let web = web_gatherer_with_search_hits(vec![hit]);
+    let research: Arc<dyn AnalysisEngine> = Arc::new(crate::analysis::NoopAnalysisEngine);
+    let compression: Arc<dyn AnalysisEngine> = Arc::new(FakeAnalysisEngine);
+    let node =
+        IterativeResearcherNode::new(Some(web), research).with_compression_engine(compression);
+    let observer: Arc<dyn SessionObserver> = Arc::new(NoopObserver);
+
+    let (_sources, summary) = node
+        .research("r-cm", "What is Tokio?", observer)
+        .await
+        .unwrap();
+
+    assert!(
+        summary.contains("Tokio is the dominant Rust async runtime."),
+        "compression must run on the compression engine:\n{summary}"
+    );
+}
+
 #[tokio::test]
 async fn iterative_researcher_node_persists_sources_to_vault() {
     let tmp = tempfile::tempdir().unwrap();
