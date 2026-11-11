@@ -34,7 +34,10 @@ impl TempTree {
     pub fn new(name: &str) -> Self {
         let unique = SEQ.fetch_add(1, Ordering::Relaxed);
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/shared-{name}-{}-{unique}",
+            "../../target/temp/connectors-test/shared-{}-{name}-{}-{unique}",
+            // Each test file compiles its own copy of this module, with its own
+            // SEQ; the including module's path keeps their directories apart.
+            module_path!().replace("::", "_"),
             std::process::id()
         ));
         // Under nextest every test is its own process, so the counter is always 0
