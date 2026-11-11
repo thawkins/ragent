@@ -75,7 +75,7 @@ lead acting as a bottleneck.
 Teams and tasks are stored locally so they survive process restarts:
 
 ```
-~/.ragent/teams/{team-name}/
+~/.config/ragent/teams/{team-name}/
     config.json          # Team metadata and member list
     tasks.json           # Shared task list (file-locked on write)
     mailbox/
@@ -180,7 +180,8 @@ The lead session receives these tools; teammates receive a smaller subset.
 | `team_task_list` | Read all tasks and their status |
 | `team_task_claim` | Atomically claim the next available task (file-locked) |
 | `team_task_complete` | Mark a task as completed and unblock dependents |
-| `team_task_update` | Update task description or status |
+| `team_task_create` | (Lead) Add a task to the shared task list |
+| `team_task_cancel` | (Lead) Cancel a task |
 | `team_read_messages` | Read unread inbound messages from the mailbox |
 | `team_submit_plan` | (Teammate) Submit a plan to the lead for approval |
 | `team_idle` | (Teammate) Notify lead of idle state; triggers TeammateIdle hook |
@@ -246,7 +247,7 @@ A new panel in the TUI (when a team is active) shows the full team tree:
 | Command | Description |
 |---------|-------------|
 | `/team` | Show team status (same as `/team status`) |
-| `/team create <name>` | Create a new team and set lead |
+| `/team create <blueprint> [name]` | Create a new team from a blueprint and set lead |
 | `/team status` | Show all teammates and task progress |
 | `/team message <name> <text>` | Send a direct message to a teammate |
 | `/team tasks` | List all tasks with status and assignments |
@@ -353,16 +354,18 @@ Hooks are shell scripts or executables configured in `ragent.json`:
 
 ## 7. Configuration
 
-Settings in `ragent.json`:
+There is no `teams` block in `ragent.json`. Each team's settings live in the
+`settings` object of its own `config.json` (`TeamSettings` in
+`crates/ragent-agent/src/team/config.rs`):
 
 ```json
 {
-  "teams": {
+  "settings": {
     "max_teammates": 8,
-    "default_require_plan_approval": false,
+    "require_plan_approval": false,
     "auto_claim_tasks": true,
-    "mailbox_poll_interval_ms": 500,
-    "task_claim_lock_timeout_ms": 5000
+    "watchdog_timeout_secs": 300,
+    "hooks": []
   }
 }
 ```

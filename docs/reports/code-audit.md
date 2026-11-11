@@ -3,6 +3,19 @@
 **Project**: Rust workspace (edition 2024, floor 1.91) — `ragent`, an AI coding agent CLI/TUI/HTTP server: root binary in `src/`, 19 crates under `crates/*`, 3,203 `.rs` files of which 1,240 are integration tests consolidated into one `tests/all.rs` binary per crate and run with `cargo nextest`
 **Scope**: Full project
 **Findings**: 55 total (11 high, 29 medium, 15 low)
+**Revision**: last revised at `f3768231` (2026-11-07). The findings below describe the tree when they were written, not HEAD.
+
+**High Priority status (re-checked at `7e1d91e6`):**
+
+| Finding | Status |
+| --- | --- |
+| `scripts/getresult.zip`, `assets/config/ragent.json.zip` | Fixed: neither file is tracked |
+| `--dry-run` "Problematic line" | Fixed: `dry_run.rs` calls `redact_secrets` first |
+| `READ_ONLY_PERMISSION_CATEGORIES` | Fixed: the `:read` categories are listed |
+| Background-task spawn log | Fixed: `background/mod.rs` logs `redact_secrets(command)` |
+| Plugin-store / connector-catalogue panels and the 29 copied browser functions | Open |
+| SSE stream duplication | Partly fixed: the buffer-cap preamble is one helper in `providers/http_client.rs`; the Anthropic / Azure Anthropic loop was not re-checked |
+| `validate_id`, `Untrusted::fence`, `prompt_for_permission` tests | Fixed: `test_vault_id.rs`, `test_untrusted_fence.rs`, `test_permission_prompt.rs` |
 
 ---
 

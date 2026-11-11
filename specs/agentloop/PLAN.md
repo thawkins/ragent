@@ -43,7 +43,7 @@ crates/ragent-config/src/
                               #   checkpoints default
 
 crates/ragent-types/src/
-└── event.rs                  # + Event::LoopTerminated {status, iterations,
+└── event/mod.rs              # + Event::LoopTerminated {status, iterations,
                               #   verification}, Event::LoopChangeSummary
 
 crates/ragent-storage/src/

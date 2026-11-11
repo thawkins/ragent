@@ -124,7 +124,7 @@ Port `SessionCompaction.serialize` from OpenCode:
 - After compaction, rebuild `chat_messages` from the latest compaction plus
   subsequent messages, update `last_reported_input_tokens` to 0, and
   continue the current turn.
-- Publish `CompactionStarted` and `CompactionFinished` events.
+- Publish `CompressionStarted` and `CompressionFinished` events.
 
 ### T-009 — Integrate emergency overflow compaction and single retry
 

@@ -506,7 +506,7 @@ emitted.
 - Existing coordinator metrics: `crates/ragent-agent/src/orchestrator/coordinator.rs`
 - Existing LLM stream events: `crates/ragent-types/src/llm.rs`
 - Existing config schema: `crates/ragent-config/src/config.rs`
-- Existing event bus: `crates/ragent-types/src/event.rs`
+- Existing event bus: `crates/ragent-types/src/event/mod.rs`
 - OpenTelemetry Rust SDK: <https://crates.io/crates/opentelemetry>
 - OTLP exporter crate: <https://crates.io/crates/opentelemetry-otlp>
 - OTel logs data model: <https://opentelemetry.io/docs/specs/otel/logs/data-model/>

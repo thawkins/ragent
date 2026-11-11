@@ -43,12 +43,12 @@ tokens, **shall** prefer the provider-reported value for compaction decisions.
 ### Event-driven requirements
 
 FR-003: When the estimated request tokens exceed `context_window - max(output_tokens,
-compaction_buffer)`, the runner **shall** emit a `CompactionStarted` event and
+compaction_buffer)`, the runner **shall** emit a `CompressionStarted` event and
 invoke the summarisation pipeline before sending the user prompt to the LLM.
 
 FR-004: When a provider response fails with a context-overflow error before any
 assistant tokens have been produced, the runner **shall** trigger emergency
-summarisation, retry the turn once, and emit a `CompactionFinished` event with
+summarisation, retry the turn once, and emit a `CompressionFinished` event with
 the outcome.
 
 FR-005: When summarisation completes successfully, the system **shall** insert

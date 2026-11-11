@@ -1,6 +1,6 @@
 # Implementation Plan: Optimise `ragent-agent` Crate Performance
 
-This plan is the companion to [`AGENTSPEC.md`](AGENTSPEC.md). Each task maps
+This plan is the companion to [`SPEC.md`](SPEC.md). Each task maps
 back to one or more requirements and targets a single, measurable change with
 minimal blast radius.
 

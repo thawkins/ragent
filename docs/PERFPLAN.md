@@ -1,6 +1,6 @@
 # PERFPLAN.md — Performance Remediation Plan
 
-Status: **Draft — awaiting prioritisation approval**
+Status: **M1–M6 complete; M7 partial — PERF-079..082 shipped, PERF-078 open**
 Created: 2026-09-14
 Owner: ragent team
 Baseline version: v1.0.101
@@ -73,7 +73,7 @@ Effort: **S** (< 1 h), **M** (half day), **L** (1-2 days), **XL** (needs design)
 | **M4** | Network & resource reuse | **Complete** — PERF-057..063 shipped. `run_git_or_error` derives stdout/stderr/status from a single `git` spawn (`run_git_output` returns a `GitOutput`), so no git tool runs its subprocess twice; `tests/test_git_single_spawn.rs` records invocations via a PATH shim and asserts one spawn per tool. One process-wide `OnceLock<reqwest::Client>` (`ragent_tools_vcs::http_client::shared_client()` and the existing `ragent_llm` `create_http_client()`) now backs every GitHub/GitLab client, both auth modules, the CI job-trace path and the Copilot device-flow poll — `tests/test_shared_http_client.rs` fails if a `reqwest::Client::new()` reappears. Resolved VCS tokens are cached (GitHub by token-file mtime, GitLab per storage handle, invalidated on save/delete) and the job-trace path reuses the client's token instead of decrypting twice. The Azure Foundry retry clones a `bytes::Bytes` refcount rather than the request payload, Ollama Cloud serialises its body once (logs built only when the trace level is enabled), and all 12 streaming providers pre-size their SSE buffer to 8 KiB |
 | **M5** | Regex hoisting | **Complete** — PERF-064..068 shipped. Zero `Regex::new` calls remain on any per-page / per-candidate / per-plan path; all are hoisted to `OnceLock`/`LazyLock` statics (guarded by three `test_no_percall_regex` tests). The relevance scorer builds a `PreparedQuery` once per sub-query and reuses it across candidates: **7.55 µs -> 1.45 µs over four candidates (5.2x)**, and the per-candidate `format!` haystack is gone |
 | **M6** | Data layer | **Complete** — PERF-069..077 shipped. Storage reads no longer serialise behind writes (a dedicated read-only connection + WAL; `test_reader_concurrency` reads during an open write tx), snapshot expand moves rather than clones bytes, the codeindex stale diff is O(scanned) not O(total), the symbol-name filter is an anchored prefix served by a new NOCASE index, per-file upserts are transactional with `RETURNING id`, the Tantivy writer is long-lived, MCP tool lookup is O(1), and the research gatherer shares queries/hits/bodies behind `Arc` |
-| **M7** | Guardrails | CI perf gate + benchmark baselines landed; `PERF-NNN` docs updated; FxHashMap policy documented |
+| **M7** | Guardrails | **Partial** — PERF-079..082 shipped. PERF-078 is open: `scripts/check-perf-regression.sh` does not exist, and the only regression script, `scripts/check-bench-regression.sh` (the `agent_loop` bench), is not wired into any CI or pre-flight script |
 
 Milestones are ordered by user-visible return. M1/M2/M3 are the release-blocking
 set; M4-M7 are the follow-up train.

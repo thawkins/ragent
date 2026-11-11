@@ -65,7 +65,7 @@ OpenCode-derived summarisation compaction described in
 |------|----------------|----------------|------------------|
 | `crates/ragent-telemetry/src/counters.rs` | `context_compressions` | Counter incremented on compression | Keep counter; increment from new compaction path. |
 | `crates/ragent-telemetry/src/instruments.rs` | `context_compression_ratio_last` | Last ratio gauge | Keep gauge; populate from new path. |
-| `crates/ragent-telemetry/src/recorder.rs` | Recorder wiring | Event consumption | Ensure new `CompactionStarted/Finished` events still update telemetry. |
+| `crates/ragent-telemetry/src/recorder.rs` | Recorder wiring | Event consumption | Ensure new `CompressionStarted`/`CompressionFinished` events still update telemetry. |
 
 ## 8. Storage
 
