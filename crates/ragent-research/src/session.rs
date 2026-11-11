@@ -1298,6 +1298,19 @@ pub struct ResearchSession {
     engine_factory: Option<AnalysisEngineFactory>,
 }
 
+/// Split a model reference into `(provider_id, model_id)`.
+///
+/// Accepts the documented `provider:model` form and `provider/model`. A `/`
+/// is tried first, so `ollama/phi4:latest` keeps its tag in the model id.
+/// Returns `None` when either part is empty or there is no separator.
+#[must_use]
+pub fn parse_model_ref(model: &str) -> Option<(&str, &str)> {
+    model
+        .split_once('/')
+        .or_else(|| model.split_once(':'))
+        .filter(|(provider, model_id)| !provider.is_empty() && !model_id.is_empty())
+}
+
 /// Builds an [`AnalysisEngine`] for a `(provider_id, model_id)` pair.
 ///
 /// The caller (the agent adapter) owns credential and base-URL resolution, so
@@ -1431,12 +1444,9 @@ impl ResearchSession {
         let (Some(model), Some(factory)) = (model, self.engine_factory.as_ref()) else {
             return fallback.clone();
         };
-        // `/` first, so `ollama/phi4:latest` keeps its tag in the model id.
-        match model.split_once('/').or_else(|| model.split_once(':')) {
-            Some((provider, model_id)) if !provider.is_empty() && !model_id.is_empty() => {
-                factory(provider, model_id)
-            }
-            _ => {
+        match parse_model_ref(model) {
+            Some((provider, model_id)) => factory(provider, model_id),
+            None => {
                 tracing::warn!(
                     model,
                     "research: phase model override is not `provider:model`; using the run model"
@@ -3434,16 +3444,9 @@ impl ResearchSession {
                             .analysis
                             .summarization_model
                             .as_deref()
-                            .and_then(|s| {
-                                s.split_once('/')
-                                    .map(|(p, m)| (p.to_string(), m.to_string()))
-                            })
-                            .or_else(|| {
-                                self.model.as_deref().and_then(|s| {
-                                    s.split_once('/')
-                                        .map(|(p, m)| (p.to_string(), m.to_string()))
-                                })
-                            });
+                            .and_then(parse_model_ref)
+                            .or_else(|| self.model.as_deref().and_then(parse_model_ref))
+                            .map(|(p, m)| (p.to_string(), m.to_string()));
                         let (provider_id, model_id) = model_ref?;
                         let api_key = self
                             .summarizer

@@ -10,6 +10,9 @@
   research loop, researcher compression, and the final report synthesis. They
   were previously recorded but every phase called the active model. Values
   accept `provider:model` or `provider/model` (#55).
+- `--summarization-model` now accepts the documented `provider:model` form
+  (e.g. `ollama:phi4`). Only `provider/model` worked before; the colon form
+  silently fell back to the active model.
 
 ### Removed - AGENTS.md acknowledgement exchange
 

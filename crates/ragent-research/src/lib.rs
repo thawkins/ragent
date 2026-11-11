@@ -201,7 +201,7 @@ pub use session::{
     AnalysisConfig, AnalysisEngineFactory, AnalysisEvent, DEFAULT_WEB_PHASE_TIMEOUT_SECS,
     InputConfig, LocalConfig, NoopObserver, OutputConfig, ResearchSession, ResilienceConfig,
     RunEngineConfig, RunOutcome, SessionConfig, SessionEvent, SessionObserver, SessionPhase,
-    SupervisorConfig, SynthesisEvent, SynthesizeOutcome, WebConfig,
+    SupervisorConfig, SynthesisEvent, SynthesizeOutcome, WebConfig, parse_model_ref,
 };
 pub use source::{LocalSourceKind, Source};
 pub use source_age::{AgeSpan, AgeSpanError, AgeUnit};
