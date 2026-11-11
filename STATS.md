@@ -171,7 +171,8 @@ tree holds 1,089 consolidated `test_*.rs` files plus 130 `tests/inline/*`
 modules and 15 shared `support/` / prelude helpers, but each crate compiles
 them into ONE `tests/all.rs` target (`autotests = false` +
 `[[test]] name = "all"` + `#[path = "test_x.rs"] mod test_x;`), so a full run
-links 19 integration binaries instead of ~1,234. Tests run under `cargo nextest`
+links one integration binary per crate plus one for the root package
+(`ls crates/*/tests/all.rs tests/all.rs`) instead of one per test file. Tests run under `cargo nextest`
 (`.config/nextest.toml`); run one file by filter:
 `cargo nextest run -p <crate> -E 'test(test_foo::)'`.
 

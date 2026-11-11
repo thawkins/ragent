@@ -131,7 +131,7 @@ summarises them in the order the checks actually execute, full detail follows.
 
 ### Layer 1 — Safe-command whitelist
 
-A built-in list of 26 commands, mostly read-only but including the
+A built-in list (`SAFE_COMMANDS` in `crates/ragent-tools-core/src/bash.rs`), mostly read-only but including the
 file-modifying `mkdir`, `touch`, `cp` and `mv`, is prefix-matched and skips the
 permission prompt (`validate_shell_command` just logs
 `"Safe bash command auto-approved"` and still runs every later layer). A command is safe if

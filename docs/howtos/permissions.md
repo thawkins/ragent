@@ -444,7 +444,7 @@ Permission Check (PermissionChecker + interactive prompt)
 
 ### Layer 1 — Safe Command Whitelist
 
-A built-in list of 26 commands (`ls`, `cat`, `grep`, `rg`, `diff`, `echo`, ...),
+A built-in list (`SAFE_COMMANDS` in `crates/ragent-tools-core/src/bash.rs`: `ls`, `cat`, `grep`, `rg`, `diff`, `echo`, ...),
 mostly read-only but including the file-modifying `mkdir`, `touch`, `cp` and
 `mv`, skips the permission prompt. It does **not** skip validation: the command
 still passes through every later layer of `validate_shell_command` (banned
@@ -1158,7 +1158,7 @@ named a spelling the rename retired.
 |-------------------------|-----------------------------------------------------------|
 | Codeindex (read-only)   | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` |
 | Sub-agent management    | `new_agent`, `cancel_agent`, `list_agents`, `wait_agents`, `agent_complete` |
-| Team tools              | All tools starting with `team_` (19 tools)                |
+| Team tools              | All tools starting with `team_`                           |
 | Task management         | `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`          |
 | Interactive question    | `AskUserQuestion`                                                |
 | Model introspection     | `model_info`                                              |

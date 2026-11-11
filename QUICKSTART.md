@@ -888,10 +888,11 @@ The AI agent can use these tools during a session:
 | `commands_info`| JSON dump of the slash-command catalog      | `none`          |
 | `DateTime` | Current date/time: RFC 3339 UTC instant, an optional fixed UTC-offset rendering, date/time fields, Unix timestamp | `none`          |
 
-149 tools are registered in the default build across 21 categories — run
-`/tools` in the TUI to list them all. (`mf_screenshot` is registered only when a
-drivable headless browser engine is present — spec `openhands` FR-029 — so the
-default build advertises 149; with a bundled driver it is 150.)
+Run `/tools` in the TUI to list every registered tool, or `ragent --dry-run --json
+run x` for the total and per-category counts (see
+[docs/howtos/tools/INDEX.md](docs/howtos/tools/INDEX.md)). `mf_screenshot` is
+registered only when a drivable headless browser engine is present — spec
+`openhands` FR-029.
 
 **Provider spellings (optional).** A model, an ACP client or an MCP server may
 name a tool with a spelling ragent does not register — Anthropic's `WebFetch`,
@@ -970,7 +971,7 @@ Skills are reusable task packages that enhance the agent's capabilities. They su
 
 ### Bundled Skills
 
-Ragent includes 4 built-in skills:
+Ragent bundles these skills:
 
 | Skill | Description | Usage |
 |-------|-------------|-------|

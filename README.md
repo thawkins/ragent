@@ -47,11 +47,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   the action is permitted or refused; it is a tightening-only layer over the static
   rules (a `deny` is hard, an `allow` never overrides an explicit policy `deny`, and
   any analyzer failure degrades to the normal interactive prompt)
-- **Comprehensive tool system** — **150 registered tools across 21 categories** in
-  the default build (the engine-gated `mf_screenshot` tool registers only when a
-  drivable headless browser is present, one above the count shown — spec
-  `openhands` FR-029). `ragent run --dry-run` prints the live per-category counts;
-  the groups are:
+- **Comprehensive tool system** — a registry of tools grouped into permission
+  categories in the default build (the engine-gated `mf_screenshot` tool registers
+  only when a drivable headless browser is present — spec `openhands` FR-029).
+  `ragent run --dry-run` prints the live total and per-category counts (see
+  [docs/howtos/tools/INDEX.md](docs/howtos/tools/INDEX.md)); the groups are:
 
 ![ragent tool session](assets/screens/ragentsession.png)
 
@@ -627,12 +627,14 @@ measured cost of each step on the reference machine - release build 8m 1s /
 14.95 GiB (that run compiles every test binary from scratch; the green re-run
 that reused them took 8m 49s and 0.30 GiB), and a coverage run 9m 0s that
 reused the instrumented tree. The same report carries the line-coverage figures:
-**86.7% of 168,392 instrumented lines**, with all 18 crates above 85% except the
-CLI presentation binary.
+**86.7% of 168,392 instrumented lines**, with every crate in that measurement above 85%
+except the CLI presentation binary (per-crate table in `BUILDSTATS.md`).
 
 Every crate builds **one** integration-test binary from its `tests/` tree
 (`autotests = false` plus a single `[[test]] name = "all"` that `#[path]`-includes
-each `tests/test_*.rs` file), so a full run links 20 targets (19 crates plus the root package) instead of ~950.
+each `tests/test_*.rs` file), so a full run links one target per crate plus one for
+the root package (`ls crates/*/tests/all.rs tests/all.rs` lists them) instead of one
+per test file.
 Tests run under [cargo-nextest](https://nexte.st) (`.config/nextest.toml`): every
 test gets its own process, so a wedged test cannot block its neighbours. Run one
 file by filter:
@@ -946,7 +948,7 @@ The project is a Cargo workspace built from 19 focused crates:
 | `ragent-config`         | Configuration types, defaults, and parsing                               |
 | `ragent-connectors`     | Connector catalogue, store, providers, MCP bridge, `/connectors`       |
 | `ragent-hyperresearch`  | Deep-research engine: decomposition, notes, citation graph, vault       |
-| `ragent-llm`            | Provider clients and model registry (14 providers + Model Router)        |
+| `ragent-llm`            | Provider clients and model registry (every built-in provider + Model Router) |
 | `ragent-plugins`        | Codex/Claude dialect plugins, sandboxed JS runtime, `/plugins`         |
 | `ragent-research`       | Web/local research gathering, synthesis, dated report output             |
 | `ragent-server`         | Axum HTTP routes and SSE streaming                                       |
@@ -1011,8 +1013,8 @@ Key optimisations include:
 
 ## Project Status
 
-**v1.0.158** — The core architecture, tool system (150 tools across 21 categories in
-the default build), TUI, HTTP server, memory system, teams/swarm coordination, spec
+**v1.0.158** — The core architecture, tool system, TUI, HTTP server, memory system,
+teams/swarm coordination, spec
 management, skills system, research system, plugin and connector systems, pluggable
 execution backends, ACP integration, the automation service, and multi-layered
 security are functional and under active development.
