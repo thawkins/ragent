@@ -80,9 +80,9 @@ step reports as a `title` `RunStep` event.
 | `--tier` | `light` \| `full` \| `dissertation`. |
 | `--mode` | `tiered` \| `supervisor` \| `competitive`. `competitive` implies `--format comparison-table`. |
 | `--summarization-model` | `<provider:model>` override for summarisation. |
-| `--research-model` | `<provider:model>` override for the researcher stage. |
-| `--compression-model` | `<provider:model>` override for compression. |
-| `--final-report-model` | `<provider:model>` override for the final report. |
+| `--research-model` | `<provider:model>` for the researcher stage. Recorded on the run, but not yet used to choose the model: every phase calls the active model. |
+| `--compression-model` | `<provider:model>` for compression. Recorded, not yet used. |
+| `--final-report-model` | `<provider:model>` for the final report. Recorded, not yet used. |
 | `--max-concurrent-research-units N` | Parallel research unit cap. |
 | `--format` | `report` \| `executive-summary` \| `comparison-table` \| `source-bibliography` \| `imrad` \| `newsletter`. |
 | `--sources-dir <dir>` | Local sources directory to cross-reference. |

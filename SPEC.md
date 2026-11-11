@@ -3050,9 +3050,9 @@ in-memory strings; the implementation contains no `unsafe` code and no
 |---------|---------|
 | `/research create ... --mode tiered|supervisor|competitive` | Select research execution strategy |
 | `/research create ... --summarization-model <provider:model>` | Use a lightweight model for per-page webpage summaries |
-| `/research create ... --research-model <provider:model>` | Model used by sub-topic research agents |
-| `/research create ... --compression-model <provider:model>` | Model used to compress intermediate findings |
-| `/research create ... --final-report-model <provider:model>` | Model used to write the final report |
+| `/research create ... --research-model <provider:model>` | Intended model for sub-topic research agents; recorded, not yet used to select the model (see `research.models.*`) |
+| `/research create ... --compression-model <provider:model>` | Intended model for compressing findings; recorded, not yet used |
+| `/research create ... --final-report-model <provider:model>` | Intended model for the final report; recorded, not yet used |
 | `/research create ... --max-concurrent-research-units N` | Limit parallel researchers in supervisor/competitive modes |
 | `/research create ... --papers` | Include academically-classified backends (OpenAlex) in the search sweep. Scholarly engines are excluded by default; config `research.exclude_academic_engines` persists the exclusion |
 | `/research create ... --oa-enable` / `--no-oa` | Force open-access recovery on/off for the run, overriding `research.open_access_recovery` |
@@ -5397,10 +5397,11 @@ but these are not `ragent.json` keys: `ResearchConfig` has no `few_shot` or
 
 ### `research.models.*` (string, optional)
 
-Per-phase model overrides. **Parsed but not yet applied:** the run builder
-(`build_session_config` in `ragent-research` `run_request.rs`) copies only the
-per-run request fields (`--research-model`, `--compression-model`,
-`--final-report-model`), so these config keys currently have no effect.
+Per-phase model overrides, carried on every run's configuration. A per-run
+flag for the same phase (`--research-model`, `--compression-model`,
+`--final-report-model`) wins. **Not yet used to select a model:** every phase still calls the session's active
+model; `research_model` only appears as a `Model:` line in supervisor
+researcher reports, and the other two have no consumer.
 
 - `research_model` — model used by research agents / sub-topic workers.
 - `compression_model` — model used to compress or summarise intermediate findings.
@@ -5413,16 +5414,15 @@ command (FR-002).
 ### `research.supervisor.max_concurrent_research_units` (integer, default 5)
 
 Maximum number of researcher agents that may run concurrently in `supervisor`
-and `competitive` modes (FR-012). **Parsed but not yet applied:** runs use the
-per-run `--max-concurrent-research-units` value or the built-in default.
+and `competitive` modes (FR-012). A per-run `--max-concurrent-research-units`
+wins over this value.
 
 ### `research.evaluate.enabled` (boolean, default `false`)
 
-Intended to append a deterministic quality scorecard to every run's
-`RESEARCH.md` (FR-015). **Parsed but not yet applied:** the run builder reads
-only the per-run `evaluate` field, so pass `--evaluate` on the TUI
-`/research create` command (the `ragent research create` CLI has no
-`--evaluate` flag).
+Appends a deterministic quality scorecard to every run's `RESEARCH.md`
+(FR-015). A per-run `--evaluate` on the TUI `/research create` command turns it
+on for one run; the `ragent research create` CLI has no `--evaluate` flag, so
+this key is how CLI runs enable it.
 
 ### Example stanza
 

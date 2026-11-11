@@ -72,9 +72,6 @@ fn test_real_report_pair_groups_findings_under_its_concepts() {
             concept.text
         );
     }
-    // TEMP: dump the deck for a visual check.
-    std::fs::write("../../target/temp/real-deck.md", &deck.markdown)
-        .expect("write the sample deck");
     // The reader-facing narrative the deck no longer renders.
     assert!(
         !deck.markdown.contains("## Top Implications"),

@@ -14,7 +14,7 @@ fn to_run_request_maps_new_mode_and_summarization_and_evaluate() {
         tier: Some("light".into()),
         research_model: Some("anthropic:claude-sonnet-4".into()),
         max_concurrent_research_units: Some(3),
-        evaluate: true,
+        evaluate: Some(true),
         ..minimal_request("compete", false)
     };
 
@@ -38,7 +38,21 @@ fn to_run_request_preserves_defaults_when_optional_fields_omitted() {
     let run = req.to_run_request();
     assert!(run.mode.is_none());
     assert!(run.summarization_model.is_none());
-    assert_eq!(run.evaluate, Some(false));
+    // Omitted means "use research.evaluate.enabled" (#39), not an explicit off.
+    assert_eq!(run.evaluate, None);
+}
+
+#[test]
+fn evaluate_json_distinguishes_omitted_from_explicit_false() {
+    let omitted: CreateResearchRequest =
+        serde_json::from_str(r#"{"name":"a","topic":"t"}"#).expect("parses");
+    let off: CreateResearchRequest =
+        serde_json::from_str(r#"{"name":"a","topic":"t","evaluate":false}"#).expect("parses");
+    let on: CreateResearchRequest =
+        serde_json::from_str(r#"{"name":"a","topic":"t","evaluate":true}"#).expect("parses");
+    assert_eq!(omitted.to_run_request().evaluate, None);
+    assert_eq!(off.to_run_request().evaluate, Some(false));
+    assert_eq!(on.to_run_request().evaluate, Some(true));
 }
 
 /// Build a minimal request with every optional field defaulted, for the
@@ -83,7 +97,7 @@ fn minimal_request(name: &str, papers: bool) -> CreateResearchRequest {
         compression_model: None,
         final_report_model: None,
         max_concurrent_research_units: None,
-        evaluate: false,
+        evaluate: None,
         url_cloak: false,
         max_age: None,
     }

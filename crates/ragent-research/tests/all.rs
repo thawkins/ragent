@@ -129,6 +129,8 @@ mod test_reconcile;
 mod test_research_baseline;
 #[path = "test_research_config_event.rs"]
 mod test_research_config_event;
+#[path = "test_research_config_fallbacks.rs"]
+mod test_research_config_fallbacks;
 #[path = "test_research_create_synthesis.rs"]
 mod test_research_create_synthesis;
 #[path = "test_research_e2e.rs"]
