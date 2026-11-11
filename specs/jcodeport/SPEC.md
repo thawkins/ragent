@@ -229,10 +229,10 @@ Task ids are cited by source comments (for example `T-070`, `T-071`). `done` mar
 | T-055 | M6 | Add tests; ensure ambient sessions can be disabled via config. | |
 | T-056 | M6 | Register tools. | |
 | - | M6 | **Acceptance:** `schedule task="review open PRs" wake_in_minutes=60` queues a future resume; `request_permission` surfaces an actionable prompt in the TUI. | |
-| T-060 | M7 | Implement Gmail search/read/draft/send via OAuth2 or a managed backend (e.g. Composio-style). Store tokens in `ragent-storage` encrypted table. | |
-| T-061 | M7 | Implement channel registry for Telegram/Discord webhooks; add config block in `ragent.json`. | |
-| T-062 | M7 | Add tests with mocked backends. | |
-| T-063 | M7 | Register tools. | |
+| T-060 | M7 | Implement Gmail search/read/draft/send via OAuth2 or a managed backend (e.g. Composio-style). Store tokens in `ragent-storage` encrypted table. | done |
+| T-061 | M7 | Implement channel registry for Telegram/Discord webhooks; add config block in `ragent.json`. | done |
+| T-062 | M7 | Add tests with mocked backends. | done |
+| T-063 | M7 | Register tools. | done |
 | - | M7 | **Acceptance:** `gmail action="search" query="from:ci@example.com"` returns messages; `send_channel_message message="deployed"` sends to configured channels. | |
 | T-070 | M8 | Store durable goals in SQLite with milestones, progress, and status; surface them in system prompt or via tool. | done |
 | T-070 | M8 | Implement `initiative` actions (`create`, `update`, `checkpoint`, `list`, `close`). | done |

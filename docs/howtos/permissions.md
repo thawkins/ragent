@@ -434,7 +434,7 @@ How the layers meet the permission system:
 - **The allowlist only exempts Layer 2.** `/bash add allow curl` (or a
   `bash.allowlist` entry) re-enables a banned tool without YOLO mode; it does
   not exempt the command from Layers 5-7.
-- **The denylist adds to Layer 5.** `/bash add deny <pattern>` (or a
+- **The denylist is Layer 6.** `/bash add deny <pattern>` (or a
   `bash.denylist` entry) rejects any command containing the pattern.
 - `/bash` changes persist immediately to `.ragent/ragent.json` (project) or
   `~/.config/ragent/ragent.json` (with `--global`); see
