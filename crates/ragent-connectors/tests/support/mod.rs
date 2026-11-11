@@ -34,9 +34,18 @@ impl TempTree {
     pub fn new(name: &str) -> Self {
         let unique = SEQ.fetch_add(1, Ordering::Relaxed);
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/shared-{name}-{}-{unique}",
+            "../../target/temp/connectors-test/shared-{}-{name}-{}-{unique}",
+            // Each test file compiles its own copy of this module, with its own
+            // SEQ; the including module's path keeps their directories apart.
+            module_path!().replace("::", "_"),
             std::process::id()
         ));
+        // Under nextest every test is its own process, so the counter is always 0
+        // and the name is name + pid. CI restores `target/` from cache, so a
+        // directory from an earlier run with a reused pid may still exist.
+        if path.exists() {
+            std::fs::remove_dir_all(&path).expect("stale temp dir removable");
+        }
         std::fs::create_dir_all(&path).expect("temp tree creatable");
         std::fs::create_dir_all(path.join(".ragent")).expect("tree .ragent creatable");
         Self(path)
