@@ -1,7 +1,11 @@
 ---
-status: draft
+status: implemented
 audit:
   - { time: 1786472988, from: "none", to: "draft", actor: "system" }
+  - { time: 1794443745, from: "draft", to: "in_review", actor: "cli" }
+  - { time: 1794443745, from: "in_review", to: "approved", actor: "cli" }
+  - { time: 1794443745, from: "approved", to: "in_progress", actor: "cli" }
+  - { time: 1794443745, from: "in_progress", to: "implemented", actor: "cli" }
 ---
 # Extend `/spec create` to Generate a TESTPLAN.md Manual Test Plan
 

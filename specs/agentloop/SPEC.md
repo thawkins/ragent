@@ -1,7 +1,11 @@
 ---
-status: draft
+status: implemented
 audit:
   - { time: 1788748243, from: "none", to: "draft", actor: "system" }
+  - { time: 1794443699, from: "draft", to: "in_review", actor: "cli" }
+  - { time: 1794443699, from: "in_review", to: "approved", actor: "cli" }
+  - { time: 1794443731, from: "approved", to: "in_progress", actor: "cli" }
+  - { time: 1794443731, from: "in_progress", to: "implemented", actor: "cli" }
 ---
 # Specification: Agentic Loop Mechanism (`/loop`) — Goal-Driven Plan-Act-Observe with Four Stop Conditions
 

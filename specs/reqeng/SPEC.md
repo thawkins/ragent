@@ -1,7 +1,8 @@
 ---
-status: draft
+status: in_review
 audit:
   - { time: 1786622116, from: "none", to: "draft", actor: "system" }
+  - { time: 1794443741, from: "draft", to: "in_review", actor: "cli" }
 ---
 # Specification: Back-fill Spec-Driven Development (SDD) Capabilities
 

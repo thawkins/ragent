@@ -1,7 +1,11 @@
 ---
-status: draft
+status: implemented
 audit:
   - { time: 1786474278, from: "none", to: "draft", actor: "system" }
+  - { time: 1794443744, from: "draft", to: "in_review", actor: "cli" }
+  - { time: 1794443744, from: "in_review", to: "approved", actor: "cli" }
+  - { time: 1794443744, from: "approved", to: "in_progress", actor: "cli" }
+  - { time: 1794443744, from: "in_progress", to: "implemented", actor: "cli" }
 ---
 # Specification: `/spec update` Subcommand — Regenerate PLAN.md and TESTPLAN.md from Edited SPEC.md
 
