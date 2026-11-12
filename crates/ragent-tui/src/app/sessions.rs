@@ -34,7 +34,7 @@ const OPEN_SESSIONS_KEY: &str = "tui.sessions.open";
 const MAX_RESTORED_SESSIONS: usize = 8;
 
 /// Body of `/session help`.
-pub const SESSION_HELP: &str = "## /session - Multiple sessions\n\n\
+pub(super) const SESSION_HELP: &str = "## /session - Multiple sessions\n\n\
 | Subcommand | Description |\n|---|---|\n\
 | `/session` or `/session list` | List open sessions and what each needs |\n\
 | `/session new [path]` | Start a new session in `path` (default: this project); \

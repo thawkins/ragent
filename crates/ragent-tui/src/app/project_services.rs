@@ -51,14 +51,14 @@ impl ProjectServices {
 }
 
 /// The project root of a directory (see `ragent_storage::project_root`).
-pub fn root_of(directory: &Path) -> PathBuf {
+pub(super) fn root_of(directory: &Path) -> PathBuf {
     PathBuf::from(ragent_storage::project_root(
         &directory.display().to_string(),
     ))
 }
 
 /// The launch project's root (the project of the process cwd).
-pub fn launch_root() -> PathBuf {
+pub(super) fn launch_root() -> PathBuf {
     root_of(&std::env::current_dir().unwrap_or_default())
 }
 
