@@ -2,13 +2,35 @@
 
 ## [Unreleased]
 
-### Added - plan for the Project object and sessions sidebar upgrade
+### Added - projects, session worktrees and request counts in the sidebar
 
-- `specs/projects/PLAN.md` plans a stored `Project` (local worktree, base
-  provider/model, optional GitHub or GitLab remote), sessions attached to a
-  project record, optional per-session git worktrees, and sidebar changes.
-  It builds on the unmerged `feat/multisession-m2-session-view` branch. No
-  code changes yet.
+- A project is now a stored record: a local checkout with a name, an
+  optional base provider/model and, when it came from GitHub or GitLab, its
+  remote. Every session is created in a project and attached to it; existing
+  sessions are migrated (schema 6). Plan: `specs/projects/PLAN.md`.
+- `/project` (`show`, `list`, `add`, `rename`, `model`, `refresh`, `prune`,
+  `remove`) and `ragent project list|show|add|remove`.
+- `/session new --project <name>` starts a session in a named project, and
+  `--branch <branch>` gives the session its own git worktree at that branch.
+  `/project prune` removes clean worktrees of archived sessions.
+- A new session starts on its project's base model when one is set.
+- The session sidebar shows project names with a chevron and a `[github]` /
+  `[gitlab]` tag, lists projects with no sessions, has a `/ Search` row, and
+  on each session row shows a branch marker with the number of pull/merge
+  requests for the session's branch and a right-aligned state marker. On a
+  project heading, `n` starts a session and `b` prefills a branch session.
+- HTTP: `GET/POST /projects`, `GET/DELETE /projects/{id}`,
+  `GET /projects/{id}/sessions`; `POST /sessions` accepts `project_id` and
+  `branch`; session responses carry `project_id`, `branch` and `worktree`.
+- `ragent session list` groups sessions by project (`--project`, `--json`).
+- Session archives record the project name, remote and branch.
+
+### Changed
+
+- The sidebar's project heading reads `name v` (chevron after the name) and
+  shows the session count only when collapsed. A session's state marker
+  moved from before the title to the right edge.
+- `/session list --all` headings show the project name and its directory.
 
 ### Added - multiple sessions and a session sidebar
 

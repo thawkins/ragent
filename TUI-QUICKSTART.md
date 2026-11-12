@@ -978,11 +978,21 @@ The sidebar on the left (shown when the terminal is at least 100 columns
 wide) lists:
 
 - `+ New session`
+- `/ Search`, which filters the list
 - a `Pinned` section
-- one section per project (the git work tree of the session's directory),
-  the current project first
+- one section per project, the current project first. The heading shows
+  the project's name, `v` (open) or `>` (collapsed), and `[github]` or
+  `[gitlab]` when the project has a known remote. A project with no
+  sessions is listed too, so you can start one in it.
 
-Each session row shows a marker, its title and how long ago it was active:
+Each session row shows its title, how long ago it was active, and at the
+right edge:
+
+- `Y` when the session has its own branch, followed by the number of
+  pull/merge requests for that branch (no number when there are none or the
+  count is not known yet). It is magenta when the session owns its git
+  worktree.
+- a state marker:
 
 | Marker | Meaning |
 | ------ | ------- |
@@ -1003,11 +1013,13 @@ Keys:
 | `Left`/`Right` | (sidebar focused) collapse / expand a project |
 | `p` / `a` / `F2` | (sidebar focused) pin, archive, rename |
 | `/` | (sidebar focused) filter by title or project |
+| `n` | (on a project heading) new session in that project |
+| `b` | (on a project heading) prefill the command for a new session on its own branch |
 | `Esc` | (sidebar focused) clear the filter, then return to the input |
 
 With the mouse, click a row to open it and drag the sidebar's right border
 to resize it. The same actions are available as `/session` commands
-(`/session help`). ragent reopens your open sessions on the next start;
+(`/session help`); projects are managed with `/project` (`/project help`). ragent reopens your open sessions on the next start;
 use `ragent --new` to start fresh.
 
 ---

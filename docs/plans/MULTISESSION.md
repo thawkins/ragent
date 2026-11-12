@@ -603,6 +603,9 @@ Risks and open questions
   Proposal for v1: stop them, persist state, restore on next launch.
 - Q2 Worktree-per-session (Claude desktop offers isolated worktrees) is
   out of scope for v1; listed as a possible follow-up only.
+  Delivered since by spec `projects` (`specs/projects/PLAN.md`): a project
+  is a stored record, and `/session new --branch <branch>` gives a session
+  its own git worktree.
 
 Out of scope
 ------------

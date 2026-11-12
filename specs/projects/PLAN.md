@@ -1,6 +1,8 @@
 # Implementation Plan: Project Object and Sessions Sidebar Upgrade
 
-**Spec ID:** `projects` - **Status:** draft, awaiting answers to "Open Questions"
+**Spec ID:** `projects` - **Status:** implemented (T-001 to T-015); see
+"Implementation Notes" for where the code differs from the plan below and
+"Open Questions" for the defaults that were applied
 
 **Builds on:** branch `feat/multisession-m2-session-view` (MULTISESSION M1-M8 plus the
 schema-5 session-kind follow-up; plan in `docs/plans/MULTISESSION.md` on that branch).
@@ -184,23 +186,23 @@ All glyphs stay ASCII, per the project style rule.
 
 ## Tasks
 
-| ID | Title | Crate | Effort | Depends |
-|----|-------|-------|--------|---------|
-| T-001 | `projects` table, session columns, backfill, setting re-key, `SCHEMA_VERSION` 6 | ragent-storage | M | - |
-| T-002 | `ProjectRow` CRUD; `ProjectSessions` carries the project; empty projects listed; `branch`/`worktree` accessors | ragent-storage | M | T-001 |
-| T-003 | `Project`, `ProjectRemote`, `RemoteKind`, `ProjectManager::resolve_for_dir`, project events | ragent-agent | M | T-002 |
-| T-004 | Remote detection (GitHub, GitLab incl. self-hosted), credential stripping, lazy refresh | ragent-agent, ragent-tools-vcs | S | T-003 |
-| T-005 | All four session-creation paths attach a project record; child sessions inherit | ragent-agent | S | T-003 |
-| T-006 | Session worktree create/prune; per-project services keyed by `project_id` | ragent-agent, ragent-tui | L | T-005 |
-| T-007 | Base model seeding and `/project model` | ragent-tui | S | T-005 |
-| T-008 | `/project` command and `/session new --branch` | ragent-tui | M | T-006 |
-| T-009 | Sidebar data: headings from `Project::name`, empty projects, branch + request count per row | ragent-tui | M | T-005, T-015 |
-| T-010 | Sidebar rendering: chevron, remote tag, branch marker, right-aligned state marker, `Search` row | ragent-tui | M | T-009 |
-| T-011 | CLI grouped `session list` and `project` subcommands | ragent (root) | S | T-005 |
-| T-012 | Server routes, `SessionResponse` fields, OpenAPI | ragent-server | M | T-005 |
-| T-013 | Session archive carries the project | ragent-agent | S | T-005 |
-| T-015 | `PullRequestCounts` service: per-project list call for GitHub and GitLab, grouping by source branch, cache, background refresh, back-off, `sessions.pr_count` | ragent-agent, ragent-tools-vcs, ragent-storage | L | T-004 |
-| T-014 | SPEC.md, QUICKSTART.md, TUI-QUICKSTART.md, CHANGELOG.md, `docs/plans/MULTISESSION.md` Q2 note | docs | S | all |
+| ID | Title | Crate | Effort | Depends | Status |
+|----|-------|-------|--------|---------|--------|
+| T-001 | `projects` table, session columns, backfill, setting re-key, `SCHEMA_VERSION` 6 | ragent-storage | M | - | completed |
+| T-002 | `ProjectRow` CRUD; `ProjectSessions` carries the project; empty projects listed; `branch`/`worktree` accessors | ragent-storage | M | T-001 | completed |
+| T-003 | `Project`, `ProjectRemote`, `RemoteKind`, `ProjectManager::resolve_for_dir`, project events | ragent-agent | M | T-002 | completed |
+| T-004 | Remote detection (GitHub, GitLab incl. self-hosted), credential stripping, lazy refresh | ragent-agent, ragent-tools-vcs | S | T-003 | completed |
+| T-005 | All four session-creation paths attach a project record; child sessions inherit | ragent-agent | S | T-003 | completed |
+| T-006 | Session worktree create/prune; per-project services keyed by `project_id` | ragent-agent, ragent-tui | L | T-005 | completed |
+| T-007 | Base model seeding and `/project model` | ragent-tui | S | T-005 | completed |
+| T-008 | `/project` command and `/session new --branch` | ragent-tui | M | T-006 | completed |
+| T-009 | Sidebar data: headings from `Project::name`, empty projects, branch + request count per row | ragent-tui | M | T-005, T-015 | completed |
+| T-010 | Sidebar rendering: chevron, remote tag, branch marker, right-aligned state marker, `Search` row | ragent-tui | M | T-009 | completed |
+| T-011 | CLI grouped `session list` and `project` subcommands | ragent (root) | S | T-005 | completed |
+| T-012 | Server routes, `SessionResponse` fields, OpenAPI | ragent-server | M | T-005 | completed |
+| T-013 | Session archive carries the project | ragent-agent | S | T-005 | completed |
+| T-015 | `PullRequestCounts` service: per-project list call for GitHub and GitLab, grouping by source branch, cache, background refresh, back-off, `sessions.pr_count` | ragent-agent, ragent-tools-vcs, ragent-storage | L | T-004 | completed |
+| T-014 | SPEC.md, QUICKSTART.md, TUI-QUICKSTART.md, CHANGELOG.md, `docs/plans/MULTISESSION.md` Q2 note | docs | S | all | completed |
 
 Effort key: S = under half a day, M = about one day, L = two to three days. Total: about
 11 to 14 working days. T-001 to T-005 (about 3.5 days) deliver the stored project with
@@ -226,7 +228,58 @@ Each task lands with tests in the crate's `tests/` directory, registered in `tes
 Git-using tests build their repositories under `target/temp/<unique-name>` and pass the
 worktree root explicitly; no test writes into the repository.
 
+## Implementation Notes
+
+Where the delivered code differs from the plan above, and why:
+
+1. **Remote parsing is a dedicated parser, not `parse_reverse_repo`.**
+   `parse_reverse_repo` treats every non-GitHub https host as GitLab and
+   reads process configuration while parsing. A project remote must be
+   `None` for an unknown host, so `ragent_agent::project::remote` classifies
+   by host only: `github.com`; `gitlab.com`, a host whose first label is
+   `gitlab`, or the configured GitLab instance.
+2. **Per-project services stay keyed by checkout root (Behaviour 6).** A
+   session worktree is a different branch of the repository, so its code
+   index must describe that branch's files. Sharing the project's index
+   would answer with the main checkout's content. Each checkout therefore
+   keeps its own services, as before; no code change was needed.
+3. **Project attachment happens in storage.** `Storage::create_session_with`
+   resolves or creates the project record, so every creation path (the
+   server's direct storage call and archive import included) attaches a
+   session without each caller doing it. `ProjectManager::resolve_for_dir`
+   adds remote detection on top.
+4. **A directory that is a session's own worktree resolves to that
+   session's project.** Without this, a later `/session new` from inside a
+   session worktree would create a second project, because a linked
+   worktree has a `.git` entry of its own.
+5. **`projects.remote_checked`** (not in the planned schema) records that
+   remote detection has run, so a project with no recognised remote is not
+   re-probed on every use.
+6. **Activity hints.** Besides the 5-minute interval, a finished turn or a
+   focus change makes the project due once 1 minute has passed since its
+   last attempt (`PullRequestCounts::nudge`), instead of forcing a call on
+   every turn.
+7. **Sidebar glyphs.** The branch marker is the ASCII `Y`. The heading
+   shows the session count only when collapsed. The chevron existed before
+   this work (before the name); it now follows the name, as in the
+   reference screenshot.
+8. **`/project add <url>`** clones into the focused directory on a blocking
+   task and reports the result as a notice. The clone path is not covered
+   by an automated test, because it needs a reachable GitHub or GitLab
+   host; path registration and URL rejection are tested.
+9. **Removing a project** archives its record rather than deleting it, so
+   archived sessions keep a valid `project_id`. Creating a session in the
+   worktree again restores the same project.
+10. **Test file names.** T-009/T-010 tests extend
+    `ragent-tui/tests/test_sessions_sidebar.rs`; T-008 has
+    `test_project_command.rs`; T-011 has `ragent-agent/tests/test_project_report.rs`
+    (the report functions the CLI prints); T-013 has
+    `test_session_archive_project.rs`.
+
 ## Open Questions
+
+These were not answered before implementation; the plan's assumption was
+applied to each. Changing an answer is a follow-up change.
 
 1. **Session worktree default.** Plan assumes opt-in: a session uses the project worktree
    unless a branch is requested. Alternative: every new session gets its own worktree and
