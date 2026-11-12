@@ -39,7 +39,8 @@ this directory and register it |\n\
 (files are kept) |\n\
 | `/project help` | Show this help |\n\n\
 Start a session in a project with `/session new --project <name> [--branch <branch>]`. \
-With `--branch` the session gets its own git worktree at that branch.";
+With `--branch` the session gets its own git worktree at that branch. The project's \
+checkout must be inside the launch directory or a `dirs.allowed_roots` entry.";
 
 /// The outcome of creating a session with its own worktree in the
 /// background: the session and its project, or why it failed.
@@ -265,7 +266,8 @@ impl App {
     ///
     /// # Errors
     ///
-    /// Returns a message when the session cannot be created or, for a
+    /// Returns a message when the project's checkout is outside the
+    /// permitted roots, when the session cannot be created or, for a
     /// branch, when the work cannot be started; the previous session stays
     /// focused.
     pub fn open_new_session_in_project(
@@ -273,6 +275,14 @@ impl App {
         project: &Project,
         branch: Option<&str>,
     ) -> Result<(), String> {
+        // The same containment rule as `/session new <path>` (SEC-062): the
+        // project's checkout must be inside the launch directory or a
+        // `dirs.allowed_roots` entry. Checking the checkout, not the path
+        // the user typed, also covers an allowed subdirectory whose
+        // repository root lies outside the permitted roots. A session's own
+        // worktree is created by ragent under its data directory and needs
+        // no check.
+        self.allowed_session_directory(&project.worktree.display().to_string())?;
         let manager = self.project_manager();
         let sessions = Arc::clone(&self.session_processor.session_manager);
         let root = self.session_worktree_root();

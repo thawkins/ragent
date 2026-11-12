@@ -92,13 +92,22 @@ async fn test_project_base_model_absent_inherits_the_focused_model() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the roots
 async fn test_project_base_model_applies_to_sessions_in_another_project() {
+    // The permitted roots depend on process-global state (see
+    // `support::allow_session_root`).
+    let _env = crate::global_env_lock();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/temp/project_base_model/other");
+    std::fs::create_dir_all(&dir).expect("fixture dir");
+    let dir = dir.canonicalize().expect("canonical");
     let mut app = support::make_app();
+    support::allow_session_root(&app, &dir);
     app.session.selected_model = Some("openai/gpt-picked".to_string());
     app.execute_slash_command("/session list").await;
     let other = app
         .storage
-        .ensure_project("/nonexistent/base_model/other")
+        .ensure_project(&dir.display().to_string())
         .expect("other project");
     app.project_manager_for_test()
         .set_base_model(&other.id, Some(&model("ollama", "local-model")))

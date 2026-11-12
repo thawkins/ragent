@@ -52,6 +52,9 @@ fn app_with_project(name: &str) -> (App, Project, PathBuf) {
     git(&repo, &["add", "README.md"]);
     git(&repo, &["commit", "--quiet", "-m", "initial"]);
     let mut app = support::make_app();
+    // The fixture is outside the launch directory; permit it as a
+    // `dirs.allowed_roots` entry would.
+    support::allow_session_root(&app, &base);
     app.worktree_root = Some(base.join("trees"));
     let project = app
         .project_manager_for_test()
@@ -309,7 +312,11 @@ async fn test_project_command_remove_needs_no_live_sessions() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the roots
 async fn test_project_command_session_new_in_a_named_project() {
+    // The permitted roots depend on process-global state (see
+    // `support::allow_session_root`).
+    let _env = crate::global_env_lock();
     let (mut app, project, base) = app_with_project("named");
     app.execute_slash_command("/session list").await;
     let first = app.session.session_id.clone().expect("first session");
@@ -338,7 +345,11 @@ async fn test_project_command_session_new_in_a_named_project() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the roots
 async fn test_project_command_session_new_with_a_branch_gets_its_own_worktree() {
+    // The permitted roots depend on process-global state (see
+    // `support::allow_session_root`).
+    let _env = crate::global_env_lock();
     let (mut app, project, base) = app_with_project("branched");
     app.execute_slash_command("/session list").await;
     let before = app.session.session_id.clone();
@@ -402,7 +413,11 @@ async fn test_project_command_session_new_with_a_branch_gets_its_own_worktree() 
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the roots
 async fn test_project_command_session_new_rejects_bad_options() {
+    // The permitted roots depend on process-global state (see
+    // `support::allow_session_root`).
+    let _env = crate::global_env_lock();
     let (mut app, _project, _base) = app_with_project("bad_options");
     app.execute_slash_command("/session list").await;
     let before = app.session.session_id.clone();
@@ -436,7 +451,11 @@ async fn test_project_command_session_new_rejects_bad_options() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the roots
 async fn test_project_command_session_new_keeps_paths_and_names_with_spaces() {
+    // The permitted roots depend on process-global state (see
+    // `support::allow_session_root`).
+    let _env = crate::global_env_lock();
     let mut app = support::make_app();
     app.execute_slash_command("/session list").await;
 
@@ -451,9 +470,11 @@ async fn test_project_command_session_new_keeps_paths_and_names_with_spaces() {
     );
 
     // A project name with a space works when quoted.
+    let quoted = fixture_dir("quoted");
+    support::allow_session_root(&app, &quoted);
     let other = app
         .storage
-        .ensure_project("/nonexistent/project_command/quoted")
+        .ensure_project(&quoted.display().to_string())
         .expect("project");
     app.storage
         .rename_project(&other.id, "Other App")
@@ -511,7 +532,11 @@ fn test_project_command_clone_errors_never_carry_the_url_credentials() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the roots
 async fn test_project_command_prune_removes_archived_clean_worktrees() {
+    // The permitted roots depend on process-global state (see
+    // `support::allow_session_root`).
+    let _env = crate::global_env_lock();
     let (mut app, _project, _base) = app_with_project("pruned");
     app.execute_slash_command("/session list").await;
     let before = app.session.session_id.clone();
@@ -547,4 +572,65 @@ async fn test_project_command_prune_removes_archived_clean_worktrees() {
     let row = app.storage.get_session(&id).expect("get").expect("row");
     assert_eq!(PathBuf::from(&row.directory), app.session.directory);
     assert!(app.session.directory.is_dir());
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the roots
+async fn test_project_command_session_new_refuses_a_project_outside_permitted_roots() {
+    let _env = crate::global_env_lock();
+    let base = fixture_dir("outside_roots");
+    let repo = base.join("repo");
+    let allowed_subdir = repo.join("docs");
+    std::fs::create_dir_all(&allowed_subdir).expect("dirs");
+    git(&repo, &["init", "--quiet", "--initial-branch=main"]);
+    std::fs::write(repo.join("README.md"), "fixture\n").expect("write");
+    git(&repo, &["add", "README.md"]);
+    git(&repo, &["commit", "--quiet", "-m", "initial"]);
+    let mut app = support::make_app();
+    app.worktree_root = Some(base.join("trees"));
+    app.execute_slash_command("/session list").await;
+    let before = app.session.session_id.clone();
+    let sessions_before = app.storage.list_sessions().expect("list").len();
+    // A project record can exist for a checkout this launch may not use.
+    let project = app
+        .project_manager_for_test()
+        .resolve_for_dir(&repo)
+        .expect("project");
+
+    // By name, with and without a branch.
+    for command in [
+        format!("/session new --project {}", project.id),
+        format!("/session new --project {} --branch feature/x", project.id),
+    ] {
+        app.execute_slash_command(&command).await;
+        assert!(app.status.contains("outside"), "{command}: {}", app.status);
+    }
+
+    // Only a subdirectory is permitted: asking for a branch session there
+    // must not widen access to the repository root above it.
+    support::allow_session_root(&app, &allowed_subdir);
+    app.execute_slash_command(&format!(
+        "/session new {} --branch feature/x",
+        allowed_subdir.display()
+    ))
+    .await;
+    assert!(app.status.contains("outside"), "status: {}", app.status);
+
+    assert_eq!(
+        app.session.session_id, before,
+        "no refused request switched"
+    );
+    assert_eq!(
+        app.storage.list_sessions().expect("list").len(),
+        sessions_before,
+        "no session was created"
+    );
+    assert!(!base.join("trees").exists(), "no worktree was created");
+
+    // Once the checkout itself is permitted, the same request works.
+    support::allow_session_root(&app, &repo);
+    app.execute_slash_command(&format!("/session new --project {}", project.id))
+        .await;
+    assert_ne!(app.session.session_id, before, "status: {}", app.status);
+    assert_eq!(app.cwd_path, repo);
 }

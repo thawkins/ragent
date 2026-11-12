@@ -301,6 +301,13 @@ Where the delivered code differs from the plan above, and why:
 18. **Clone errors are scrubbed**: the URL as typed is replaced by its
     credential-free form before an error is shown.
 
+19. **Project sessions obey the permitted-roots rule in the TUI too**
+    (decided by the author after review). `/session new --project`, the
+    sidebar's `n` and `/session new <path> --branch` check the project's
+    checkout against the launch directory and `dirs.allowed_roots`, as
+    `/session new <path>` and the HTTP route already did. Focusing an
+    existing stored session is unchanged.
+
 ## Open Questions
 
 These were not answered before implementation; the plan's assumption was

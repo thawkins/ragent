@@ -572,10 +572,15 @@ async fn test_sessions_sidebar_search_row_starts_the_filter() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the roots
 async fn test_sessions_sidebar_n_on_a_heading_opens_a_session_in_that_project() {
+    // The permitted roots depend on process-global state (see
+    // `support::allow_session_root`).
+    let _env = crate::global_env_lock();
     let (mut app, _a, b) = app_with_sidebar().await;
     let dir = fixture_dir("n_on_heading").join("other");
     std::fs::create_dir_all(&dir).expect("dir");
+    support::allow_session_root(&app, &dir);
     let project = app
         .storage
         .ensure_project(&dir.display().to_string())
@@ -638,4 +643,31 @@ async fn test_sessions_sidebar_project_update_reloads_the_rows() {
 
     assert!(app.sidebar.dirty);
     assert!(row_of(&sidebar_rows(&mut app), "Fresh Name v").is_some());
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_n_on_a_heading_outside_permitted_roots_is_refused() {
+    let (mut app, _a, b) = app_with_sidebar().await;
+    let dir = fixture_dir("n_outside_roots").join("other");
+    std::fs::create_dir_all(&dir).expect("dir");
+    let project = app
+        .storage
+        .ensure_project(&dir.display().to_string())
+        .expect("project");
+    app.sidebar.dirty = true;
+    app.sidebar.cursor = heading_index(&mut app, &project.id);
+    app.sidebar.focused = true;
+
+    app.handle_key_event(key(KeyCode::Char('n'), KeyModifiers::NONE))
+        .await;
+
+    assert!(app.status.contains("outside"), "status: {}", app.status);
+    assert_eq!(app.session.session_id.as_deref(), Some(b.as_str()));
+    assert!(
+        app.storage
+            .list_project_sessions(&project.id, false)
+            .expect("list")
+            .is_empty(),
+        "no session was created in the project"
+    );
 }

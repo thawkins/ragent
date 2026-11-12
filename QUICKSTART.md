@@ -1404,7 +1404,9 @@ checkout.
 
 With `--branch` the session gets its own `git worktree` at that branch, so
 it does not disturb the project's main checkout. Quote a project name that
-contains spaces: `/session new --project "My App"`. The sidebar shows `Y` and
+contains spaces: `/session new --project "My App"`. A session can only be
+started in a project whose checkout is under the launch directory or a
+`dirs.allowed_roots` entry. The sidebar shows `Y` and
 the number of pull/merge requests for that branch beside the session.
 
 The same data is available outside the TUI:

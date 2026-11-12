@@ -2082,8 +2082,12 @@ on first use. Design and tasks: `specs/projects/PLAN.md`.
   (`worktrees/<project>-<id>/<branch>`) and runs the session there. The
   branch is an existing local branch, else the remote's branch of that name
   (tracked), else a new branch from the remote's default branch (or `HEAD`).
-  The session still belongs to the owning project. The worktree is created
-  on a blocking task, because it may fetch from the remote; the session is
+  The session still belongs to the owning project. In the TUI and over
+  HTTP, a session can only be started in a project whose checkout is inside
+  the launch directory or a `dirs.allowed_roots` entry, the same rule as
+  `/session new <path>` (SEC-062); the check is on the checkout, so an
+  allowed subdirectory does not open the repository above it. The worktree
+  is created on a blocking task, because it may fetch from the remote; the session is
   focused when that finishes and a failure is reported on the status line.
   Archiving a session leaves its worktree on disk; `/project prune` removes
   the worktrees of archived sessions that have no uncommitted changes,

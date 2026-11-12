@@ -1013,7 +1013,7 @@ Keys:
 | `Left`/`Right` | (sidebar focused) collapse / expand a project |
 | `p` / `a` / `F2` | (sidebar focused) pin, archive, rename |
 | `/` | (sidebar focused) filter by title or project |
-| `n` | (on a project heading) new session in that project |
+| `n` | (on a project heading) new session in that project (its checkout must be under the launch directory or in `dirs.allowed_roots`) |
 | `b` | (on a project heading) prefill the command for a new session on its own branch |
 | `Esc` | (sidebar focused) clear the filter, then return to the input |
 
