@@ -134,6 +134,12 @@ pub enum Event {
         /// Unique identifier of the session.
         session_id: String,
     },
+    /// A project record was created or changed (name, base model, remote,
+    /// or the request counts of its sessions' branches).
+    ProjectUpdated {
+        /// Unique identifier of the project.
+        project_id: String,
+    },
     /// The model has started generating a new assistant message.
     MessageStart {
         /// Session this message belongs to.
@@ -1289,6 +1295,7 @@ impl Event {
         match self {
             Self::SessionCreated { .. } => "SessionCreated",
             Self::SessionUpdated { .. } => "SessionUpdated",
+            Self::ProjectUpdated { .. } => "ProjectUpdated",
             Self::MessageStart { .. } => "MessageStart",
             Self::TextDelta { .. } => "TextDelta",
             Self::ReasoningDelta { .. } => "ReasoningDelta",
@@ -1443,7 +1450,7 @@ impl Event {
             Self::ShellCwdChanged { session_id, .. } | Self::UserInput { session_id, .. } => {
                 Some(session_id.as_str())
             }
-            Self::OpenResearchView { .. } => None,
+            Self::OpenResearchView { .. } | Self::ProjectUpdated { .. } => None,
             Self::MemoryStored { session_id, .. }
             | Self::MemoryRecalled { session_id, .. }
             | Self::MemoryForgotten { session_id, .. }

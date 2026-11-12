@@ -87,7 +87,12 @@ fn test_session_grouping_create_session_records_project() {
         .create_session("sub", &text(&l.repo_a_sub))
         .expect("session");
     let row = storage.get_session("sub").expect("get").expect("row");
-    assert_eq!(row.project_id, text(&l.repo_a));
+    let project = storage
+        .get_project(&row.project_id)
+        .expect("get project")
+        .expect("the session is attached to a project record");
+    assert_eq!(project.worktree, text(&l.repo_a));
+    assert_eq!(project.name, "repo_a");
 }
 
 #[test]
@@ -113,7 +118,7 @@ fn test_session_grouping_groups_by_project_newest_first() {
         .iter()
         .map(|g| {
             (
-                g.project_id.clone(),
+                g.project.worktree.clone(),
                 g.sessions.iter().map(|s| s.id.clone()).collect(),
             )
         })
@@ -162,7 +167,14 @@ fn test_session_grouping_archive_round_trip() {
     storage.set_session_pinned("s", true).expect("pin");
 
     storage.archive_session("s").expect("archive");
-    assert!(storage.list_sessions_grouped().expect("grouped").is_empty());
+    // The project stays listed (spec `projects`); it just has no sessions.
+    assert!(
+        storage
+            .list_sessions_grouped()
+            .expect("grouped")
+            .iter()
+            .all(|g| g.sessions.is_empty())
+    );
     assert!(
         storage.pinned_session_ids().expect("ids").is_empty(),
         "an archived session is not listed as pinned"
@@ -207,7 +219,11 @@ fn test_session_grouping_migrates_a_v3_database() {
     let storage = Storage::open(&path).expect("migrate");
 
     let row = storage.get_session("old").expect("get").expect("row");
-    assert_eq!(row.project_id, text(&l.repo_a), "project backfilled");
+    let project = storage
+        .get_project(&row.project_id)
+        .expect("get project")
+        .expect("project backfilled");
+    assert_eq!(project.worktree, text(&l.repo_a), "project backfilled");
     storage
         .set_session_pinned("old", true)
         .expect("the pinned column exists after migration");
