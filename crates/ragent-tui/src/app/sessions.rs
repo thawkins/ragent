@@ -93,6 +93,32 @@ impl App {
         }
     }
 
+    /// Runs `f` with the session `origin` in `self.session`, swapping a
+    /// background session in and back out, so output from a long-running
+    /// job lands in the session that started it (`/bench run`, `/new`,
+    /// `/spec govcreate`). The status line is left as `f` sets it: job
+    /// progress stays visible whichever session is focused. `None`, the
+    /// focused session, or a session that is no longer open runs `f` on the
+    /// focused session.
+    pub(crate) fn with_origin_session<R>(
+        &mut self,
+        origin: Option<&str>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let index = origin
+            .filter(|id| self.session.session_id.as_deref() != Some(*id))
+            .and_then(|id| self.background.position(id));
+        match index {
+            None => f(self),
+            Some(index) => {
+                self.swap_with_background(index);
+                let result = f(self);
+                self.swap_with_background(index);
+                result
+            }
+        }
+    }
+
     /// Routes one bus event to the session that owns it.
     ///
     /// Events for a background session are applied to that session's view;

@@ -3053,6 +3053,12 @@ pub struct App {
     /// Parked code indexes of open projects other than the focused one
     /// (spec MULTISESSION M8).
     pub project_services: std::collections::HashMap<std::path::PathBuf, super::ProjectServices>,
+    /// Session that started the running `/bench run`; its output goes there.
+    pub bench_origin_session: Option<String>,
+    /// Session that started the running `/new` scaffold.
+    pub newproj_origin_session: Option<String>,
+    /// Session that started the running `/spec govcreate`.
+    pub govcreate_origin_session: Option<String>,
     /// Whether the event loop should keep running.
     pub is_running: bool,
     /// Shared event bus for agent communication.

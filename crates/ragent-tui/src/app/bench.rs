@@ -18,6 +18,7 @@ impl App {
     /// drift apart (a field cleared in one branch but not the other leaves
     /// stale bench state pinned to the status line).
     fn clear_active_bench(&mut self) {
+        self.bench_origin_session = None;
         if let Some(task_id) = self.active_bench_task_id.take()
             && let Some(idx) = self.active_tasks.iter().position(|task| task.id == task_id)
         {
@@ -55,6 +56,13 @@ impl App {
     /// Poll the active benchmark task, refresh the status line with progress,
     /// drain progress events, and surface the finished result when complete.
     pub fn poll_pending_bench(&mut self) {
+        // Output belongs to the session that started the run (MULTISESSION).
+        let origin = self.bench_origin_session.clone();
+        self.with_origin_session(origin.as_deref(), Self::poll_pending_bench_in_origin);
+    }
+
+    /// [`Self::poll_pending_bench`] with the run's own session focused.
+    fn poll_pending_bench_in_origin(&mut self) {
         // Watchdog: surface and clear a run that has outlived the staleness
         // cap so a wedged runner cannot hold the animate deadline forever.
         if self.bench_stale() {
@@ -503,6 +511,7 @@ impl App {
             ragent_bench::BenchTarget::All => "all",
         };
         self.active_bench_task_id = Some(task_id.clone());
+        self.bench_origin_session = self.session.session_id.clone();
         self.active_bench_summary = Some(format!(
             "`{target_label}` on `{}/{}`",
             selection.provider_id, selection.model_id

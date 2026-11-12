@@ -155,6 +155,7 @@ impl App {
         self.newproj_progress_text = None;
         self.newproj_progress_slug = None;
         self.newproj_running = true;
+        self.newproj_origin_session = self.session.session_id.clone();
 
         // Seed the progress panel: the first streamed line is visible as
         // soon as the worker's first step starts. The header is plain text
@@ -244,6 +245,14 @@ impl App {
     /// collapsed into the final FR-011 summary message and the status line
     /// reports the terminal state.
     pub fn poll_newproj_result(&mut self) {
+        // Progress and the summary belong to the session that started the
+        // scaffold (MULTISESSION).
+        let origin = self.newproj_origin_session.clone();
+        self.with_origin_session(origin.as_deref(), Self::poll_newproj_result_in_origin);
+    }
+
+    /// [`Self::poll_newproj_result`] with the scaffold's own session focused.
+    fn poll_newproj_result_in_origin(&mut self) {
         // Stream any fresh worker progress lines into the panel.
         let drained: Vec<String> = match self.newproj_progress.lock() {
             Ok(mut lines) => std::mem::take(&mut *lines),
@@ -278,6 +287,10 @@ impl App {
         };
         self.newproj_running = false;
         self.needs_redraw = true;
+        // The panel is final: drop its text so a later poll (in whichever
+        // session is focused) cannot recreate it.
+        self.newproj_progress_text = None;
+        self.newproj_origin_session = None;
         match outcome {
             Ok((summary, stack_note)) => {
                 let mut text = format!("From: /new\n\n{summary}");

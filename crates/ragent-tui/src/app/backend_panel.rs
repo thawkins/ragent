@@ -247,6 +247,11 @@ impl App {
             self.status = "backend: unavailable".to_string();
             return;
         }
+        // Another session in this project may have switched the backend
+        // since this one last looked: compare against the config as it is
+        // now, not the cached value.
+        let current = ragent_agent::Config::load_for(&self.cwd_path).unwrap_or_default();
+        self.session.active_backend = current.effective_execution_backend().as_str().to_string();
         if kind == self.session.active_backend {
             self.append_assistant_text(&format!(
                 "From: /backend\n[i]  `{id}` is already the active execution backend."
@@ -299,19 +304,29 @@ impl App {
     }
 
     /// The config file a backend switch is written to: the project-local
-    /// `.ragent/ragent.json` when one was loaded, else the global config.
+    /// `.ragent/ragent.json` the focused session's effective config loaded,
+    /// else that config's first file, else the global config.
     fn backend_config_path(&self) -> Option<PathBuf> {
-        let is_project = |path: &PathBuf| {
+        let is_project = |path: &&PathBuf| {
             path.file_name().is_some_and(|f| f == "ragent.json")
                 && path
                     .parent()
                     .and_then(|parent| parent.file_name())
                     .is_some_and(|f| f == ".ragent")
         };
-        if self.config_paths.iter().any(is_project) {
-            return Some(self.cwd_path.clone().join(".ragent/ragent.json"));
+        // The session's effective config (MULTISESSION M8): its own project
+        // file, or the launch configuration it inherits.
+        let paths = match ragent_agent::Config::load_for(&self.cwd_path) {
+            Ok(config) => config.config_paths,
+            Err(e) => {
+                tracing::warn!(error = %e, "could not load session config for /backend");
+                self.config_paths.clone()
+            }
+        };
+        if let Some(project) = paths.iter().find(is_project) {
+            return Some(project.clone());
         }
-        self.config_paths
+        paths
             .first()
             .cloned()
             .or_else(ragent_config::Config::global_config_path)

@@ -242,6 +242,7 @@ impl App {
         self.govcreate_progress_text = None;
         self.govcreate_progress_slug = None;
         self.govcreate_running = true;
+        self.govcreate_origin_session = self.session.session_id.clone();
 
         let header_line = format!("Govcreate '{spec_id}'...");
         self.govcreate_progress_slug = Some(header_line.clone());
@@ -312,6 +313,7 @@ impl App {
             // The worker could not spawn; the run could not start. Mark the
             // run finished and let the poll surface the failure state.
             self.govcreate_running = false;
+            self.govcreate_origin_session = None;
             self.push_log_no_agent(
                 LogLevel::Warn,
                 format!("govcreate: worker spawn failed: {err}"),
@@ -324,6 +326,14 @@ impl App {
     /// message and render the terminal report once the worker deposits it
     /// (T-013, FR-015).
     pub fn poll_govcreate_result(&mut self) {
+        // Progress and the report belong to the session that started the run
+        // (MULTISESSION).
+        let origin = self.govcreate_origin_session.clone();
+        self.with_origin_session(origin.as_deref(), Self::poll_govcreate_result_in_origin);
+    }
+
+    /// [`Self::poll_govcreate_result`] with the run's own session focused.
+    fn poll_govcreate_result_in_origin(&mut self) {
         // Stream any fresh worker progress lines into the panel. A poisoned
         // lock means the worker panicked mid-report - recover with
         // `into_inner` so the panel still drains and the stall is visible.
@@ -360,6 +370,7 @@ impl App {
             return;
         };
         self.govcreate_running = false;
+        self.govcreate_origin_session = None;
         self.needs_redraw = true;
         let rendered = report.render();
         self.session.force_new_message = true;

@@ -1838,12 +1838,13 @@ impl Config {
         Self::load_cached_in(cwd, Path::new(""), xdg)
     }
 
-    /// Loads the configuration for a project directory other than the
-    /// process cwd (spec MULTISESSION M6): the global config overlaid with
-    /// `<directory>/.ragent/ragent.json`, under the same project-local guard
-    /// and the same mtime-keyed cache as [`Config::load`].
-    ///
-    /// When `directory` is the process cwd this is exactly [`Config::load`].
+    /// Loads the configuration a session working in `directory` runs under
+    /// (spec MULTISESSION M6): when the directory has its own
+    /// `.ragent/ragent.json`, the global config overlaid with it (same
+    /// project-local guard and mtime-keyed cache as [`Config::load`]);
+    /// otherwise the launch configuration, exactly [`Config::load`]. The
+    /// agent loop resolves a session's config by the same rule, so every
+    /// reader agrees on what the session runs under.
     ///
     /// # Arguments
     ///
@@ -1857,7 +1858,8 @@ impl Config {
         let canonical = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
         let is_cwd =
             std::env::current_dir().is_ok_and(|cwd| canonical(&cwd) == canonical(directory));
-        if is_cwd {
+        let own_config = directory.join(".ragent").join("ragent.json").is_file();
+        if is_cwd || !own_config {
             return Self::load();
         }
         if read_env("RAGENT_CONFIG").is_some() || read_env("RAGENT_CONFIG_CONTENT").is_some() {

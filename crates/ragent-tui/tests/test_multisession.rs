@@ -473,3 +473,50 @@ async fn test_multisession_background_attention_fires_notification_hook() {
         "hook output"
     );
 }
+
+#[tokio::test]
+async fn test_multisession_scaffold_output_lands_in_the_session_that_started_it() {
+    let (mut app, a, _b) = app_with_two_sessions().await;
+    // `/new` was started in A, which is now in the background.
+    app.newproj_origin_session = Some(a.clone());
+    app.newproj_progress_slug = Some("Scaffolding `demo`...".to_string());
+    app.newproj_progress
+        .lock()
+        .expect("progress")
+        .push("[1/2] wrote Cargo.toml".to_string());
+    *app.newproj_result.lock().expect("result") =
+        Some(Ok(("Scaffolded demo".to_string(), String::new())));
+    let focused_before = transcript(&app.session);
+
+    app.poll_newproj_result();
+
+    let in_a = transcript(background(&app, &a));
+    assert!(
+        in_a.contains("wrote Cargo.toml"),
+        "progress panel in A: {in_a}"
+    );
+    assert!(in_a.contains("Scaffolded demo"), "summary in A: {in_a}");
+    assert_eq!(transcript(&app.session), focused_before, "nothing in B");
+    assert!(
+        app.newproj_progress_text.is_none(),
+        "panel text dropped once final"
+    );
+
+    // A later poll in B must not recreate the panel there.
+    app.poll_newproj_result();
+    assert_eq!(transcript(&app.session), focused_before);
+}
+
+#[tokio::test]
+async fn test_multisession_bench_output_lands_in_the_session_that_started_it() {
+    let (mut app, a, _b) = app_with_two_sessions().await;
+    app.bench_origin_session = Some(a.clone());
+    *app.bench_result.lock().expect("result") = Some(Err("runner crashed".to_string()));
+    let focused_before = transcript(&app.session);
+
+    app.poll_pending_bench();
+
+    assert!(transcript(background(&app, &a)).contains("runner crashed"));
+    assert_eq!(transcript(&app.session), focused_before);
+    assert!(app.bench_origin_session.is_none());
+}
