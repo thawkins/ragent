@@ -191,6 +191,11 @@ pub struct Config {
     /// GitLab integration configuration.
     #[serde(default)]
     pub gitlab: GitLabIntegrationConfig,
+    /// Pull/merge request integration: GitHub Enterprise hosts (spec
+    /// SESSIONMENU FR-21). User-global only; a project-local file cannot
+    /// set it.
+    #[serde(default, skip_serializing_if = "VcsConfig::is_default")]
+    pub vcs: VcsConfig,
     /// Agent-loop performance configuration (AgentPerf FR-027).
     ///
     /// Controls the per-step wall-clock budget, the per-stream stall
@@ -394,6 +399,7 @@ impl Default for Config {
             gcf: GcfConfig::default(),
             storage: StorageConfig::default(),
             gitlab: GitLabIntegrationConfig::default(),
+            vcs: VcsConfig::default(),
             agent_perf: AgentPerfConfig::default(),
             telemetry: crate::telemetry::TelemetryConfig::default(),
             yolo: false,
@@ -3126,6 +3132,13 @@ impl Config {
             overlay.acp = None;
             rejected.push("acp");
         }
+        // A GitHub Enterprise host entry names the API URL that receives the
+        // GitHub token. A project must not be able to point it elsewhere, so
+        // the section is dropped from the untrusted overlay (SESSIONMENU FR-21).
+        if !overlay.vcs.is_default() {
+            overlay.vcs = VcsConfig::default();
+            rejected.push("vcs");
+        }
         // A provider `api` block redirects the endpoint that receives the
         // provider credential. A project-local file must not be able to point
         // the credential or the prompt stream at an attacker host, so the `api`
@@ -3237,6 +3250,11 @@ impl Config {
         }
         if overlay.gitlab.username.is_some() {
             base.gitlab.username = overlay.gitlab.username;
+        }
+
+        // VCS hosts: an overlay that names hosts replaces the base list.
+        if !overlay.vcs.github.hosts.is_empty() {
+            base.vcs.github.hosts = overlay.vcs.github.hosts;
         }
 
         // tavily_api_key: overlay overrides base
@@ -3917,6 +3935,53 @@ pub struct GitLabIntegrationConfig {
 }
 
 redacted_debug_impl!(GitLabIntegrationConfig);
+
+/// Pull/merge request integration settings (spec SESSIONMENU FR-21).
+///
+/// Configured under the `vcs` key of the user-global `ragent.json`:
+///
+/// ```json
+/// {
+///   "vcs": {
+///     "github": {
+///       "hosts": [
+///         { "host": "github.example.com", "api_url": "https://github.example.com/api/v3" }
+///       ]
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VcsConfig {
+    /// GitHub settings.
+    #[serde(default)]
+    pub github: VcsGitHubConfig,
+}
+
+impl VcsConfig {
+    /// Whether nothing is configured (used to skip serialising the section).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// GitHub settings under `vcs.github`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VcsGitHubConfig {
+    /// GitHub Enterprise Server hosts, besides `github.com`.
+    #[serde(default)]
+    pub hosts: Vec<GitHubHost>,
+}
+
+/// One GitHub Enterprise Server host.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GitHubHost {
+    /// Host name as it appears in git remotes, e.g. `github.example.com`.
+    pub host: String,
+    /// REST API base URL, e.g. `https://github.example.com/api/v3`.
+    pub api_url: String,
+}
 
 /// Spec-Driven Development (SDD) capability toggles (FR-019).
 ///

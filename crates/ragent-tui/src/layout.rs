@@ -396,9 +396,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         None => {
             app.sidebar.area = Rect::default();
             app.sidebar.focused = false;
+            app.sidebar.menu = None;
         }
     }
     render_chat(frame, app, chat_area);
+    // Session context menu (spec SESSIONMENU): above the sidebar and chat,
+    // below every modal overlay drawn next.
+    crate::session_menu::render(frame, app);
     // Config-save picker overlay - rendered on top of chat, before history
     // picker so that whichever picker is open gets drawn last (i.e. on top).
     if app.config_save_picker.is_some() {

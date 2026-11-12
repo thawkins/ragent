@@ -239,7 +239,7 @@ fn test_projects_crud_archive_refuses_live_sessions_and_ensure_restores() {
     storage
         .archive_project(&project.id)
         .expect("archive project");
-    assert!(storage.list_projects().expect("list").is_empty());
+    assert_eq!(storage.list_projects().expect("list"), Vec::new());
     assert!(storage.list_sessions_grouped().expect("grouped").is_empty());
     assert_eq!(
         storage

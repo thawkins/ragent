@@ -44,7 +44,7 @@ checkout must be inside the launch directory or a `dirs.allowed_roots` entry.";
 
 /// The outcome of creating a session with its own worktree in the
 /// background: the session and its project, or why it failed.
-pub(crate) type PendingProjectSession = Result<(ragent_agent::session::Session, Project), String>;
+pub(super) type PendingProjectSession = Result<(ragent_agent::session::Session, Project), String>;
 
 /// Options of `/session new` that name a project or branch.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -163,6 +163,17 @@ impl App {
     /// A project manager over this app's storage and event bus.
     pub(crate) fn project_manager(&self) -> ProjectManager {
         ProjectManager::new(Arc::clone(&self.storage), Arc::clone(&self.event_bus))
+            .with_github_hosts(self.github_hosts())
+    }
+
+    /// The configured GitHub Enterprise Server hosts (`vcs.github.hosts`).
+    pub(crate) fn github_hosts(&self) -> Vec<ragent_config::GitHubHost> {
+        self.session_processor
+            .load_config_cached()
+            .vcs
+            .github
+            .hosts
+            .clone()
     }
 
     /// [`App::project_manager`] for the consolidated test target; not part
@@ -513,9 +524,13 @@ impl App {
         // the focused directory under the repository's name.
         let gitlab_host = ragent_tools_vcs::gitlab::auth::load_config(self.storage.as_ref())
             .map(|c| c.instance_url);
-        let remote =
-            ragent_agent::project::parse_remote_url(target, "origin", gitlab_host.as_deref())
-                .ok_or_else(|| format!("`{target}` is not a GitHub or GitLab repository URL"))?;
+        let remote = ragent_agent::project::parse_remote_url_with_hosts(
+            target,
+            "origin",
+            gitlab_host.as_deref(),
+            &self.github_hosts(),
+        )
+        .ok_or_else(|| format!("`{target}` is not a GitHub or GitLab repository URL"))?;
         let name = remote.path.rsplit('/').next().unwrap_or("repo").to_string();
         let dest = self.cwd_path.join(&name);
         if dest.exists() {

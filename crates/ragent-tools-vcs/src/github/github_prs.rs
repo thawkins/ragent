@@ -310,6 +310,20 @@ impl Tool for GitHubCreatePrTool {
 
         let pr_number = resp["number"].as_u64().unwrap_or(0);
         let url = resp["html_url"].as_str().unwrap_or("");
+        crate::binding::bind_created(
+            ctx,
+            ragent_storage::SessionRequest {
+                session_id: String::new(),
+                forge: "github".to_string(),
+                host: String::new(),
+                repo: format!("{owner}/{repo}"),
+                number: pr_number,
+                title: title.to_string(),
+                web_url: url.to_string(),
+                head_branch: head.clone(),
+                state: "open".to_string(),
+            },
+        );
 
         Ok(ToolOutput {
             content: format!("Created PR #{pr_number}: {url}"),

@@ -50,6 +50,14 @@ the current one keeps running |\n\
 | `/session pin` | Pin or unpin the focused session |\n\
 | `/session archive` | Archive and close the focused session |\n\
 | `/session unarchive <id-or-title>` | Restore an archived session to the list |\n\
+| `/session unread [id-or-title]` | Mark a session unread, or read again |\n\
+| `/session fork [id-or-title]` | Copy a session's transcript into a new session |\n\
+| `/session delete <id-or-title>` | Permanently delete a session (asks first) |\n\
+| `/session section` | List sidebar sections |\n\
+| `/session section <name>` / `--none` | Move the focused session to a section, or back to its project |\n\
+| `/session section new <name>` | Create a section and move the focused session to it |\n\
+| `/session section rename <name>` | Rename the focused session's section |\n\
+| `/session section delete [name]` | Delete a section (default: the focused session's); its sessions go back to their projects |\n\
 | `/session help` | Show this help |\n\n\
 A `path` must be inside the launch directory or a `dirs.allowed_roots` entry.";
 
@@ -212,6 +220,12 @@ impl App {
         let finished = was_processing && !self.session.is_processing;
         if finished {
             self.session.unread = true;
+            if let Some(id) = self.session.session_id.as_deref() {
+                // Persisted so the mark survives a restart (SESSIONMENU FR-08).
+                if let Err(e) = self.storage.set_session_unread(id, true) {
+                    tracing::warn!(error = %e, session_id = %id, "could not mark session unread");
+                }
+            }
         }
         if failed {
             self.session.errored = true;
@@ -314,6 +328,11 @@ impl App {
     pub(super) fn after_focus_change(&mut self) {
         self.session.unread = false;
         self.session.errored = false;
+        if let Some(id) = self.session.session_id.as_deref() {
+            if let Err(e) = self.storage.set_session_unread(id, false) {
+                tracing::warn!(error = %e, session_id = %id, "could not mark session read");
+            }
+        }
         self.sidebar.dirty = true;
         self.apply_session_directory();
         self.text_selection = None;
@@ -825,6 +844,297 @@ impl App {
         Ok(())
     }
 
+    /// Directory of session `id`: its open view's, else the stored one.
+    pub(crate) fn session_directory(&self, id: &str) -> Option<PathBuf> {
+        std::iter::once(&self.session)
+            .chain(self.background.iter())
+            .find(|v| v.session_id.as_deref() == Some(id))
+            .map(|v| v.directory.clone())
+            .or_else(|| {
+                self.storage
+                    .get_session(id)
+                    .ok()
+                    .flatten()
+                    .map(|row| PathBuf::from(row.directory))
+            })
+    }
+
+    /// Opens session `id`'s directory in an editor, the file manager or a
+    /// terminal (SESSIONMENU FR-06). The program is started detached.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the session is unknown, this machine has no
+    /// such program, or it cannot be started.
+    pub(crate) fn open_session_in(
+        &mut self,
+        id: &str,
+        target: crate::open_in::OpenTarget,
+    ) -> Result<(), String> {
+        let dir = self
+            .session_directory(id)
+            .ok_or_else(|| format!("session not found: {id}"))?;
+        let env = crate::open_in::LaunchEnv::current();
+        let spec = crate::open_in::launch_spec(target, &dir, &env)
+            .ok_or_else(|| format!("no {} found", target.label().to_lowercase()))?;
+        match self.sidebar.launch_log.as_mut() {
+            Some(log) => log.push(spec),
+            None => crate::open_in::spawn(&spec)?,
+        }
+        self.status = format!(
+            "opened {} in {}",
+            dir.display(),
+            target.label().to_lowercase()
+        );
+        Ok(())
+    }
+
+    /// Moves session `id` into the section `section_id`, or back to its
+    /// project with `None` (SESSIONMENU FR-11).
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the section does not exist or storage fails.
+    pub(crate) fn move_session_to_section(
+        &mut self,
+        id: &str,
+        section_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.storage
+            .set_session_section(id, section_id)
+            .map_err(|e| e.to_string())?;
+        self.sidebar.dirty = true;
+        self.status = match section_id {
+            None => "session moved back to its project".to_string(),
+            Some(_) => "session moved to section".to_string(),
+        };
+        Ok(())
+    }
+
+    /// The section named `name` (ignoring case).
+    fn section_named(&self, name: &str) -> Result<ragent_storage::SidebarSection, String> {
+        self.storage
+            .list_sections()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|s| s.name.eq_ignore_ascii_case(name.trim()))
+            .ok_or_else(|| format!("no section named `{}`", name.trim()))
+    }
+
+    /// The focused session's section id, or an error when it has none.
+    fn focused_section_id(&self) -> Result<String, String> {
+        let id = self.focused_session_id()?;
+        self.storage
+            .session_sections()
+            .map_err(|e| e.to_string())?
+            .remove(&id)
+            .ok_or_else(|| "this session is not in a section".to_string())
+    }
+
+    /// `/session section ...` (SESSIONMENU FR-11).
+    fn handle_section_command(&mut self, args: &str) -> Result<(), String> {
+        let (sub, rest) = args
+            .split_once(char::is_whitespace)
+            .map_or((args, ""), |(s, r)| (s, r.trim()));
+        match sub {
+            "" => {
+                let sections = self.storage.list_sections().map_err(|e| e.to_string())?;
+                let mut text = String::from("| Section |\n|---|\n");
+                for s in &sections {
+                    text.push_str(&format!("| {} |\n", s.name));
+                }
+                if sections.is_empty() {
+                    text = "No sections. `/session section new <name>` creates one.".into();
+                }
+                self.append_assistant_text(&super::helpers::from_cmd("session section", &text));
+                self.status = format!("sections: {}", sections.len());
+                Ok(())
+            }
+            "--none" => {
+                let id = self.focused_session_id()?;
+                self.move_session_to_section(&id, None)
+            }
+            "new" if rest.is_empty() => Err("usage: /session section new <name>".to_string()),
+            "new" => {
+                let id = self.focused_session_id()?;
+                let section = self
+                    .storage
+                    .create_section(rest)
+                    .map_err(|e| e.to_string())?;
+                self.move_session_to_section(&id, Some(&section.id))?;
+                self.status = format!("section `{}` created", section.name);
+                Ok(())
+            }
+            "rename" if rest.is_empty() => Err("usage: /session section rename <name>".to_string()),
+            "rename" => {
+                let section = self.focused_section_id()?;
+                self.storage
+                    .rename_section(&section, rest)
+                    .map_err(|e| e.to_string())?;
+                self.sidebar.dirty = true;
+                self.status = format!("section renamed to `{rest}`");
+                Ok(())
+            }
+            "delete" => {
+                let section = if rest.is_empty() {
+                    self.focused_section_id()?
+                } else {
+                    self.section_named(rest)?.id
+                };
+                self.storage
+                    .delete_section(&section)
+                    .map_err(|e| e.to_string())?;
+                self.sidebar.dirty = true;
+                self.status = "section deleted; its sessions are back in their projects".into();
+                Ok(())
+            }
+            _ => {
+                let section = self.section_named(args)?;
+                let id = self.focused_session_id()?;
+                self.move_session_to_section(&id, Some(&section.id))
+            }
+        }
+    }
+
+    /// `query` resolved to a session id, or the focused session when empty.
+    fn session_or_focused(&self, query: &str) -> Result<String, String> {
+        if query.is_empty() {
+            self.focused_session_id()
+        } else {
+            self.resolve_session_query(query)
+        }
+    }
+
+    /// Whether session `id` is open and running a turn.
+    fn session_is_running(&self, id: &str) -> bool {
+        std::iter::once(&self.session)
+            .chain(self.background.iter())
+            .any(|v| v.session_id.as_deref() == Some(id) && v.is_processing)
+    }
+
+    /// Marks session `id` unread, or read when it is unread (SESSIONMENU
+    /// FR-08). The mark is stored, and copied to the session's open view.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when storage cannot be read or updated.
+    pub(crate) fn toggle_session_unread(&mut self, id: &str) -> Result<(), String> {
+        let stored = self
+            .storage
+            .unread_session_ids()
+            .map_err(|e| e.to_string())?
+            .contains(id);
+        let open_unread = std::iter::once(&self.session)
+            .chain(self.background.iter())
+            .any(|v| v.session_id.as_deref() == Some(id) && v.unread);
+        let unread = !(stored || open_unread);
+        self.storage
+            .set_session_unread(id, unread)
+            .map_err(|e| e.to_string())?;
+        if self.session.session_id.as_deref() == Some(id) {
+            self.session.unread = unread;
+        } else if let Some(index) = self.background.position(id)
+            && let Some(view) = self.background.view_mut(index)
+        {
+            view.unread = unread;
+        }
+        self.status = if unread {
+            "session marked unread"
+        } else {
+            "session marked read"
+        }
+        .to_string();
+        self.sidebar.dirty = true;
+        Ok(())
+    }
+
+    /// Copies session `id`'s transcript into a new session in the same
+    /// directory and focuses it (SESSIONMENU FR-10). A running session is
+    /// refused: its last turn is not finished.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the session is running or storage fails.
+    pub(crate) fn fork_session_by_id(&mut self, id: &str) -> Result<(), String> {
+        if self.session_is_running(id) {
+            return Err("that session is running; stop it first".to_string());
+        }
+        let title = match self.session_title(id) {
+            t if t.is_empty() => format!("{} (fork)", short_session_id(id)),
+            t => format!("{t} (fork)"),
+        };
+        let fork = self
+            .session_processor
+            .session_manager
+            .fork_session(id, &title)
+            .map_err(|e| e.to_string())?;
+        self.switch_to_session(&fork)?;
+        self.persist_open_sessions();
+        self.status = format!("forked into {}", short_session_id(&fork));
+        Ok(())
+    }
+
+    /// Opens the delete confirmation for session `id` (SESSIONMENU FR-13).
+    /// A running session is refused before asking.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the session is running or does not exist.
+    pub(crate) fn request_delete_session(&mut self, id: &str) -> Result<(), String> {
+        if self.session_is_running(id) {
+            return Err("that session is running; stop it first".to_string());
+        }
+        let tree = self
+            .storage
+            .session_tree_ids(id)
+            .map_err(|e| e.to_string())?;
+        if tree.is_empty() {
+            return Err(format!("session not found: {id}"));
+        }
+        let title = match self.session_title(id) {
+            t if t.is_empty() => format!("untitled {}", short_session_id(id)),
+            t => t,
+        };
+        self.open_row_action(crate::app::RowAction::DeleteSession {
+            session_id: id.to_string(),
+            title,
+            children: tree.len() - 1,
+        });
+        Ok(())
+    }
+
+    /// Permanently deletes session `id` and its sub-agent sessions
+    /// (SESSIONMENU FR-13). An open session is closed first; a running one
+    /// is refused. Callers ask the user before calling this.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the session is running, cannot be closed, or
+    /// storage fails.
+    pub(crate) fn delete_session_by_id(&mut self, id: &str) -> Result<(), String> {
+        if self.session_is_running(id) {
+            return Err("that session is running; stop it first".to_string());
+        }
+        if self.session.session_id.as_deref() == Some(id) {
+            self.close_focused_session()?;
+        } else if let Some(index) = self.background.position(id) {
+            self.background.remove(index);
+        }
+        let deleted = self
+            .session_processor
+            .session_manager
+            .delete_session(id)
+            .map_err(|e| e.to_string())?;
+        for gone in &deleted {
+            self.forget_session_step_state(gone);
+        }
+        self.persist_open_sessions();
+        self.release_unused_projects();
+        self.sidebar.dirty = true;
+        self.status = format!("deleted session {}", short_session_id(id));
+        Ok(())
+    }
+
     /// `/session archive`: archives the focused session and closes it
     /// (FR-08). A running session must be stopped first.
     fn archive_focused_session(&mut self) -> Result<(), String> {
@@ -947,6 +1257,18 @@ impl App {
                 .resolve_session_query(rest)
                 .and_then(|id| self.switch_to_session(&id)),
             "close" => self.close_focused_session(),
+            "unread" => self
+                .session_or_focused(rest)
+                .and_then(|id| self.toggle_session_unread(&id)),
+            "fork" => self
+                .session_or_focused(rest)
+                .and_then(|id| self.fork_session_by_id(&id)),
+            "section" => self.handle_section_command(rest),
+            "delete" if rest.is_empty() => Err("usage: /session delete <id-or-title>".to_string()),
+            "delete" => self
+                .resolve_session_query(rest)
+                .or_else(|_| self.resolve_archived_query(rest))
+                .and_then(|id| self.request_delete_session(&id)),
             other => Err(format!(
                 "unknown subcommand `{other}` (/session help lists them)"
             )),

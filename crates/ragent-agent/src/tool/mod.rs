@@ -1369,6 +1369,10 @@ impl ragent_tools_vcs::storage::StorageBackend for CoreVcsStorageAdapter {
     fn delete_setting(&self, key: &str) -> anyhow::Result<()> {
         self.inner.delete_setting(key)
     }
+
+    fn bind_session_request(&self, request: &ragent_storage::SessionRequest) -> anyhow::Result<()> {
+        self.inner.bind_session_request(request).map(|_| ())
+    }
 }
 
 struct ExtractedVcsToolAdapter {

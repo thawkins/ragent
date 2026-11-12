@@ -103,7 +103,7 @@ fn test_projects_migration_creates_one_project_per_root() {
             |r| r.get(0),
         )
         .expect("version");
-    assert_eq!(version, "6");
+    assert_eq!(version, ragent_storage::SCHEMA_VERSION.to_string());
 }
 
 #[test]

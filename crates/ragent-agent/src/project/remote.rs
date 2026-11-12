@@ -2,7 +2,8 @@
 //! `projects`, T-004).
 //!
 //! GitHub and GitLab are recognised. The classification is by the remote
-//! URL's host only: `github.com` is GitHub; `gitlab.com`, a host whose first
+//! URL's host only: `github.com` or a configured GitHub Enterprise Server
+//! host (`vcs.github.hosts`) is GitHub; `gitlab.com`, a host whose first
 //! label is `gitlab`, or the configured self-hosted instance is GitLab.
 //! Anything else yields no remote description, and the project stays a
 //! local project. Depends on `ragent-tools-vcs` for the timeout-bounded git
@@ -10,8 +11,21 @@
 
 use std::path::Path;
 
+use ragent_config::GitHubHost;
 use ragent_storage::ProjectRemoteRow;
 use serde::{Deserialize, Serialize};
+
+/// The words a hosting system uses for a change request: GitHub has pull
+/// requests, GitLab has merge requests (spec SESSIONMENU A4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestNoun {
+    /// Abbreviation: `PR` or `MR`.
+    pub short: &'static str,
+    /// Full name in lower case: `pull request` or `merge request`.
+    pub long: &'static str,
+    /// Prefix of a request number: `#` on GitHub, `!` on GitLab.
+    pub sigil: char,
+}
 
 /// The hosting system of a project remote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -30,6 +44,23 @@ impl RemoteKind {
         match self {
             Self::GitHub => "github",
             Self::GitLab => "gitlab",
+        }
+    }
+
+    /// What this hosting system calls a change request.
+    #[must_use]
+    pub const fn noun(self) -> RequestNoun {
+        match self {
+            Self::GitHub => RequestNoun {
+                short: "PR",
+                long: "pull request",
+                sigil: '#',
+            },
+            Self::GitLab => RequestNoun {
+                short: "MR",
+                long: "merge request",
+                sigil: '!',
+            },
         }
     }
 
@@ -171,18 +202,34 @@ pub fn split_instance_url(instance: &str) -> (String, String) {
 /// Whether `host` (with an optional port) is the configured instance host.
 /// A configured host without a port matches the remote host on any port,
 /// because an ssh remote and the web UI rarely share one.
-fn is_instance_host(host: &str, instance_host: &str) -> bool {
+pub(crate) fn is_instance_host(host: &str, instance_host: &str) -> bool {
     let name = host.split(':').next().unwrap_or(host);
     !instance_host.is_empty()
         && (instance_host == host || instance_host.split(':').next() == Some(name))
 }
 
+/// The configured GitHub Enterprise Server entry for `host`, if any.
+///
+/// Entries are matched by host name (a scheme or path in the configured
+/// value is ignored); an entry without a port matches any port.
+#[must_use]
+pub fn github_host_entry<'a>(host: &str, github_hosts: &'a [GitHubHost]) -> Option<&'a GitHubHost> {
+    github_hosts
+        .iter()
+        .find(|entry| is_instance_host(host, &split_instance_url(&entry.host).0))
+}
+
 /// Classifies a host. `gitlab_host` is the configured self-hosted GitLab
-/// host or base URL, if any.
-fn classify_host(host: &str, gitlab_host: Option<&str>) -> Option<RemoteKind> {
+/// host or base URL, if any; `github_hosts` are the configured GitHub
+/// Enterprise Server hosts.
+fn classify_host(
+    host: &str,
+    gitlab_host: Option<&str>,
+    github_hosts: &[GitHubHost],
+) -> Option<RemoteKind> {
     let name = host.split(':').next().unwrap_or(host);
     let name = name.strip_prefix("www.").unwrap_or(name);
-    if name == "github.com" {
+    if name == "github.com" || github_host_entry(host, github_hosts).is_some() {
         return Some(RemoteKind::GitHub);
     }
     let configured =
@@ -224,8 +271,36 @@ pub fn parse_remote_url(
     remote_name: &str,
     gitlab_host: Option<&str>,
 ) -> Option<ProjectRemote> {
+    parse_remote_url_with_hosts(url, remote_name, gitlab_host, &[])
+}
+
+/// [`parse_remote_url`] that also recognises the configured GitHub
+/// Enterprise Server hosts (`vcs.github.hosts`) as GitHub.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_agent::project::{RemoteKind, parse_remote_url_with_hosts};
+/// use ragent_config::GitHubHost;
+///
+/// let hosts = [GitHubHost {
+///     host: "github.example.com".into(),
+///     api_url: "https://github.example.com/api/v3".into(),
+/// }];
+/// let url = "git@github.example.com:acme/app.git";
+/// let remote = parse_remote_url_with_hosts(url, "origin", None, &hosts).unwrap();
+/// assert_eq!(remote.kind, RemoteKind::GitHub);
+/// assert_eq!(remote.host, "github.example.com");
+/// ```
+#[must_use]
+pub fn parse_remote_url_with_hosts(
+    url: &str,
+    remote_name: &str,
+    gitlab_host: Option<&str>,
+    github_hosts: &[GitHubHost],
+) -> Option<ProjectRemote> {
     let mut parts = split_remote_url(url)?;
-    let kind = classify_host(&parts.host, gitlab_host)?;
+    let kind = classify_host(&parts.host, gitlab_host, github_hosts)?;
     // An instance served under a path (`https://host/gitlab`) puts that
     // prefix in front of every http(s) clone path; it is not part of the
     // project path. ssh remotes do not carry it.
@@ -309,9 +384,20 @@ fn git_line(args: &[&str], dir: &Path) -> Option<String> {
 /// the remote is on a host that is neither GitHub nor GitLab.
 #[must_use]
 pub fn detect_remote(worktree: &Path, gitlab_host: Option<&str>) -> Option<ProjectRemote> {
+    detect_remote_with_hosts(worktree, gitlab_host, &[])
+}
+
+/// [`detect_remote`] that also recognises the configured GitHub Enterprise
+/// Server hosts as GitHub.
+#[must_use]
+pub fn detect_remote_with_hosts(
+    worktree: &Path,
+    gitlab_host: Option<&str>,
+    github_hosts: &[GitHubHost],
+) -> Option<ProjectRemote> {
     const REMOTE: &str = "origin";
     let url = git_line(&["remote", "get-url", REMOTE], worktree)?;
-    let mut remote = parse_remote_url(&url, REMOTE, gitlab_host)?;
+    let mut remote = parse_remote_url_with_hosts(&url, REMOTE, gitlab_host, github_hosts)?;
     // `refs/remotes/origin/HEAD` -> `origin/main` -> `main`.
     remote.default_branch = git_line(
         &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],

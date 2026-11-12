@@ -442,6 +442,41 @@ impl SessionManager {
             .collect())
     }
 
+    /// Permanently deletes a session and its sub-agent, teammate and skill
+    /// sessions with their transcripts (spec SESSIONMENU FR-13), and drops
+    /// their cached state.
+    ///
+    /// # Returns
+    ///
+    /// The ids deleted, the session itself first; empty when it did not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if storage fails; nothing is deleted then.
+    pub fn delete_session(&self, id: &str) -> anyhow::Result<Vec<String>> {
+        let ids = self.storage.delete_session(id)?;
+        for deleted in &ids {
+            self.remove_session_state(deleted);
+        }
+        Ok(ids)
+    }
+
+    /// Copies session `source`'s transcript into a new top-level session in
+    /// the same directory, titled `title` (spec SESSIONMENU FR-10).
+    ///
+    /// # Returns
+    ///
+    /// The new session's id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `source` does not exist or storage fails.
+    pub fn fork_session(&self, source: &str, title: &str) -> anyhow::Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.storage.fork_session(source, &id, title)?;
+        Ok(id)
+    }
+
     /// Archives a session so it no longer appears in [`list_sessions`](Self::list_sessions)
     /// and emits a `SessionUpdated` event.
     ///

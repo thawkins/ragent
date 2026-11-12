@@ -301,6 +301,20 @@ impl Tool for GitLabCreateMrTool {
 
         let mr_iid = resp["iid"].as_u64().unwrap_or(0);
         let url = resp["web_url"].as_str().unwrap_or("");
+        crate::binding::bind_created(
+            ctx,
+            ragent_storage::SessionRequest {
+                session_id: String::new(),
+                forge: "gitlab".to_string(),
+                host: String::new(),
+                repo: project.replace("%2F", "/").replace("%2f", "/"),
+                number: mr_iid,
+                title: resp["title"].as_str().unwrap_or(title).to_string(),
+                web_url: url.to_string(),
+                head_branch: source_branch.clone(),
+                state: "open".to_string(),
+            },
+        );
 
         Ok(ToolOutput {
             content: format!("Created MR !{mr_iid}: {url}"),

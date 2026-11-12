@@ -21,15 +21,18 @@
 //! to the most recently focused one. While the sidebar has focus: arrows and
 //! `PageUp`/`PageDown` move, `Enter` acts on the row, `Left`/`Right` collapse
 //! and expand a section, `p` pins, `a` archives, `F2` renames, `/` filters,
+//! `u` marks unread/read, `f` forks, `D` deletes (after a confirmation),
 //! `Esc` clears the filter or returns focus to the input. On a project
 //! heading `n` starts a session in that project and `b` prefills the command
-//! that starts one in its own worktree at a branch.
+//! that starts one in its own worktree at a branch. `m`, `Shift+F10` or a
+//! right-click on a session row opens its context menu
+//! ([`crate::session_menu`]).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ragent_storage::{ProjectSessions, SessionCheckout, Storage, project_root};
+use ragent_storage::{ProjectSessions, SessionCheckout, SidebarSection, Storage, project_root};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -80,6 +83,12 @@ pub struct SidebarState {
     pub groups: Vec<ProjectSessions>,
     /// Cached ids of pinned sessions.
     pub pinned: HashSet<String>,
+    /// Cached ids of sessions marked unread in storage (SESSIONMENU FR-08).
+    pub unread: HashSet<String>,
+    /// Cached user-defined sections, in display order (SESSIONMENU FR-11).
+    pub sections: Vec<SidebarSection>,
+    /// Cached section id of each session placed in a section.
+    pub session_section: HashMap<String, String>,
     /// Cached ids of projects whose directory no longer exists.
     pub missing: HashSet<String>,
     /// Cached branch, worktree and request count of each session that has a
@@ -89,6 +98,12 @@ pub struct SidebarState {
     pub area: Rect,
     /// Whether the right border is being dragged to resize.
     pub dragging: bool,
+    /// The open session context menu, if any (spec SESSIONMENU).
+    pub menu: Option<crate::session_menu::SessionMenu>,
+    /// Test hook: when set, `Open in` records what it would start here
+    /// instead of starting it.
+    #[doc(hidden)]
+    pub launch_log: Option<Vec<crate::open_in::LaunchSpec>>,
 }
 
 impl Default for SidebarState {
@@ -105,10 +120,15 @@ impl Default for SidebarState {
             dirty: true,
             groups: Vec::new(),
             pinned: HashSet::new(),
+            unread: HashSet::new(),
+            sections: Vec::new(),
+            session_section: HashMap::new(),
             missing: HashSet::new(),
             checkouts: HashMap::new(),
             area: Rect::default(),
             dragging: false,
+            menu: None,
+            launch_log: None,
         }
     }
 }
@@ -248,8 +268,11 @@ pub fn refresh_if_dirty(app: &mut App) {
         app.storage.list_sessions_grouped(),
         app.storage.pinned_session_ids(),
         app.storage.session_checkouts(),
+        app.storage.unread_session_ids(),
+        app.storage.list_sections(),
+        app.storage.session_sections(),
     ) {
-        (Ok(groups), Ok(pinned), Ok(checkouts)) => {
+        (Ok(groups), Ok(pinned), Ok(checkouts), Ok(unread), Ok(sections), Ok(session_section)) => {
             app.sidebar.missing = groups
                 .iter()
                 .filter(|g| !Path::new(&g.project.worktree).exists())
@@ -258,9 +281,17 @@ pub fn refresh_if_dirty(app: &mut App) {
             app.sidebar.groups = groups;
             app.sidebar.pinned = pinned;
             app.sidebar.checkouts = checkouts;
+            app.sidebar.unread = unread;
+            app.sidebar.sections = sections;
+            app.sidebar.session_section = session_section;
             app.sidebar.dirty = false;
         }
-        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+        (Err(e), ..)
+        | (_, Err(e), ..)
+        | (_, _, Err(e), ..)
+        | (.., Err(e), _, _)
+        | (.., Err(e), _)
+        | (.., Err(e)) => {
             // Keep the stale rows and retry on the next frame.
             tracing::warn!(error = %e, "session sidebar refresh failed");
         }
@@ -321,85 +352,112 @@ fn display_title(id: &str, title: &str) -> String {
 ///
 /// The rows in display order, starting with [`SidebarRow::NewSession`].
 pub fn build_rows(app: &App) -> Vec<SidebarRow> {
+    let filter = app.sidebar.filter.to_lowercase();
+    let mut rows = vec![SidebarRow::NewSession, SidebarRow::Search];
+    for section in sections(app) {
+        push_section(&mut rows, app, &section, &filter);
+    }
+    rows
+}
+
+/// Collapse key of a user-defined section; NUL keeps it apart from paths.
+pub fn user_section_key(section_id: &str) -> String {
+    format!("\0section:{section_id}")
+}
+
+/// One sidebar section before filtering and collapse.
+struct SectionData<'a> {
+    /// Collapse key: a project root, the pinned key or a user section key.
+    key: String,
+    /// Heading text.
+    label: String,
+    /// Sessions, each with its project label (matched by the filter).
+    sessions: Vec<(&'a ragent_storage::SessionRow, String)>,
+    /// Whether the project directory no longer exists.
+    missing: bool,
+    /// Forge kind of the project's remote (`github`, `gitlab`), if any.
+    remote: Option<String>,
+    /// Whether the heading is shown when the section has no sessions.
+    show_empty: bool,
+}
+
+/// Every section in display order: `Pinned`, the user sections by name,
+/// then the projects (the launch project first, the rest by recency).
+/// A pinned session is listed only under `Pinned`, and a session in a user
+/// section only there.
+fn sections(app: &App) -> Vec<SectionData<'_>> {
     let state = &app.sidebar;
-    let filter = state.filter.to_lowercase();
     let labels = project_labels(&state.groups);
     let launch = project_root(&app.cwd_path.display().to_string());
-    let mut rows = vec![SidebarRow::NewSession, SidebarRow::Search];
-
-    let mut pinned: Vec<(&ragent_storage::SessionRow, &str)> = state
-        .groups
-        .iter()
-        .flat_map(|g| {
-            let label = labels.get(&g.project_id).map_or("", String::as_str);
-            g.sessions.iter().map(move |s| (s, label))
+    let all = || {
+        state.groups.iter().flat_map(|g| {
+            let label = labels.get(&g.project_id).cloned().unwrap_or_default();
+            g.sessions.iter().map(move |s| (s, label.clone()))
         })
+    };
+    let newest_first = |list: &mut Vec<(&ragent_storage::SessionRow, String)>| {
+        list.sort_by(|a, b| b.0.updated_at.cmp(&a.0.updated_at));
+    };
+    let mut out = Vec::new();
+
+    let mut pinned: Vec<_> = all()
         .filter(|(s, _)| state.pinned.contains(&s.id))
         .collect();
-    pinned.sort_by(|a, b| b.0.updated_at.cmp(&a.0.updated_at));
-    push_section(
-        &mut rows,
-        app,
-        Section {
-            key: PINNED_KEY,
-            label: "Pinned",
+    newest_first(&mut pinned);
+    out.push(SectionData {
+        key: PINNED_KEY.to_string(),
+        label: "Pinned".to_string(),
+        sessions: pinned,
+        missing: false,
+        remote: None,
+        show_empty: false,
+    });
+
+    let placed = |id: &str| state.session_section.get(id);
+    for section in &state.sections {
+        let mut sessions: Vec<_> = all()
+            .filter(|(s, _)| !state.pinned.contains(&s.id) && placed(&s.id) == Some(&section.id))
+            .collect();
+        newest_first(&mut sessions);
+        out.push(SectionData {
+            key: user_section_key(&section.id),
+            label: section.name.clone(),
+            sessions,
             missing: false,
             remote: None,
             show_empty: false,
-        },
-        &pinned,
-        &filter,
-    );
+        });
+    }
 
     let mut ordered: Vec<&ProjectSessions> = state.groups.iter().collect();
     // Stable sort: the launch project first, the rest keep recency order.
     ordered.sort_by_key(|g| g.project.worktree != launch);
     for group in ordered {
-        let label = labels.get(&group.project_id).map_or("", String::as_str);
-        let sessions: Vec<(&ragent_storage::SessionRow, &str)> = group
+        let label = labels.get(&group.project_id).cloned().unwrap_or_default();
+        let sessions = group
             .sessions
             .iter()
-            .filter(|s| !state.pinned.contains(&s.id))
-            .map(|s| (s, label))
+            .filter(|s| !state.pinned.contains(&s.id) && placed(&s.id).is_none())
+            .map(|s| (s, label.clone()))
             .collect();
-        push_section(
-            &mut rows,
-            app,
-            Section {
-                key: &group.project_id,
-                label,
-                missing: state.missing.contains(&group.project_id),
-                remote: group.project.remote.as_ref().map(|r| r.kind.as_str()),
-                // A project with no sessions is still listed, so a session
-                // can be started in it (spec `projects`).
-                show_empty: true,
-            },
-            &sessions,
-            &filter,
-        );
+        out.push(SectionData {
+            key: group.project_id.clone(),
+            label,
+            sessions,
+            missing: state.missing.contains(&group.project_id),
+            remote: group.project.remote.as_ref().map(|r| r.kind.clone()),
+            // A project with no sessions is still listed, so a session
+            // can be started in it (spec `projects`).
+            show_empty: true,
+        });
     }
-    rows
-}
-
-/// What [`push_section`] needs to know about one section.
-struct Section<'a> {
-    key: &'a str,
-    label: &'a str,
-    missing: bool,
-    remote: Option<&'a str>,
-    /// Whether the heading is shown when the section has no sessions.
-    show_empty: bool,
+    out
 }
 
 /// Appends one section (heading plus visible sessions) to `rows`.
-fn push_section(
-    rows: &mut Vec<SidebarRow>,
-    app: &App,
-    section: Section<'_>,
-    sessions: &[(&ragent_storage::SessionRow, &str)],
-    filter: &str,
-) {
-    let matching: Vec<&ragent_storage::SessionRow> = sessions
+fn push_section(rows: &mut Vec<SidebarRow>, app: &App, section: &SectionData<'_>, filter: &str) {
+    let matching: Vec<&ragent_storage::SessionRow> = section
+        .sessions
         .iter()
         .filter(|(s, project)| {
             filter.is_empty()
@@ -413,14 +471,14 @@ fn push_section(
         return;
     }
     // A filter shows every match, collapsed or not.
-    let collapsed = filter.is_empty() && app.sidebar.collapsed.contains(section.key);
+    let collapsed = filter.is_empty() && app.sidebar.collapsed.contains(&section.key);
     rows.push(SidebarRow::Header {
-        key: section.key.to_string(),
-        label: section.label.to_string(),
+        key: section.key.clone(),
+        label: section.label.clone(),
         count: matching.len(),
         collapsed,
         missing: section.missing,
-        remote: section.remote.map(str::to_string),
+        remote: section.remote.clone(),
     });
     if !collapsed {
         rows.extend(matching.into_iter().map(|s| {
@@ -463,15 +521,22 @@ pub fn relative_age(timestamp: &str, now: chrono::DateTime<chrono::Utc>) -> Stri
     }
 }
 
-/// Attention of the session `id` if it is open, else `Idle`.
-fn attention_of(app: &App, id: &str) -> Attention {
-    if app.session.session_id.as_deref() == Some(id) {
-        return app.session.attention();
+/// Attention of the session `id`: its open view's state, or `Unread` when
+/// an otherwise idle session is marked unread in storage.
+pub(crate) fn attention_of(app: &App, id: &str) -> Attention {
+    let live = if app.session.session_id.as_deref() == Some(id) {
+        app.session.attention()
+    } else {
+        app.background
+            .iter()
+            .find(|v| v.session_id.as_deref() == Some(id))
+            .map_or(Attention::Idle, |v| v.attention())
+    };
+    if live == Attention::Idle && app.sidebar.unread.contains(id) {
+        Attention::Unread
+    } else {
+        live
     }
-    app.background
-        .iter()
-        .find(|v| v.session_id.as_deref() == Some(id))
-        .map_or(Attention::Idle, |v| v.attention())
 }
 
 /// Marker and colour for an attention state (FR-04, ASCII only).
@@ -683,31 +748,15 @@ fn row_line(
 
 /// Session ids in sidebar order (pins first), ignoring collapse and filter.
 fn ordered_session_ids(app: &App) -> Vec<String> {
-    let state = &app.sidebar;
-    let launch = project_root(&app.cwd_path.display().to_string());
-    let mut pinned: Vec<&ragent_storage::SessionRow> = state
-        .groups
-        .iter()
-        .flat_map(|g| g.sessions.iter())
-        .filter(|s| state.pinned.contains(&s.id))
-        .collect();
-    pinned.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    let mut ordered: Vec<&ProjectSessions> = state.groups.iter().collect();
-    ordered.sort_by_key(|g| g.project.worktree != launch);
-    pinned
+    sections(app)
         .into_iter()
-        .chain(
-            ordered
-                .into_iter()
-                .flat_map(|g| g.sessions.iter())
-                .filter(|s| !state.pinned.contains(&s.id)),
-        )
-        .map(|s| s.id.clone())
+        .flat_map(|section| section.sessions)
+        .map(|(s, _)| s.id.clone())
         .collect()
 }
 
 /// Reports a failed session action on the status line.
-fn report(app: &mut App, result: Result<(), String>) {
+pub(crate) fn report(app: &mut App, result: Result<(), String>) {
     if let Err(message) = result {
         app.status = format!("session: {message}");
     }
@@ -816,6 +865,43 @@ fn toggle_section(app: &mut App, key: &str, collapse: Option<bool>) {
     app.sidebar.save(&app.storage);
 }
 
+/// Focuses session `id` and prefills `/session rename <title>` (`F2`).
+pub(crate) fn begin_rename(app: &mut App, id: &str) {
+    let title = match app.storage.get_session(id) {
+        Ok(row) => row.map(|r| r.title),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not read session title");
+            None
+        }
+    };
+    let text = format!("/session rename {}", title.unwrap_or_default());
+    begin_prefill(app, id, &text);
+}
+
+/// Focuses session `id`, puts `text` in the input with the cursor at its
+/// end, and returns focus to the input. Nothing is prefilled when the
+/// session cannot be focused.
+pub(crate) fn begin_prefill(app: &mut App, id: &str, text: &str) {
+    let result = app.switch_to_session(id);
+    let ok = result.is_ok();
+    report(app, result);
+    if ok {
+        app.session.input_cursor = text.chars().count();
+        app.session.input = text.to_string();
+        app.sidebar.focused = false;
+    }
+}
+
+/// Opens the context menu for the session under the cursor, if any.
+fn open_menu_at_cursor(app: &mut App) {
+    if let Some(id) = cursor_session(app) {
+        let state = &app.sidebar;
+        let line = state.cursor.saturating_sub(state.scroll);
+        let row_y = state.area.y + 1 + u16::try_from(line).unwrap_or(u16::MAX);
+        crate::session_menu::open(app, &id, row_y);
+    }
+}
+
 /// The session id under the cursor, if the cursor is on a session row.
 fn cursor_session(app: &App) -> Option<String> {
     match build_rows(app).get(app.sidebar.cursor) {
@@ -835,6 +921,9 @@ fn cursor_session(app: &App) -> Option<String> {
 ///
 /// `true` when the sidebar consumed the key.
 pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
+    if crate::session_menu::handle_key(app, key) {
+        return true;
+    }
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
@@ -941,23 +1030,31 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
         }
         KeyCode::F(2) => {
             if let Some(id) = cursor_session(app) {
-                let result = app.switch_to_session(&id);
-                let ok = result.is_ok();
-                report(app, result);
-                if ok {
-                    let title = match app.storage.get_session(&id) {
-                        Ok(row) => row.map(|r| r.title),
-                        Err(e) => {
-                            tracing::warn!(error = %e, "could not read session title");
-                            None
-                        }
-                    };
-                    let text = format!("/session rename {}", title.unwrap_or_default());
-                    app.session.input_cursor = text.chars().count();
-                    app.session.input = text;
-                    app.sidebar.focused = false;
-                }
+                begin_rename(app, &id);
             }
+        }
+        KeyCode::Char('m') => open_menu_at_cursor(app),
+        KeyCode::Char('u') => {
+            if let Some(id) = cursor_session(app) {
+                let result = app.toggle_session_unread(&id);
+                report(app, result);
+            }
+        }
+        KeyCode::Char('f') => {
+            if let Some(id) = cursor_session(app) {
+                let result = app.fork_session_by_id(&id);
+                report(app, result);
+                app.sidebar.focused = false;
+            }
+        }
+        KeyCode::Char('D') => {
+            if let Some(id) = cursor_session(app) {
+                let result = app.request_delete_session(&id);
+                report(app, result);
+            }
+        }
+        KeyCode::F(10) if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            open_menu_at_cursor(app);
         }
         KeyCode::Esc if !state.filter.is_empty() => {
             state.filter.clear();
@@ -980,6 +1077,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
 ///
 /// `true` when the sidebar consumed the event.
 pub fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
+    if crate::session_menu::handle_mouse(app, event) {
+        return true;
+    }
     let area = app.sidebar.area;
     if app.sidebar.dragging {
         match event.kind {
@@ -1014,6 +1114,18 @@ pub fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
                 if index < build_rows(app).len() {
                     app.sidebar.cursor = index;
                     activate_row(app, index);
+                }
+            }
+        }
+        MouseEventKind::Down(MouseButton::Right) => {
+            app.sidebar.focused = true;
+            let top = area.y + 1;
+            if event.row >= top && event.row < area.y + area.height - 1 {
+                let index = app.sidebar.scroll + usize::from(event.row - top);
+                if let Some(SidebarRow::Session { id, .. }) = build_rows(app).get(index) {
+                    let id = id.clone();
+                    app.sidebar.cursor = index;
+                    crate::session_menu::open(app, &id, event.row);
                 }
             }
         }

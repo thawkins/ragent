@@ -1252,6 +1252,16 @@ pub enum RowAction {
         /// The member name shown by the row, for the dialog body.
         name: String,
     },
+    /// Permanently delete a session and its sub-agent sessions (spec
+    /// SESSIONMENU FR-13).
+    DeleteSession {
+        /// The session the answer deletes.
+        session_id: String,
+        /// The session title (or `untitled <id>`), for the dialog body.
+        title: String,
+        /// How many sub-agent, teammate and skill sessions go with it.
+        children: usize,
+    },
 }
 
 /// The footer hints for the modal row-action dialog (spec `teamssetup` FR-028,
@@ -1286,6 +1296,7 @@ impl RowAction {
             Self::SuspendTeammate { .. } => " Suspend teammate? ".to_string(),
             Self::ShutdownTeammate { .. } => " Shut down teammate? ".to_string(),
             Self::ResumeTeammate { name, .. } => format!(" Resume {name}? "),
+            Self::DeleteSession { .. } => " Delete session? ".to_string(),
         }
     }
 
@@ -1316,6 +1327,16 @@ impl RowAction {
             // (spec `teamssetup` FR-029, FR-032).
             Self::ResumeTeammate { agent_id, name } => {
                 format!("{name} ({agent_id}) blocked -> resume")
+            }
+            Self::DeleteSession {
+                title, children, ..
+            } => {
+                let with = match children {
+                    0 => String::new(),
+                    1 => " and 1 sub-session".to_string(),
+                    n => format!(" and {n} sub-sessions"),
+                };
+                format!("{}{with}; cannot be undone", short_suffix(title, 40))
             }
         }
     }

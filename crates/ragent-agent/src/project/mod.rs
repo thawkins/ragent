@@ -23,7 +23,10 @@ use anyhow::Result;
 use ragent_storage::{ProjectRow, Storage};
 use serde::{Deserialize, Serialize};
 
-pub use remote::{ProjectRemote, RemoteKind, detect_remote, parse_remote_url, split_instance_url};
+pub use remote::{
+    ProjectRemote, RemoteKind, RequestNoun, detect_remote, detect_remote_with_hosts,
+    github_host_entry, parse_remote_url, parse_remote_url_with_hosts, split_instance_url,
+};
 
 use crate::agent::ModelRef;
 use crate::event::{Event, EventBus};
@@ -105,6 +108,7 @@ pub fn parse_model_ref(text: &str) -> Result<ModelRef> {
 pub struct ProjectManager {
     storage: Arc<Storage>,
     event_bus: Arc<EventBus>,
+    github_hosts: Vec<ragent_config::GitHubHost>,
 }
 
 impl std::fmt::Debug for ProjectManager {
@@ -117,7 +121,19 @@ impl ProjectManager {
     /// Creates a manager over the given storage and event bus.
     #[must_use]
     pub const fn new(storage: Arc<Storage>, event_bus: Arc<EventBus>) -> Self {
-        Self { storage, event_bus }
+        Self {
+            storage,
+            event_bus,
+            github_hosts: Vec::new(),
+        }
+    }
+
+    /// Recognises remotes on these GitHub Enterprise Server hosts
+    /// (`vcs.github.hosts`) as GitHub.
+    #[must_use]
+    pub fn with_github_hosts(mut self, hosts: Vec<ragent_config::GitHubHost>) -> Self {
+        self.github_hosts = hosts;
+        self
     }
 
     fn changed(&self, project_id: &str) {
@@ -162,7 +178,11 @@ impl ProjectManager {
             .storage
             .get_project(project_id)?
             .ok_or_else(|| anyhow::anyhow!("project not found: {project_id}"))?;
-        let detected = detect_remote(Path::new(&row.worktree), self.gitlab_host().as_deref());
+        let detected = detect_remote_with_hosts(
+            Path::new(&row.worktree),
+            self.gitlab_host().as_deref(),
+            &self.github_hosts,
+        );
         if detected.is_none() {
             tracing::debug!(project = %row.name, "no GitHub or GitLab remote detected");
         }

@@ -225,6 +225,8 @@ mod test_event_handler_more;
 mod test_event_swarm_research_deep;
 #[path = "test_force_cleanup_modal.rs"]
 mod test_force_cleanup_modal;
+#[path = "test_open_in.rs"]
+mod test_open_in;
 #[path = "test_subagent_lifecycle_review.rs"]
 mod test_subagent_lifecycle_review;
 
@@ -607,6 +609,8 @@ mod test_project_base_model;
 mod test_project_command;
 #[path = "test_project_services.rs"]
 mod test_project_services;
+#[path = "test_session_menu.rs"]
+mod test_session_menu;
 #[path = "test_sessions_sidebar.rs"]
 mod test_sessions_sidebar;
 #[path = "test_slash_advertised_forms.rs"]
