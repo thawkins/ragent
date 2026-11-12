@@ -222,6 +222,45 @@ async fn test_gemini_chat_emits_usage_once_per_response() {
     assert!(usage[0].0 < finish_at, "usage is emitted before Finish");
 }
 
+/// Usage metadata that arrives in a frame AFTER the `finishReason` frame is
+/// merged into the single usage event, which still precedes `Finish`.
+#[tokio::test]
+async fn test_gemini_chat_merges_usage_arriving_after_finish() {
+    let body = concat!(
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"A\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":31,\"candidatesTokenCount\":4}}\n",
+        "{\"usageMetadata\":{\"promptTokenCount\":31,\"candidatesTokenCount\":9}}\n",
+    )
+    .to_string();
+    let url = spawn_gemini_body(body).await;
+    let client = GeminiClient::new("k", &url);
+    let events: Vec<StreamEvent> = client
+        .chat(gemini_request())
+        .await
+        .expect("chat")
+        .collect()
+        .await;
+    let usage: Vec<(usize, u64, u64)> = events
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| match e {
+            StreamEvent::Usage {
+                input_tokens,
+                output_tokens,
+            } => Some((i, *input_tokens, *output_tokens)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(usage.len(), 1, "one usage event per response: {events:?}");
+    assert_eq!((usage[0].1, usage[0].2), (31, 9), "final merged totals");
+    let finishes: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| matches!(e, StreamEvent::Finish { .. }).then_some(i))
+        .collect();
+    assert_eq!(finishes.len(), 1, "exactly one Finish");
+    assert!(usage[0].0 < finishes[0], "usage is emitted before Finish");
+}
+
 /// A stream with usage but no `finishReason` still reports usage once, at the
 /// end of the stream.
 #[tokio::test]

@@ -552,10 +552,13 @@ impl LlmClient for GeminiClient {
             // retry budget belongs to the line, not the chunk.
             let mut malformed_retries: u32 = 0;
             // Gemini repeats `usageMetadata` on every chunk as running totals.
-            // Keep the latest and emit ONE `Usage` per response (before
-            // `Finish`, or at end of stream) so consumers that sum usage
-            // events do not count the prompt once per chunk.
+            // Keep the latest and emit ONE `Usage` per response at end of
+            // stream (before `Finish`) so consumers that sum usage events do
+            // not count the prompt once per chunk.
             let mut pending_usage: Option<(u64, u64)> = None;
+            // The finish reason, held until end of stream so usage that
+            // arrives after the `finishReason` frame is still merged first.
+            let mut pending_finish: Option<FinishReason> = None;
 
             futures::pin_mut!(stream);
 
@@ -718,10 +721,10 @@ impl LlmClient for GeminiClient {
                                     "OTHER" => FinishReason::Stop,
                                     _ => FinishReason::Stop,
                                 };
-                                if let Some((input_tokens, output_tokens)) = pending_usage.take() {
-                                    yield StreamEvent::Usage { input_tokens, output_tokens };
-                                }
-                                yield StreamEvent::Finish { reason };
+                                // Held until end of stream: a usage-only frame
+                                // may still follow, and usage must go out once,
+                                // with the final totals, before `Finish`.
+                                pending_finish = Some(reason);
                             }
                         }
                     }
@@ -738,18 +741,20 @@ impl LlmClient for GeminiClient {
                         }
             }
 
-            // Usage not yet emitted (no finishReason frame, or usage arriving
-            // after it) goes out once here.
-            if let Some((input_tokens, output_tokens)) = pending_usage.take() {
-                yield StreamEvent::Usage { input_tokens, output_tokens };
-            }
-
             // F2: end-of-stream flush. A `functionCall` deferred after the
             // finishReason flush (or in a stream that ends without a finishReason
             // frame) was previously dropped here. Emit any remaining buffered calls;
             // the accumulator drains its buffer, so no call can be emitted twice.
             for event in acc.flush_deferred() {
                 yield event;
+            }
+
+            // The final usage totals go out once, then the held `Finish`.
+            if let Some((input_tokens, output_tokens)) = pending_usage.take() {
+                yield StreamEvent::Usage { input_tokens, output_tokens };
+            }
+            if let Some(reason) = pending_finish.take() {
+                yield StreamEvent::Finish { reason };
             }
 
             // Ensure we emit a finish event if not already done
