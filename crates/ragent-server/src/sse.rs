@@ -366,6 +366,7 @@ const fn event_type_name(event: &Event) -> &'static str {
     match event {
         Event::SessionCreated { .. } => "session_created",
         Event::SessionUpdated { .. } => "session_updated",
+        Event::ProjectUpdated { .. } => "project_updated",
         Event::MessageStart { .. } => "message_start",
         Event::TextDelta { .. } => "text_delta",
         Event::ReasoningDelta { .. } => "reasoning_delta",
@@ -462,6 +463,9 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
     let data = match event {
         Event::SessionCreated { session_id } | Event::SessionUpdated { session_id } => {
             to_data(&SessionOnly { session_id })
+        }
+        Event::ProjectUpdated { project_id } => {
+            to_data(&serde_json::json!({ "project_id": project_id }))
         }
 
         Event::MessageStart {

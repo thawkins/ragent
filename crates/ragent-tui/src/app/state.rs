@@ -948,6 +948,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Sessions: /session [list] | new | switch | close | rename | pin | archive",
     },
     SlashCommandDef {
+        trigger: "project",
+        description: "Projects: /project [show] | list | add | rename | model | refresh | prune | remove",
+    },
+    SlashCommandDef {
         trigger: "resume",
         description: "Resume the agent from where it was halted (/resume help)",
     },
@@ -3050,6 +3054,17 @@ pub struct App {
     pub background: super::SessionRegistry,
     /// Left-hand session sidebar (spec MULTISESSION, M5).
     pub sidebar: crate::sessions_sidebar::SidebarState,
+    /// Pull/merge request counts per session branch (spec `projects`).
+    pub request_counts: Arc<ragent_agent::project::requests::PullRequestCounts>,
+    /// Sessions whose worktrees were created on a background task and are
+    /// waiting to be focused (spec `projects`).
+    pub pending_project_sessions:
+        Arc<std::sync::Mutex<Vec<crate::app::projects::PendingProjectSession>>>,
+    /// When the poll loop last looked for projects with due request counts.
+    pub last_request_sweep: Option<std::time::Instant>,
+    /// Where session worktrees are created; `None` uses the ragent data
+    /// directory. Tests point this at `target/temp/`.
+    pub worktree_root: Option<std::path::PathBuf>,
     /// Parked code indexes of open projects other than the focused one
     /// (spec MULTISESSION M8).
     pub project_services: std::collections::HashMap<std::path::PathBuf, super::ProjectServices>,

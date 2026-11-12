@@ -39,6 +39,7 @@ mod model_picker_cache;
 pub use self::model_picker_cache::ModelPickerRowsCache;
 
 mod project_services;
+pub(crate) mod projects;
 pub mod prompt;
 mod research;
 mod reverse;

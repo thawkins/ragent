@@ -15,7 +15,9 @@ pub mod storage;
 
 // Re-export commonly used types
 pub use activity_log::{ActivityLog, AppendError};
-pub use project::project_root;
+pub use project::{
+    ProjectRemoteRow, ProjectRow, SessionCheckout, default_project_name, project_root,
+};
 pub use snapshot::{IncrementalSnapshot, Snapshot};
 pub use storage::{
     BackgroundTaskRow, ConversationStats, CronEventRow, CycleError, InitiativeMilestone,

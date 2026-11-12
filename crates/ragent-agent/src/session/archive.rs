@@ -60,6 +60,10 @@ pub struct ArchiveManifest {
     pub session_title: String,
     /// Session working directory.
     pub session_directory: String,
+    /// The project the session belonged to (spec `projects`). Absent in
+    /// archives written before projects were stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ArchiveProject>,
     /// Timestamp when the archive was created (ISO-8601).
     pub created_at: String,
     /// Number of messages in the transcript.
@@ -74,6 +78,22 @@ pub struct ArchiveManifest {
     pub files: HashMap<String, String>,
     /// Sensitivity warning about transcript content.
     pub sensitivity_warning: String,
+}
+
+/// The project a session belonged to when it was exported.
+///
+/// Informational: it tells the reader where the session came from. On
+/// import the session is attached to the project of the directory it is
+/// imported into, not to this one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchiveProject {
+    /// The project's display name.
+    pub name: String,
+    /// The project's remote, if it had a recognised one. The URL carries no
+    /// credentials.
+    pub remote: Option<crate::project::ProjectRemote>,
+    /// The branch of the session's own worktree, if it had one.
+    pub branch: Option<String>,
 }
 
 /// Session archive export configuration.
@@ -304,12 +324,29 @@ pub fn export_session_archive(
         }
     }
 
+    // The project and branch the session belonged to.
+    let project = match storage.get_project(&session.project_id)? {
+        Some(row) => {
+            let branch = storage
+                .session_checkout(&session.id)?
+                .and_then(|checkout| checkout.branch);
+            let project = crate::project::Project::from(row);
+            Some(ArchiveProject {
+                name: project.name,
+                remote: project.remote,
+                branch,
+            })
+        }
+        None => None,
+    };
+
     // Create manifest
     let manifest = ArchiveManifest {
         manifest_version: MANIFEST_VERSION,
         session_id: session.id.clone(),
         session_title: session.title.clone(),
         session_directory: session.directory,
+        project,
         created_at: Utc::now().to_rfc3339(),
         message_count: messages.len(),
         trigger_count,
@@ -363,6 +400,9 @@ impl Default for ImportConfig {
 pub struct ImportResult {
     /// Session ID that was created/updated.
     pub session_id: String,
+    /// The project the imported session was attached to: the project of the
+    /// directory it was imported into (spec `projects`).
+    pub project_id: String,
     /// Number of messages imported.
     pub messages_imported: usize,
     /// Number of trigger rules imported.
@@ -496,6 +536,11 @@ pub async fn import_session_archive(
     // Generate a new session ID and create it
     let session_id = uuid::Uuid::new_v4().to_string();
     storage.create_session(&session_id, &session_dir.to_string_lossy())?;
+    // Storage attached the session to the project of `session_dir`.
+    let project_id = storage
+        .get_session(&session_id)?
+        .map(|row| row.project_id)
+        .unwrap_or_default();
 
     let mut imported_count = 0u64;
     for msg in &messages {
@@ -590,6 +635,7 @@ pub async fn import_session_archive(
 
     Ok(ImportResult {
         session_id,
+        project_id,
         messages_imported: imported_count as usize,
         triggers_imported,
         cron_jobs_imported,

@@ -60,7 +60,7 @@ export class RagentClient {
     return this.request<unknown>('GET', `/sessions`, true);
   }
 
-  /** POST /sessions - Create a session for a project directory */
+  /** POST /sessions - Create a session for a directory, or in a project (optionally on its own branch worktree) */
   async postSessions(body: unknown): Promise<unknown> {
     return this.request<unknown>('POST', `/sessions`, body, true);
   }
@@ -73,6 +73,31 @@ export class RagentClient {
   /** DELETE /sessions/{id} - Archive a session */
   async deleteSessionsId(id: string): Promise<unknown> {
     return this.request<unknown>('DELETE', `/sessions/${encodeURIComponent(id)}`, true);
+  }
+
+  /** GET /projects - List projects */
+  async getProjects(): Promise<unknown> {
+    return this.request<unknown>('GET', `/projects`, true);
+  }
+
+  /** POST /projects - Register the project that contains a directory */
+  async postProjects(body: unknown): Promise<unknown> {
+    return this.request<unknown>('POST', `/projects`, body, true);
+  }
+
+  /** GET /projects/{id} - Fetch one project */
+  async getProjectsId(id: string): Promise<unknown> {
+    return this.request<unknown>('GET', `/projects/${encodeURIComponent(id)}`, true);
+  }
+
+  /** DELETE /projects/{id} - Remove a project with no live sessions from the list */
+  async deleteProjectsId(id: string): Promise<unknown> {
+    return this.request<unknown>('DELETE', `/projects/${encodeURIComponent(id)}`, true);
+  }
+
+  /** GET /projects/{id}/sessions - List a project's sessions */
+  async getProjectsIdSessions(id: string): Promise<unknown> {
+    return this.request<unknown>('GET', `/projects/${encodeURIComponent(id)}/sessions`, true);
   }
 
   /** GET /sessions/{id}/messages - List a session's messages */

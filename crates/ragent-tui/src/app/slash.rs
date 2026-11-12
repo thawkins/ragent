@@ -5966,6 +5966,17 @@ Tools: `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`.\n";
                 // Reload directory lists alongside other config
                 ragent_agent::dir_lists::load_from_config();
             }
+            "project" => {
+                if is_help_args(args) {
+                    self.append_assistant_text(&crate::app::helpers::from_cmd(
+                        "project help",
+                        crate::app::projects::PROJECT_HELP,
+                    ));
+                    self.status = "project: help".to_string();
+                    return;
+                }
+                self.handle_project_command(args);
+            }
             "session" => {
                 if is_help_args(args) {
                     self.append_assistant_text(&crate::app::helpers::from_cmd(
@@ -11283,6 +11294,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 std::collections::HashMap::new(),
                             )),
                             research_root: std::sync::Arc::new(self.cwd_path.join("research")),
+                            worktree_root: std::sync::Arc::new(self.session_worktree_root()),
                         };
 
                         let addr_clone = addr.clone();

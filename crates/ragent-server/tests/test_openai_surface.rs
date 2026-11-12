@@ -232,6 +232,10 @@ fn state_with(replies: Vec<Reply>, token: &str) -> (AppState, Arc<EventBus>) {
         coordinator: None,
         research_runs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         research_root: std::sync::Arc::new(crate::research_sandbox::isolated_research_root()),
+        // A sibling of the per-test research root, under `target/temp/`.
+        worktree_root: std::sync::Arc::new(
+            crate::research_sandbox::isolated_research_root().join("../worktrees"),
+        ),
     };
     (state, event_bus)
 }

@@ -209,7 +209,11 @@ async fn test_multisession_session_in_other_directory_moves_the_working_director
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the cwd
 async fn test_multisession_new_session_in_a_permitted_path() {
+    // The permitted roots start from the process cwd, which other tests in
+    // this binary swap under the same lock.
+    let _cwd = crate::global_env_lock();
     let (mut app, _a, _b) = app_with_two_sessions().await;
     let sub = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
@@ -331,6 +335,8 @@ async fn test_multisession_archive_then_unarchive_by_suffix() {
 async fn test_multisession_list_all_groups_by_project() {
     let (mut app, _a, _b) = app_with_two_sessions().await;
     let project = ragent_storage::project_root(&app.cwd_path.display().to_string());
+    let name = ragent_storage::default_project_name(&project);
+    let project = format!("{name} - `{project}`");
 
     app.execute_slash_command("/session list --all").await;
 
@@ -425,7 +431,12 @@ async fn test_multisession_auto_title_keeps_a_user_title() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the env
 async fn test_multisession_background_attention_fires_notification_hook() {
+    // The injected config is only honoured while no `RAGENT_CONFIG*`
+    // override is set, and other tests in this binary set those under the
+    // same lock.
+    let _env = crate::global_env_lock();
     let out = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/temp/multisession_notify");
     let _ = std::fs::remove_dir_all(&out); // INTENTIONAL: may not exist yet

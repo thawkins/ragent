@@ -2026,7 +2026,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | Teammate strip | One row of pills under the status bar, one per active teammate (status glyph, clipped name, focused highlight, `Alt+^v:cycle` hint); omitted when no team is active (spec `agentui` FR-027) |
 | Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` status glyphs, and a background-shell section; openable from the keyboard with `Alt+A` (the chord resolves to `InputAction::ToggleAgentsWindow` and calls the same `App::toggle_agents_window` the button click does, so both share one visibility path, one no-subject no-op and one redraw flag - spec `agentssetup` FR-022); keyboard-first: a block cursor (`Up`/`Down`/`PgUp`/`PgDn`) selects a row, `Space` toggles suspend/resume, `Del` arms the kill confirmation, `Enter` opens the row's output view, and clicking a row selects it; the FR-077 key legend sits in the footer (spec `agentui` FR-006..FR-016) |
 | Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; the block cursor plus `Enter`/`Space`/`Del` drive focus, suspend and shutdown; clicking a teammate selects it (spec `agentui` FR-017..FR-026) |
-| Session sidebar | Left-hand list of every session: `+ New session`, `Pinned`, then one section per project (git work tree of the session directory, launch project first); attention markers `!` waiting, `*` running, `x` failed, `o` unread; relative age; filter, per-project collapse, drag resize, `Alt+S` toggle; hidden below 100 columns (spec `MULTISESSION` M5) |
+| Session sidebar | Left-hand list of every session: `+ New session`, `/ Search`, `Pinned`, then one section per project (launch project first; projects with no sessions are listed too). A project heading shows the project name, a chevron (`v` open, `>` collapsed) and `[github]` / `[gitlab]` when the remote is known. A session row shows the title, relative age, a branch marker `Y` with the count of pull/merge requests for the session's branch, and a right-aligned attention marker (`!` waiting, `*` running, `x` failed, `o` unread). Filter, per-project collapse, drag resize, `Alt+S` toggle; hidden below 100 columns (specs `MULTISESSION` M5, `projects`) |
 | Input | Command-line with slash-command autocomplete |
 | Permission dialog | Modal approval dialog with live countdown (120 s) |
 | Question dialog | Modal user question (free-text or multiple-choice) |
@@ -2056,12 +2056,73 @@ project root; a project's own config still cannot add servers). A
 project's services are released when its last open session closes. Design
 and milestones: `docs/plans/MULTISESSION.md`.
 
+### 6.1b Projects
+
+A project is a stored record (`projects` table, schema 6;
+`ragent_agent::project::Project`) with a display name, the canonical root of
+its local checkout (`worktree`), an optional base provider/model, and an
+optional description of the remote the checkout came from. Every session
+belongs to one: `sessions.project_id` holds the project's id. A session is
+attached when it is created: a child session (sub-agent, teammate, forked
+skill) takes its parent's project; any other session takes the project
+rooted at the git work tree that contains its directory, which is created
+on first use. Design and tasks: `specs/projects/PLAN.md`.
+
+- **Remote.** Detected once from the `origin` remote, and again on
+  `/project refresh`. `github.com` is GitHub; `gitlab.com`, a host whose
+  first label is `gitlab`, or the configured GitLab instance is GitLab. Any
+  other host leaves the project without a remote description. Credentials
+  embedded in the URL are never stored.
+- **Base model.** A new session starts on its project's base model when one
+  is set, otherwise on the focused session's model. `/model` changes only
+  the focused session; `/project model` changes the project.
+- **Session worktree.** `/session new --branch <branch>` (or `POST
+  /sessions` with `project_id` and `branch`) creates a `git worktree` of the
+  project's repository under the ragent data directory
+  (`worktrees/<project>-<id>/<branch>`) and runs the session there. The
+  branch is an existing local branch, else the remote's branch of that name
+  (tracked), else a new branch from the remote's default branch (or `HEAD`).
+  The session still belongs to the owning project. In the TUI and over
+  HTTP, a session can only be started in a project whose checkout is inside
+  the launch directory or a `dirs.allowed_roots` entry, the same rule as
+  `/session new <path>` (SEC-062); the check is on the checkout, so an
+  allowed subdirectory does not open the repository above it. The worktree
+  is created on a blocking task, because it may fetch from the remote; the session is
+  focused when that finishes and a failure is reported on the status line.
+  Archiving a session leaves its worktree on disk; `/project prune` removes
+  the worktrees of archived sessions that have no uncommitted changes,
+  without `--force`. A worktree is kept while any live session owns it or
+  works in it or in a subdirectory of it. Sessions that worked in a removed
+  worktree are moved to the project worktree and keep their branch, so an
+  unarchived session still has a directory that exists.
+  Each checkout keeps its own project services (code index, MCP client),
+  because the index must describe the files of that branch.
+- **Pull/merge request counts.** The number beside a session's branch
+  marker is the count of pull requests (GitHub) or merge requests (GitLab),
+  in any state, whose source branch is the session's branch; requests from
+  forks are not counted. It is fetched with one paginated list call per
+  project on a background task: when the sidebar is visible, at most every
+  5 minutes per project, sooner (after 1 minute) when a turn ends or the
+  project is focused, and on `/project refresh`. Only one refresh of a
+  project runs at a time. A rate limit doubles the interval up to 1 hour.
+  At most 1,000 requests are read per refresh; for a larger repository the
+  result is partial, so it only raises counts for the branches it saw and
+  leaves every other branch's last known count alone. The last known count is stored in
+  `sessions.pr_count`; a failure leaves it unchanged. A GitLab token is only
+  sent to the configured GitLab instance.
+- **Surfaces.** `/project`, `ragent project list|show|add|remove`,
+  `ragent session list [--project <name>] [--json]` (grouped by project),
+  and the `/projects` HTTP routes. Session archives record the project
+  name, remote and branch; an imported session is attached to the project
+  of the directory it is imported into.
+
 ### 6.2 Slash Commands
 
 | Command | Description |
 |---------|-------------|
 | `/quit` / `/exit` | Exit ragent |
-| `/session` | Multiple sessions: `[list] \| list --all \| list --archived \| new [path] \| switch <id-or-title> \| close \| rename <title> \| pin \| archive \| unarchive <id-or-title> \| help` (spec `MULTISESSION`) |
+| `/session` | Multiple sessions: `[list] \| list --all \| list --archived \| new [path] [--project <name>] [--branch <branch>] \| switch <id-or-title> \| close \| rename <title> \| pin \| archive \| unarchive <id-or-title> \| help` (specs `MULTISESSION`, `projects`) |
+| `/project` | Projects: `[show [name]] \| list \| add <path-or-url> \| rename <name> \| model <provider>/<model>\|current\|clear \| refresh \| prune \| remove <name> \| help` (spec `projects`) |
 | `/provider` | Open provider setup dialog (always allows editing the stored key) |
 | `/model` | Select model (jumps to model list when a provider is already configured) |
 | `/agent` | Select agent |

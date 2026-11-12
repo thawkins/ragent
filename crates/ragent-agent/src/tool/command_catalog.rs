@@ -87,6 +87,9 @@ const SESSION_SUBS: &[&str] = &[
     "unarchive",
     "help",
 ];
+const PROJECT_SUBS: &[&str] = &[
+    "show", "list", "add", "rename", "model", "refresh", "prune", "remove", "help",
+];
 const HELP_ONLY: &[&str] = &["help"];
 const BACKEND_SUBS: &[&str] = &["show", "local", "docker", "podman", "remote", "help"];
 const AUTOMATION_SUBS: &[&str] = &["list", "runs", "run", "help"];
@@ -558,6 +561,12 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
         trigger: "session",
         description: "Sessions: /session [list] | new | switch | close | rename | pin | archive",
         subcommands: SESSION_SUBS,
+        flags: EMPTY,
+    },
+    CommandCatalogEntry {
+        trigger: "project",
+        description: "Projects: /project [show] | list | add | rename | model | refresh | prune | remove",
+        subcommands: PROJECT_SUBS,
         flags: EMPTY,
     },
     CommandCatalogEntry {

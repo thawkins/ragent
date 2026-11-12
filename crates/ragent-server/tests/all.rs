@@ -30,6 +30,8 @@ mod test_ms6_hardening;
 mod test_openai_surface;
 #[path = "test_openapi_document.rs"]
 mod test_openapi_document;
+#[path = "test_projects_routes.rs"]
+mod test_projects_routes;
 #[path = "test_research_routes.rs"]
 mod test_research_routes;
 #[path = "test_routes_handlers.rs"]

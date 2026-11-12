@@ -108,7 +108,7 @@ pub const ROUTES: &[Operation] = &[
     Operation {
         path: "/sessions",
         method: "POST",
-        summary: "Create a session for a project directory",
+        summary: "Create a session for a directory, or in a project (optionally on its own branch worktree)",
         tag: "sessions",
         auth: true,
         body_schema: Some("CreateSessionRequest"),
@@ -133,6 +133,56 @@ pub const ROUTES: &[Operation] = &[
         auth: true,
         body_schema: None,
         response_schema: None,
+        sse: false,
+    },
+    Operation {
+        path: "/projects",
+        method: "GET",
+        summary: "List projects",
+        tag: "projects",
+        auth: true,
+        body_schema: None,
+        response_schema: Some("ProjectList"),
+        sse: false,
+    },
+    Operation {
+        path: "/projects",
+        method: "POST",
+        summary: "Register the project that contains a directory",
+        tag: "projects",
+        auth: true,
+        body_schema: Some("CreateProjectRequest"),
+        response_schema: Some("Project"),
+        sse: false,
+    },
+    Operation {
+        path: "/projects/{id}",
+        method: "GET",
+        summary: "Fetch one project",
+        tag: "projects",
+        auth: true,
+        body_schema: None,
+        response_schema: Some("Project"),
+        sse: false,
+    },
+    Operation {
+        path: "/projects/{id}",
+        method: "DELETE",
+        summary: "Remove a project with no live sessions from the list",
+        tag: "projects",
+        auth: true,
+        body_schema: None,
+        response_schema: None,
+        sse: false,
+    },
+    Operation {
+        path: "/projects/{id}/sessions",
+        method: "GET",
+        summary: "List a project's sessions",
+        tag: "projects",
+        auth: true,
+        body_schema: None,
+        response_schema: Some("SessionList"),
         sse: false,
     },
     Operation {
@@ -665,12 +715,59 @@ fn schemas() -> Value {
             "properties": {
                 "id": { "type": "string" },
                 "title": { "type": "string" },
+                "project_id": { "type": "string" },
                 "directory": { "type": "string" },
+                "branch": { "type": ["string", "null"] },
+                "worktree": { "type": ["string", "null"] },
                 "created_at": { "type": "string" },
                 "updated_at": { "type": "string" },
                 "summary": { "type": ["string", "null"] }
             },
-            "required": ["id", "title", "directory", "created_at", "updated_at"]
+            "required": ["id", "title", "project_id", "directory", "created_at", "updated_at"]
+        },
+        "ProjectRemote": {
+            "type": "object",
+            "properties": {
+                "kind": { "type": "string", "enum": ["github", "gitlab"] },
+                "host": { "type": "string" },
+                "path": { "type": "string" },
+                "url": { "type": "string" },
+                "remote_name": { "type": "string" },
+                "default_branch": { "type": ["string", "null"] }
+            },
+            "required": ["kind", "host", "path", "url", "remote_name"]
+        },
+        "ModelRef": {
+            "type": "object",
+            "properties": {
+                "provider_id": { "type": "string" },
+                "model_id": { "type": "string" }
+            },
+            "required": ["provider_id", "model_id"]
+        },
+        "Project": {
+            "type": "object",
+            "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" },
+                "worktree": { "type": "string" },
+                "base_model": {
+                    "anyOf": [{ "$ref": "#/components/schemas/ModelRef" }, { "type": "null" }]
+                },
+                "remote": {
+                    "anyOf": [{ "$ref": "#/components/schemas/ProjectRemote" }, { "type": "null" }]
+                },
+                "created_at": { "type": "string" },
+                "updated_at": { "type": "string" },
+                "archived_at": { "type": ["string", "null"] }
+            },
+            "required": ["id", "name", "worktree", "created_at", "updated_at"]
+        },
+        "ProjectList": { "type": "array", "items": { "$ref": "#/components/schemas/Project" } },
+        "CreateProjectRequest": {
+            "type": "object",
+            "properties": { "directory": { "type": "string" } },
+            "required": ["directory"]
         },
         "SessionList": { "type": "array", "items": { "$ref": "#/components/schemas/Session" } },
         "Message": {
@@ -684,8 +781,12 @@ fn schemas() -> Value {
         "MessageList": { "type": "array", "items": { "$ref": "#/components/schemas/Message" } },
         "CreateSessionRequest": {
             "type": "object",
-            "properties": { "directory": { "type": "string" } },
-            "required": ["directory"]
+            "description": "Give `directory`, or `project_id` with an optional `branch`.",
+            "properties": {
+                "directory": { "type": "string" },
+                "project_id": { "type": "string" },
+                "branch": { "type": "string" }
+            }
         },
         "SendMessageRequest": {
             "type": "object",

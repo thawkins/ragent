@@ -209,6 +209,13 @@ impl App {
             },
             background: crate::app::SessionRegistry::default(),
             sidebar,
+            request_counts: Arc::new(ragent_agent::project::requests::PullRequestCounts::new(
+                Arc::clone(&storage),
+                Arc::clone(&event_bus),
+            )),
+            pending_project_sessions: Arc::new(std::sync::Mutex::new(Vec::new())),
+            last_request_sweep: None,
+            worktree_root: None,
             project_services: std::collections::HashMap::new(),
             bench_origin_session: None,
             newproj_origin_session: None,

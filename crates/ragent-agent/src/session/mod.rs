@@ -117,6 +117,14 @@ pub struct Session {
     pub summary: Option<SessionSummary>,
     /// Config file path used when this session was created (for validation on resume).
     pub config_path: Option<PathBuf>,
+    /// Branch of the session-owned git worktree, if the session has one
+    /// (spec `projects`).
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// Session-owned git worktree; `None` when the session runs in the
+    /// project worktree.
+    #[serde(default)]
+    pub worktree: Option<PathBuf>,
 }
 
 /// Aggregate statistics summarizing the changes made during a session.
@@ -285,12 +293,18 @@ impl SessionManager {
         let directory_text = directory.display().to_string();
         self.storage
             .create_session_with(&id, &directory_text, parent_id, kind)?;
+        // Storage attached the session to a project record (its parent's, or
+        // the one its directory resolves to); report that id.
+        let project_id = self
+            .storage
+            .get_session(&id)?
+            .map(|row| row.project_id)
+            .unwrap_or_default();
 
         let session = Session {
             id: id.clone(),
             title: String::new(),
-            // Same value storage records for the row (MULTISESSION FR-02).
-            project_id: ragent_storage::project_root(&directory_text),
+            project_id,
             directory,
             parent_id: parent_id.map(str::to_string),
             version: 1,
@@ -300,10 +314,59 @@ impl SessionManager {
             archived_at: None,
             summary: None,
             config_path: None,
+            branch: None,
+            worktree: None,
         };
         self.event_bus
             .publish(Event::SessionCreated { session_id: id });
 
+        Ok(session)
+    }
+
+    /// Creates an interactive session in a named project (spec `projects`).
+    ///
+    /// # Arguments
+    ///
+    /// * `project_id` - the owning project; must exist.
+    /// * `directory` - the session's working directory: the project
+    ///   worktree, or the session's own worktree.
+    /// * `checkout` - the session's branch and worktree, when it owns one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the project does not exist or the insert fails.
+    pub fn create_session_in_project(
+        &self,
+        project_id: &str,
+        directory: PathBuf,
+        checkout: &ragent_storage::SessionCheckout,
+    ) -> anyhow::Result<Session> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+        self.storage.create_session_in_project(
+            &id,
+            project_id,
+            &directory.display().to_string(),
+            checkout,
+        )?;
+        let session = Session {
+            id: id.clone(),
+            title: String::new(),
+            project_id: project_id.to_string(),
+            directory,
+            parent_id: None,
+            version: 1,
+            format_version: 1,
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+            summary: None,
+            config_path: None,
+            branch: checkout.branch.clone(),
+            worktree: checkout.worktree.as_ref().map(PathBuf::from),
+        };
+        self.event_bus
+            .publish(Event::SessionCreated { session_id: id });
         Ok(session)
     }
 
@@ -330,8 +393,15 @@ impl SessionManager {
     /// assert!(found.is_some());
     /// ```
     pub fn get_session(&self, id: &str) -> anyhow::Result<Option<Session>> {
-        let row = self.storage.get_session(id)?;
-        Ok(row.map(Into::into))
+        let Some(row) = self.storage.get_session(id)? else {
+            return Ok(None);
+        };
+        let mut session: Session = row.into();
+        if let Some(checkout) = self.storage.session_checkout(id)? {
+            session.branch = checkout.branch;
+            session.worktree = checkout.worktree.map(PathBuf::from);
+        }
+        Ok(Some(session))
     }
 
     /// Lists all non-archived sessions, ordered by most recently updated.
@@ -358,7 +428,18 @@ impl SessionManager {
     /// ```
     pub fn list_sessions(&self) -> anyhow::Result<Vec<Session>> {
         let rows = self.storage.list_sessions()?;
-        Ok(rows.into_iter().map(Into::into).collect())
+        let mut checkouts = self.storage.session_checkouts()?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let mut session: Session = row.into();
+                if let Some(checkout) = checkouts.remove(&session.id) {
+                    session.branch = checkout.branch;
+                    session.worktree = checkout.worktree.map(PathBuf::from);
+                }
+                session
+            })
+            .collect())
     }
 
     /// Archives a session so it no longer appears in [`list_sessions`](Self::list_sessions)
@@ -502,6 +583,10 @@ impl From<crate::storage::SessionRow> for Session {
             archived_at,
             summary,
             config_path: None, // Historical sessions don't store config path
+            // Checkout data is not part of `SessionRow`; `SessionManager`
+            // fills it in.
+            branch: None,
+            worktree: None,
         }
     }
 }

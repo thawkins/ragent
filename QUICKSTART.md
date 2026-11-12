@@ -1336,8 +1336,10 @@ written to `log/subagents/<task-id>.md` for retrieval with the `read` tool.
 Ragent persists conversations in sessions stored in SQLite.
 
 ```bash
-# List all sessions
+# List sessions, grouped by project
 ragent session list
+ragent session list --project my-app   # one project only
+ragent session list --json             # machine-readable
 
 # Resume a previous session (loads message history into the TUI)
 ragent session resume <session-id>
@@ -1375,6 +1377,46 @@ the first prompt.
 The left-hand sidebar lists sessions by project. `Alt+S` shows, focuses or
 hides it; `Ctrl+N` opens a session; `Ctrl+Up`/`Ctrl+Down` move to the
 previous/next one; `Alt+R` returns to the last one.
+
+### Projects
+
+Every session belongs to a project: a local checkout with a name, an
+optional base model and, when it was cloned from GitHub or GitLab, its
+remote. A project is created the first time a session starts in its
+checkout.
+
+```text
+/project                              # show the focused session's project
+/project list
+/project add ../other-repo            # register a directory
+/project add git@github.com:me/x.git  # clone into this directory and register
+/project rename Storefront
+/project model anthropic/claude-sonnet-4-5   # model new sessions start on
+/project model current                # ...or use this session's model
+/project refresh                      # re-read the remote, refresh request counts
+/project prune                        # remove clean worktrees of archived sessions
+/project remove Storefront            # drop it from the list (files are kept)
+
+/session new --project Storefront                 # new session in that project
+/session new --project Storefront --branch fix/x  # ...in its own git worktree
+/session new --branch fix/x                       # same, in this project
+```
+
+With `--branch` the session gets its own `git worktree` at that branch, so
+it does not disturb the project's main checkout. Quote a project name that
+contains spaces: `/session new --project "My App"`. A session can only be
+started in a project whose checkout is under the launch directory or a
+`dirs.allowed_roots` entry. The sidebar shows `Y` and
+the number of pull/merge requests for that branch beside the session.
+
+The same data is available outside the TUI:
+
+```bash
+ragent project list
+ragent project show Storefront
+ragent project add ../other-repo
+ragent project remove Storefront
+```
 
 To get a desktop notification when a background session needs you, add an
 `on_notification` hook to `ragent.json`:

@@ -46,7 +46,7 @@ use ragent_types::message::{Message, MessagePart, Role};
 ///
 /// Public so tests can assert the persisted `schema_version` setting against
 /// the compiler-enforced value instead of a hard-coded literal.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 // PERF-071: static SQL bodies hoisted to `const &str` so the session read
 // paths build no `String` and the prepared-statement cache sees a stable
@@ -647,6 +647,9 @@ macro_rules! lock_conn_read {
         }
     };
 }
+
+#[path = "project_store.rs"]
+mod project_store;
 
 impl Storage {
     /// Acquire the internal connection lock for raw SQL access.
@@ -1277,6 +1280,65 @@ impl Storage {
             )?;
         }
 
+        // Spec `projects`: a project is a stored record. `sessions.project_id`
+        // held the work-tree root path up to schema 5; give every distinct
+        // root a project row and point its sessions at the row's id. No git
+        // command runs here: remotes are detected when a project is first
+        // used.
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            worktree TEXT NOT NULL UNIQUE,
+            provider_id TEXT,
+            model_id TEXT,
+            remote_kind TEXT,
+            remote_host TEXT,
+            remote_path TEXT,
+            remote_url TEXT,
+            remote_name TEXT,
+            default_branch TEXT,
+            remote_checked INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            archived_at TEXT
+            );",
+        )?;
+        for (col, ty) in &[
+            ("branch", "TEXT"),
+            ("worktree", "TEXT"),
+            ("pr_count", "INTEGER"),
+        ] {
+            let has_col: bool = tx
+                .prepare_cached(&format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='{col}'"
+                ))?
+                .query_row([], |r| r.get::<_, i64>(0))
+                .unwrap_or(0)
+                > 0;
+            if !has_col {
+                tx.execute_batch(&format!("ALTER TABLE sessions ADD COLUMN {col} {ty};"))?;
+            }
+        }
+        let legacy_roots: Vec<String> = tx
+            .prepare(
+                "SELECT DISTINCT project_id FROM sessions \
+                 WHERE project_id NOT IN (SELECT id FROM projects)",
+            )?
+            .query_map([], |r| r.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        let mut rekeyed: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for root in legacy_roots {
+            let project = project_store::ensure_project_on(&tx, &root)?;
+            tx.execute(
+                "UPDATE sessions SET project_id = ?1 WHERE project_id = ?2",
+                params![project.id, root],
+            )?;
+            rekeyed.insert(root, project.id);
+        }
+        rekey_sidebar_sections(&tx, &rekeyed)?;
+
         // Record the schema version so the next `Storage::open` (including
         // the background FTS warmup connection) hits the fast path. Written via
         // the transaction (not `conn`) so it commits atomically with the DDL
@@ -1395,6 +1457,22 @@ impl Storage {
                 );
             }
         }
+        // A child session belongs to its parent's project; any other session
+        // to the project its directory resolves to.
+        let inherited: Option<String> = match parent_id {
+            Some(parent) => conn
+                .query_row(
+                    "SELECT project_id FROM sessions WHERE id = ?1 AND project_id != ''",
+                    params![parent],
+                    |r| r.get(0),
+                )
+                .optional()?,
+            None => None,
+        };
+        let project_id = match inherited {
+            Some(id) => id,
+            None => project_store::project_id_for_directory(&conn, directory)?,
+        };
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO sessions \
@@ -1402,7 +1480,7 @@ impl Storage {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 id,
-                crate::project::project_root(directory),
+                project_id,
                 directory,
                 parent_id,
                 kind.as_str(),
@@ -1763,8 +1841,8 @@ impl Storage {
     ///
     /// Sub-agent and teammate sessions (`parent_id` set) are left out. Groups
     /// are ordered by their most recently updated session, and sessions within
-    /// a group by `updated_at`, newest first. A session with an empty
-    /// `project_id` groups under its directory.
+    /// a group by `updated_at`, newest first. Projects with no live session
+    /// follow, most recently updated first (spec `projects`).
     ///
     /// # Errors
     ///
@@ -1795,19 +1873,36 @@ impl Storage {
             stmt.query_map([], session_row_v5)?
                 .collect::<std::result::Result<Vec<_>, _>>()?
         };
+        let projects = self.list_projects()?;
         let mut groups: Vec<ProjectSessions> = Vec::new();
         for row in rows {
-            let project = if row.project_id.is_empty() {
-                row.directory.clone()
-            } else {
-                row.project_id.clone()
+            if let Some(group) = groups.iter_mut().find(|g| g.project_id == row.project_id) {
+                group.sessions.push(row);
+                continue;
+            }
+            // A session always carries a project id since schema 6; a row
+            // whose project record is gone still lists, under its directory.
+            let project = match projects.iter().find(|p| p.id == row.project_id) {
+                Some(project) => project.clone(),
+                None => match self.get_project(&row.project_id)? {
+                    Some(project) => project,
+                    None => orphan_project(&row),
+                },
             };
-            match groups.iter_mut().find(|g| g.project_id == project) {
-                Some(group) => group.sessions.push(row),
-                None => groups.push(ProjectSessions {
-                    project_id: project,
-                    sessions: vec![row],
-                }),
+            groups.push(ProjectSessions {
+                project_id: row.project_id.clone(),
+                project,
+                sessions: vec![row],
+            });
+        }
+        // Projects with no live session are listed after the active ones.
+        for project in projects {
+            if !groups.iter().any(|g| g.project_id == project.id) {
+                groups.push(ProjectSessions {
+                    project_id: project.id.clone(),
+                    project,
+                    sessions: Vec::new(),
+                });
             }
         }
         Ok(groups)
@@ -5153,10 +5248,67 @@ fn session_row_v5(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
 /// [`Storage::list_sessions_grouped`].
 #[derive(Debug, Clone)]
 pub struct ProjectSessions {
-    /// Project root (see [`crate::project::project_root`]).
+    /// The project's id.
     pub project_id: String,
+    /// The project record.
+    pub project: crate::project::ProjectRow,
     /// The project's sessions, most recently updated first.
     pub sessions: Vec<SessionRow>,
+}
+
+/// A stand-in project for a session whose project record no longer exists,
+/// so the session still lists under its directory.
+fn orphan_project(row: &SessionRow) -> crate::project::ProjectRow {
+    crate::project::ProjectRow {
+        id: row.project_id.clone(),
+        name: crate::project::default_project_name(&row.directory),
+        worktree: row.directory.clone(),
+        provider_id: None,
+        model_id: None,
+        remote: None,
+        remote_checked: true,
+        created_at: row.created_at.clone(),
+        updated_at: row.updated_at.clone(),
+        archived_at: None,
+    }
+}
+
+/// Rewrites the collapsed-section keys of the persisted sidebar layout
+/// (`tui.sessions.sidebar`) from project roots to project ids. Keys that are
+/// not in `rekeyed` (the pinned section) are kept.
+fn rekey_sidebar_sections(
+    conn: &Connection,
+    rekeyed: &std::collections::HashMap<String, String>,
+) -> Result<()> {
+    if rekeyed.is_empty() {
+        return Ok(());
+    }
+    let saved: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'tui.sessions.sidebar'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(saved) = saved else {
+        return Ok(());
+    };
+    let Ok(mut layout) = serde_json::from_str::<serde_json::Value>(&saved) else {
+        return Ok(());
+    };
+    let Some(collapsed) = layout.get_mut("collapsed").and_then(|c| c.as_array_mut()) else {
+        return Ok(());
+    };
+    for key in collapsed.iter_mut() {
+        if let Some(id) = key.as_str().and_then(|k| rekeyed.get(k)) {
+            *key = serde_json::Value::String(id.clone());
+        }
+    }
+    conn.execute(
+        "UPDATE settings SET value = ?1 WHERE key = 'tui.sessions.sidebar'",
+        params![layout.to_string()],
+    )?;
+    Ok(())
 }
 
 // -- Initiatives (jcodeport spec M8) --------------------------------------

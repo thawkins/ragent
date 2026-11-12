@@ -32,6 +32,7 @@ pub mod permission;
 /// Plugin bridging helpers: surface enabled plugins' MCP servers to the
 /// session (spec `plugins` FR-030).
 pub mod plugin;
+pub mod project;
 pub mod reference;
 /// Process resource limits - bounded concurrency for child process spawns
 /// and tool execution.

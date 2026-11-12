@@ -103,3 +103,22 @@ pub fn make_app() -> App {
     app.sidebar.visible = false;
     app
 }
+
+/// Makes `root` a permitted session root for `app`, as a `dirs.allowed_roots`
+/// entry would, by injecting a config into the processor's cache.
+///
+/// The injected config is honoured only while no `RAGENT_CONFIG*` override
+/// is set, and the launch directory comes from the process cwd; both are
+/// process-global, so a caller holds `crate::global_env_lock()` for as long
+/// as it relies on the permitted roots.
+#[allow(dead_code)]
+pub fn allow_session_root(app: &App, root: &std::path::Path) {
+    let mut config = ragent_config::Config::default();
+    config.dirs.allowed_roots = vec![root.display().to_string()];
+    *app.session_processor.cached_config.lock() =
+        Some(ragent_agent::session::processor::CachedConfig {
+            config: Arc::new(config),
+            file_mtimes: Vec::new(),
+            env_overrides_present: false,
+        });
+}
