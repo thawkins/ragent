@@ -119,6 +119,24 @@ impl Storage {
         ensure_project_on(&conn, worktree)
     }
 
+    /// Returns the project a session in `directory` belongs to, creating it
+    /// if needed: the owning project when `directory` is a session's own
+    /// worktree, otherwise the project rooted at the directory's work tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database write or read fails.
+    pub fn project_for_directory(&self, directory: &str) -> Result<ProjectRow> {
+        let conn = lock_conn!(self)?;
+        let id = project_id_for_directory(&conn, directory)?;
+        let row = conn.query_row(
+            &format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1"),
+            params![id],
+            project_row,
+        )?;
+        Ok(row)
+    }
+
     /// Fetches a project by id, archived ones included.
     ///
     /// # Errors
@@ -433,6 +451,42 @@ impl Storage {
         conn.execute(
             "UPDATE sessions SET branch = ?1, worktree = ?2 WHERE id = ?3",
             params![branch, worktree, id],
+        )?;
+        Ok(())
+    }
+
+    /// The session worktrees of a project that only archived sessions use,
+    /// as `(session_id, worktree)` pairs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn prunable_session_worktrees(&self, project_id: &str) -> Result<Vec<(String, String)>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, worktree FROM sessions s \
+             WHERE project_id = ?1 AND archived_at IS NOT NULL AND worktree IS NOT NULL \
+             AND NOT EXISTS (SELECT 1 FROM sessions live \
+                 WHERE live.worktree = s.worktree AND live.archived_at IS NULL) \
+             ORDER BY id",
+        )?;
+        let rows = stmt
+            .query_map(params![project_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Forgets a session's worktree after it was removed from disk; the
+    /// branch is kept.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+    pub fn clear_session_worktree(&self, id: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "UPDATE sessions SET worktree = NULL WHERE id = ?1",
+            params![id],
         )?;
         Ok(())
     }

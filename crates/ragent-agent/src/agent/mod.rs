@@ -462,7 +462,7 @@ impl fmt::Display for AgentMode {
 }
 
 /// Reference to a specific model offered by a provider.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelRef {
     /// Identifier of the LLM provider (e.g. `"anthropic"`).
     pub provider_id: String,

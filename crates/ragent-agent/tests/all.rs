@@ -806,7 +806,17 @@ mod test_permission_prompt;
 
 #[path = "test_permission_working_dir.rs"]
 mod test_permission_working_dir;
+#[path = "test_project_manager.rs"]
+mod test_project_manager;
 #[path = "test_project_mcp.rs"]
 mod test_project_mcp;
+#[path = "test_project_remote.rs"]
+mod test_project_remote;
+#[path = "test_pull_request_counts.rs"]
+mod test_pull_request_counts;
 #[path = "test_security_analyzer_request.rs"]
 mod test_security_analyzer_request;
+#[path = "test_session_project_attach.rs"]
+mod test_session_project_attach;
+#[path = "test_session_worktree.rs"]
+mod test_session_worktree;
