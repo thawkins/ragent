@@ -485,61 +485,12 @@ pub async fn run_tui(
                 app.register_primary_session_mapping();
 
                 let t_render = Instant::now();
-                // Render the ASCII art banner into the message window now that
-                // the session is valid (append_assistant_text requires session_id).
-                let banner = crate::logo::LOGO.join("\n");
-                app.append_assistant_text(&banner);
-                app.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
-                app.append_assistant_text("\n  Created by Tim Hawkins <tim.thawkins@gmail.com>");
-                app.append_assistant_text("\n  https://github.com/thawkins/ragent");
-                app.append_assistant_text("\n");
-                // app.force_new_message = true;
-                app.append_assistant_text(&format!(
-                    "\n[ok] Session created: `{}`",
-                    crate::app::short_id(&session_id)
-                ));
-                // Display the loaded configuration file(s)
-                if app.config_paths.is_empty() {
-                    app.append_assistant_text("\n[i] No config file found; using defaults");
-                } else {
-                    let mut paths_text = app
-                        .config_paths
-                        .iter()
-                        .map(|p| {
-                            let s = p.display().to_string();
-                            if let Some(home) = std::env::var_os("HOME") {
-                                let home = home.to_string_lossy();
-                                if let Some(rest) = s.strip_prefix(home.as_ref()) {
-                                    return format!("~{}", rest);
-                                }
-                            }
-                            s
-                        })
-                        .collect::<Vec<_>>()
-                        .join("`\n  ");
-                    // Prepend indentation for multi-line alignment
-                    if app.config_paths.len() > 1 {
-                        paths_text = format!("\n  {paths_text}");
-                    }
-                    app.append_assistant_text(&format!(
-                        "\n[ok] Loaded config file: `{paths_text}`"
-                    ));
-                }
+                // The session startup block (banner, id, config files) and the
+                // instruction-file announcement; every new session prints it.
+                app.announce_session_startup();
                 app.status = "session created".to_string();
                 terminal.draw(|frame| layout::render(frame, &mut app))?;
                 startup.record("Session create (render)", t_render.elapsed());
-
-                // Announce the project instruction files. No model call: they
-                // already reach the model through the system prompt (#38).
-                // Discovery walks the project tree, so it runs on a blocking
-                // thread and the notice arrives over the event bus; startup
-                // does not wait for it.
-                let proc = Arc::clone(&app.session_processor);
-                drop(tokio::task::spawn_blocking(move || {
-                    if let Err(e) = proc.announce_instruction_files(&session_id) {
-                        tracing::warn!(error = %e, "Instruction-file announcement failed");
-                    }
-                }));
             }
             Err(e) => {
                 startup.record("Session create (DB)", t_db.elapsed());
