@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed - Gemini token totals and cost counted once per response
+
+- Gemini repeats `usageMetadata` on every stream chunk as running totals,
+  and each chunk was emitted as its own usage event. Cumulative token totals
+  and recorded cost counted the prompt once per chunk. The Gemini stream now
+  emits a single usage event per response with the final totals.
+
 ### Fixed - auto-compaction and context usage tracking
 
 - Anthropic and Bedrock send a second, output-only usage event with
