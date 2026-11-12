@@ -828,47 +828,70 @@ fn tool_call_with_usage(id: &str, input_tokens: u64) -> ScriptedReply {
     ])
 }
 
-/// Auto-compaction is checked before every request in a turn, not only once:
-/// after a successful compaction brings usage back under the threshold, the
-/// trigger re-arms, so a tool-heavy turn that fills up again compacts again.
-#[tokio::test]
-async fn test_pre_send_compaction_rearms_within_one_turn() -> Result<()> {
+/// Run one turn against `replies` and count the `"auto"` compactions started.
+async fn count_auto_compactions(replies: Vec<ScriptedReply>) -> Result<usize> {
     let event_bus = Arc::new(EventBus::new(4096));
     let mut rx = event_bus.subscribe();
-    // The scripted model has a 128k window; 100k reported input is over the
-    // default 70% threshold (89.6k).
-    let (processor, working_dir, _captured, _dir) = make_processor(
-        event_bus.clone(),
-        vec![
-            tool_call_with_usage("call_1", 100_000),
-            ScriptedReply::TextOnly("summary one"),
-            tool_call_with_usage("call_2", 100_000),
-            ScriptedReply::TextOnly("summary two"),
-            ScriptedReply::TextOnly("done"),
-        ],
-    )?;
+    let (processor, working_dir, _captured, _dir) = make_processor(event_bus.clone(), replies)?;
     let session = processor.session_manager.create_session(working_dir)?;
-
     processor
         .process_message(
             &session.id,
-            "run echo twice",
+            "run echo several times",
             &make_agent(),
             Arc::new(AtomicBool::new(false)),
         )
         .await?;
-
     let mut auto_compactions = 0;
     while let Ok(event) = rx.try_recv() {
-        if let Event::CompressionStarted { reason, .. } = event {
-            if reason == "auto" {
-                auto_compactions += 1;
-            }
+        if let Event::CompressionStarted { reason, .. } = event
+            && reason == "auto"
+        {
+            auto_compactions += 1;
         }
     }
+    Ok(auto_compactions)
+}
+
+/// Auto-compaction re-arms within a turn once the provider's first report
+/// after a compaction confirms usage is back under the threshold, so a
+/// tool-heavy turn that fills up again compacts again. The scripted model has
+/// a 128k window; the default 70% threshold is 89.6k.
+#[tokio::test]
+async fn test_pre_send_compaction_rearms_within_one_turn() -> Result<()> {
+    let auto_compactions = count_auto_compactions(vec![
+        tool_call_with_usage("call_1", 100_000),
+        ScriptedReply::TextOnly("summary one"),
+        // Post-compaction report: recovered below the threshold -> re-arm.
+        tool_call_with_usage("call_2", 1_000),
+        tool_call_with_usage("call_3", 100_000),
+        ScriptedReply::TextOnly("summary two"),
+        ScriptedReply::TextOnly("done"),
+    ])
+    .await?;
     assert_eq!(
         auto_compactions, 2,
-        "each over-threshold step in the turn must trigger its own compaction"
+        "a confirmed recovery re-arms compaction for the next fill-up"
+    );
+    Ok(())
+}
+
+/// When the provider's first report after a compaction is still over the
+/// threshold (the local estimate undercounted), the trigger stays disarmed
+/// for the rest of the turn instead of re-summarising every step.
+#[tokio::test]
+async fn test_pre_send_compaction_stays_disarmed_without_recovery() -> Result<()> {
+    let auto_compactions = count_auto_compactions(vec![
+        tool_call_with_usage("call_1", 100_000),
+        ScriptedReply::TextOnly("summary one"),
+        tool_call_with_usage("call_2", 100_000),
+        tool_call_with_usage("call_3", 100_000),
+        ScriptedReply::TextOnly("done"),
+    ])
+    .await?;
+    assert_eq!(
+        auto_compactions, 1,
+        "an unconfirmed recovery must not re-arm compaction"
     );
     Ok(())
 }

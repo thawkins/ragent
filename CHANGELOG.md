@@ -11,7 +11,8 @@
 - The pre-send compaction check now adds the reply and tool results appended
   since the last request to the provider-reported count, instead of using
   the previous request's count alone.
-- After a successful compaction brings usage back under the threshold,
+- After a compaction that shrinks the history, and once the next provider
+  usage report confirms usage is back under the threshold,
   auto-compaction can run again in the same turn.
 
 ### Fixed - clarification gate ignores markers inside code

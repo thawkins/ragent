@@ -2335,6 +2335,10 @@ impl SessionProcessor {
         // (otherwise one-request-stale) provider count. `None` at turn start
         // and after compaction replaces the history.
         let mut reported_anchor_estimate: Option<usize> = None;
+        // Threshold a successful, history-reducing pre-send compaction must be
+        // confirmed under (by the next provider report) before auto-compaction
+        // re-arms within this turn.
+        let mut rearm_below_threshold: Option<usize> = None;
         loop {
             // T-008 (FR-010, FR-013, FR-014, FR-017): the stop-flag guard.
             // No stage of this iteration may run once the loop's stop flag is
@@ -2592,19 +2596,13 @@ impl SessionProcessor {
                             // The history was replaced: no provider count
                             // describes it yet, so drop the anchor.
                             reported_anchor_estimate = None;
-                            // Re-arm the trigger when compaction brought the
-                            // request back under the threshold, so a long
-                            // tool-heavy turn that fills up again can compact
-                            // again. If it could not get under the threshold,
-                            // stay disarmed to avoid re-summarising every step.
-                            let compacted_estimate = token_tracker.estimate(
-                                Some(system_prompt.as_ref()),
-                                &chat_messages,
-                                &tool_definitions[..],
-                                self.get_cached_tool_definition_bytes(),
-                            );
-                            if compacted_estimate <= decision.threshold {
-                                compaction_attempted_this_turn = false;
+                            // Re-arm candidate: the trigger stays disarmed until
+                            // the provider's next report confirms the request is
+                            // back under the threshold (the local estimate can
+                            // undercount system/tool overhead). A summary that
+                            // did not shrink the history never re-arms.
+                            if outcome.compressed_tokens < outcome.original_tokens {
+                                rearm_below_threshold = Some(decision.threshold);
                             }
                             last_reported_input_tokens = outcome.compressed_tokens as u64;
                             self.persist_last_reported_input_tokens(
@@ -2682,6 +2680,14 @@ impl SessionProcessor {
                 // Persist the provider-reported input tokens into the session state cache
                 // so the next turn starts with the same usage value shown in the TUI.
                 self.persist_last_reported_input_tokens(session_id, llm_result.last_input_tokens);
+                // First provider report after a reducing compaction: re-arm
+                // auto-compaction only when it confirms usage recovered below
+                // the threshold; otherwise stay disarmed for the turn.
+                if let Some(threshold) = rearm_below_threshold.take()
+                    && llm_result.last_input_tokens <= threshold as u64
+                {
+                    compaction_attempted_this_turn = false;
+                }
                 // Anchor the provider count to the local estimate of the
                 // request it describes (`chat_messages` is still exactly what
                 // was sent; this step's reply is appended below).
