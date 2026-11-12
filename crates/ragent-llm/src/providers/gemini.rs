@@ -551,6 +551,11 @@ impl LlmClient for GeminiClient {
             // the buffer; reset only when a line parses successfully so the
             // retry budget belongs to the line, not the chunk.
             let mut malformed_retries: u32 = 0;
+            // Gemini repeats `usageMetadata` on every chunk as running totals.
+            // Keep the latest and emit ONE `Usage` per response (before
+            // `Finish`, or at end of stream) so consumers that sum usage
+            // events do not count the prompt once per chunk.
+            let mut pending_usage: Option<(u64, u64)> = None;
 
             futures::pin_mut!(stream);
 
@@ -650,13 +655,9 @@ impl LlmClient for GeminiClient {
                     // line, not this one.
                     malformed_retries = 0;
 
-                    // Handle usage metadata (usually in the last chunk)
+                    // Record usage metadata (running totals, repeated per chunk).
                     if let Some(usage) = parsed.get("usageMetadata") {
-                        let input_tokens = usage["promptTokenCount"].as_u64().unwrap_or(0);
-                        let output_tokens = usage["candidatesTokenCount"].as_u64().unwrap_or(0);
-                        if input_tokens > 0 || output_tokens > 0 {
-                            yield StreamEvent::Usage { input_tokens, output_tokens };
-                        }
+                        pending_usage = merge_usage(pending_usage, usage);
                     }
 
                     // Handle candidates
@@ -717,6 +718,9 @@ impl LlmClient for GeminiClient {
                                     "OTHER" => FinishReason::Stop,
                                     _ => FinishReason::Stop,
                                 };
+                                if let Some((input_tokens, output_tokens)) = pending_usage.take() {
+                                    yield StreamEvent::Usage { input_tokens, output_tokens };
+                                }
                                 yield StreamEvent::Finish { reason };
                             }
                         }
@@ -730,12 +734,14 @@ impl LlmClient for GeminiClient {
                 if !line.is_empty() && line != "[,]"
                     && let Ok(parsed) = serde_json::from_str::<Value>(line)
                         && let Some(usage) = parsed.get("usageMetadata") {
-                            let input_tokens = usage["promptTokenCount"].as_u64().unwrap_or(0);
-                            let output_tokens = usage["candidatesTokenCount"].as_u64().unwrap_or(0);
-                            if input_tokens > 0 || output_tokens > 0 {
-                                yield StreamEvent::Usage { input_tokens, output_tokens };
-                            }
+                            pending_usage = merge_usage(pending_usage, usage);
                         }
+            }
+
+            // Usage not yet emitted (no finishReason frame, or usage arriving
+            // after it) goes out once here.
+            if let Some((input_tokens, output_tokens)) = pending_usage.take() {
+                yield StreamEvent::Usage { input_tokens, output_tokens };
             }
 
             // F2: end-of-stream flush. A `functionCall` deferred after the
@@ -752,6 +758,33 @@ impl LlmClient for GeminiClient {
 
         Ok(Box::pin(event_stream))
     }
+}
+
+/// Fold one Gemini `usageMetadata` object into the running usage.
+///
+/// Gemini reports running totals on every chunk, so the newest non-zero value
+/// of each field replaces the previous one (a chunk that omits a field keeps
+/// the earlier value).
+///
+/// # Arguments
+///
+/// * `current` - usage recorded so far as `(input, output)`, if any.
+/// * `usage` - the chunk's `usageMetadata` object.
+///
+/// # Returns
+///
+/// The updated `(input, output)` pair, or `None` when both are still zero.
+fn merge_usage(current: Option<(u64, u64)>, usage: &Value) -> Option<(u64, u64)> {
+    let (prev_in, prev_out) = current.unwrap_or((0, 0));
+    let input = usage["promptTokenCount"]
+        .as_u64()
+        .filter(|&n| n > 0)
+        .unwrap_or(prev_in);
+    let output = usage["candidatesTokenCount"]
+        .as_u64()
+        .filter(|&n| n > 0)
+        .unwrap_or(prev_out);
+    (input > 0 || output > 0).then_some((input, output))
 }
 
 #[cfg(test)]
