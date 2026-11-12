@@ -331,6 +331,8 @@ async fn test_multisession_archive_then_unarchive_by_suffix() {
 async fn test_multisession_list_all_groups_by_project() {
     let (mut app, _a, _b) = app_with_two_sessions().await;
     let project = ragent_storage::project_root(&app.cwd_path.display().to_string());
+    let name = ragent_storage::default_project_name(&project);
+    let project = format!("{name} - `{project}`");
 
     app.execute_slash_command("/session list --all").await;
 

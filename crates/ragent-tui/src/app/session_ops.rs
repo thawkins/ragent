@@ -4373,6 +4373,13 @@ impl App {
         match self.session_processor.session_manager.create_session(dir) {
             Ok(session) => {
                 self.session.session_id = Some(session.id.clone());
+                // A new session starts on its project's base model, when the
+                // project has one (spec `projects`).
+                match self.project_manager().get(&session.project_id) {
+                    Ok(Some(project)) => self.seed_project_base_model(&project),
+                    Ok(None) => {}
+                    Err(e) => tracing::debug!(error = %e, "could not read the session's project"),
+                }
                 // A fresh session starts with an empty queue (NFR-005).
                 self.clear_input_queue();
                 // Map the primary session's short_sid to the current agent name

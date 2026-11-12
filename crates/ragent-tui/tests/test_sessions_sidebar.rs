@@ -1,4 +1,4 @@
-//! Session sidebar (spec MULTISESSION, milestone M5).
+//! Session sidebar (spec MULTISESSION, milestone M5; spec `projects`).
 //!
 //! Renders the full layout into a `TestBackend` and drives the sidebar with
 //! real key and mouse events. Sessions live in the in-memory storage
@@ -74,6 +74,12 @@ fn launch_label(app: &App) -> String {
         .unwrap_or(root)
 }
 
+/// The attention marker of a painted sidebar row: the last column inside the
+/// right border.
+fn state_marker(row: &str) -> char {
+    row.chars().rev().nth(1).expect("row has columns")
+}
+
 fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
     KeyEvent::new(code, modifiers)
 }
@@ -91,7 +97,7 @@ fn click(column: u16, row: u16) -> MouseEvent {
 async fn test_sessions_sidebar_lists_sessions_under_project() {
     let (mut app, a, b) = app_with_sidebar().await;
     let rows = sidebar_rows(&mut app);
-    let header = format!("v {} (2)", launch_label(&app));
+    let header = format!("{} v", launch_label(&app));
 
     assert!(row_of(&rows, "SESSIONS").is_some(), "{rows:#?}");
     let new_row = row_of(&rows, "+ New session").expect("new session row");
@@ -134,8 +140,8 @@ async fn test_sessions_sidebar_pinned_section_comes_first() {
     app.execute_slash_command("/session pin").await;
     let rows = sidebar_rows(&mut app);
 
-    let pinned = row_of(&rows, "v Pinned (1)").expect("pinned header");
-    let project = row_of(&rows, &format!("v {} (1)", launch_label(&app))).expect("project");
+    let pinned = row_of(&rows, "Pinned v").expect("pinned header");
+    let project = row_of(&rows, &format!("{} v", launch_label(&app))).expect("project");
     let b_row = row_of(&rows, &untitled(&b)).expect("B");
     let a_row = row_of(&rows, &untitled(&a)).expect("A");
     assert!(pinned < b_row && b_row < project && project < a_row);
@@ -148,13 +154,19 @@ async fn test_sessions_sidebar_left_collapses_a_section() {
     app.handle_key_event(key(KeyCode::Char('s'), KeyModifiers::ALT))
         .await;
     assert!(app.sidebar.focused, "Alt+S focuses the visible sidebar");
-    app.handle_key_event(key(KeyCode::Down, KeyModifiers::NONE))
-        .await;
+    // New session, Search, then the project heading.
+    for _ in 0..2 {
+        app.handle_key_event(key(KeyCode::Down, KeyModifiers::NONE))
+            .await;
+    }
     app.handle_key_event(key(KeyCode::Left, KeyModifiers::NONE))
         .await;
 
     let rows = sidebar_rows(&mut app);
-    assert!(row_of(&rows, &format!("> {} (2)", launch_label(&app))).is_some());
+    assert!(
+        row_of(&rows, &format!("{} > (2)", launch_label(&app))).is_some(),
+        "{rows:#?}"
+    );
     assert!(row_of(&rows, &untitled(&a)).is_none(), "sessions hidden");
 }
 
@@ -199,11 +211,9 @@ async fn test_sessions_sidebar_marks_waiting_session_and_badges_status_bar() {
 
     let (rows, _) = draw(&mut app, 120, 30);
     let a_row = row_of(&rows, &untitled(&a)).expect("A");
-    assert!(
-        rows[a_row].contains("! untitled"),
-        "row was: {}",
-        rows[a_row]
-    );
+    let width = usize::from(app.sidebar.area.width);
+    let sidebar_row: String = rows[a_row].chars().take(width).collect();
+    assert_eq!(state_marker(&sidebar_row), '!', "row was: {sidebar_row}");
     assert!(
         rows.iter().any(|r| r.contains("1 need you")),
         "status bar badge missing"
@@ -291,7 +301,7 @@ async fn test_sessions_sidebar_collapsed_sections_persist() {
     let (mut app, _a, _b) = app_with_sidebar().await;
     let _ = sidebar_rows(&mut app);
     app.sidebar.focused = true;
-    app.sidebar.cursor = 1;
+    app.sidebar.cursor = 2;
     app.handle_key_event(key(KeyCode::Left, KeyModifiers::NONE))
         .await;
 
@@ -325,14 +335,307 @@ async fn test_sessions_sidebar_marks_failed_background_run_until_focused() {
 
     let rows = sidebar_rows(&mut app);
     let a_row = row_of(&rows, &untitled(&a)).expect("A");
-    assert!(
-        rows[a_row].contains("x untitled"),
-        "row was: {}",
-        rows[a_row]
-    );
+    assert_eq!(state_marker(&rows[a_row]), 'x', "row was: {}", rows[a_row]);
 
     app.switch_to_session(&a).expect("focus A");
     let rows = sidebar_rows(&mut app);
     let a_row = row_of(&rows, &untitled(&a)).expect("A");
-    assert!(!rows[a_row].contains("x untitled"), "cleared once seen");
+    assert_ne!(state_marker(&rows[a_row]), 'x', "cleared once seen");
+}
+
+// -- spec `projects`: project headings, branch markers, request counts ------
+
+/// An existing directory under the git-ignored `target/temp/` tree, unique to
+/// `name`, so a fixture project is not painted as `(missing)`.
+fn fixture_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/temp/sessions_sidebar")
+        .join(name);
+    let _ = std::fs::remove_dir_all(&dir); // INTENTIONAL: may not exist yet
+    std::fs::create_dir_all(&dir).expect("fixture dir");
+    dir.canonicalize().expect("canonical")
+}
+
+/// Index of the heading row for project `id` in the sidebar's row list.
+fn heading_index(app: &mut App, id: &str) -> usize {
+    sessions_sidebar::refresh_if_dirty(app);
+    sessions_sidebar::build_rows(app)
+        .iter()
+        .position(
+            |row| matches!(row, sessions_sidebar::SidebarRow::Header { key, .. } if key == id),
+        )
+        .expect("project heading")
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_heading_shows_the_project_name() {
+    let (mut app, _a, _b) = app_with_sidebar().await;
+    app.execute_slash_command("/project rename Storefront")
+        .await;
+
+    let rows = sidebar_rows(&mut app);
+
+    assert!(row_of(&rows, "Storefront v").is_some(), "{rows:#?}");
+    assert!(
+        row_of(&rows, &format!("{} v", launch_label(&app))).is_none(),
+        "the directory name is no longer the heading"
+    );
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_lists_a_project_with_no_sessions_and_its_remote() {
+    let (mut app, _a, _b) = app_with_sidebar().await;
+    let dir = fixture_dir("empty_project").join("toolbox");
+    std::fs::create_dir_all(&dir).expect("dir");
+    let project = app
+        .storage
+        .ensure_project(&dir.display().to_string())
+        .expect("project");
+    app.storage
+        .set_project_remote(
+            &project.id,
+            Some(&ragent_storage::ProjectRemoteRow {
+                kind: "gitlab".to_string(),
+                host: "gitlab.com".to_string(),
+                path: "group/toolbox".to_string(),
+                url: "https://gitlab.com/group/toolbox.git".to_string(),
+                remote_name: "origin".to_string(),
+                default_branch: None,
+            }),
+        )
+        .expect("remote");
+    app.sidebar.dirty = true;
+
+    let rows = sidebar_rows(&mut app);
+
+    let heading = row_of(&rows, "toolbox v").expect("empty project is listed");
+    assert!(
+        rows[heading].contains("[gitlab]"),
+        "row was: {}",
+        rows[heading]
+    );
+    assert!(
+        !rows[heading].contains("(missing)"),
+        "row was: {}",
+        rows[heading]
+    );
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_row_shows_branch_marker_and_request_count() {
+    let (mut app, a, b) = app_with_sidebar().await;
+    let project_id = app
+        .storage
+        .get_session(&a)
+        .expect("get")
+        .expect("row")
+        .project_id;
+    let directory = app.cwd_path.display().to_string();
+    let with_branch = |id: &str, title: &str, worktree: Option<&str>, count: Option<i64>| {
+        app.storage
+            .create_session_in_project(
+                id,
+                &project_id,
+                &directory,
+                &ragent_storage::SessionCheckout {
+                    branch: Some("feature/x".to_string()),
+                    worktree: worktree.map(str::to_string),
+                    pr_count: count,
+                },
+            )
+            .expect("session");
+        app.storage.update_session(id, title).expect("title");
+    };
+    with_branch("s-counted", "counted", Some("/nonexistent/tree"), Some(16));
+    with_branch("s-zero", "zero requests", None, Some(0));
+    with_branch("s-unknown", "unknown count", None, None);
+    app.sidebar.dirty = true;
+
+    let (rows, terminal) = draw(&mut app, 120, 30);
+
+    let counted = row_of(&rows, "counted").expect("counted row");
+    assert!(rows[counted].contains("Y16 "), "row was: {}", rows[counted]);
+    let x = rows[counted].find("Y16").expect("marker column") as u16;
+    assert_eq!(
+        terminal.backend().buffer()[(x, counted as u16)].fg,
+        Color::Magenta,
+        "a session that owns its worktree is highlighted"
+    );
+    for title in ["zero requests", "unknown count"] {
+        let y = row_of(&rows, title).expect("row");
+        assert!(rows[y].contains(" Y "), "row was: {}", rows[y]);
+        assert!(
+            !rows[y].contains("Y0"),
+            "a zero or unknown count shows no number: {}",
+            rows[y]
+        );
+    }
+    for id in [&a, &b] {
+        let y = row_of(&rows, &untitled(id)).expect("row");
+        assert!(
+            !rows[y].contains(" Y"),
+            "a session with no branch has no marker: {}",
+            rows[y]
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_state_marker_is_at_the_right_edge() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    app.handle_event(Event::PermissionRequested {
+        session_id: a.clone(),
+        request_id: "p1".to_string(),
+        permission: "file:write".to_string(),
+        description: "write".to_string(),
+        options: vec!["once".to_string()],
+    })
+    .await;
+
+    let rows = sidebar_rows(&mut app);
+    let a_row = row_of(&rows, &untitled(&a)).expect("A");
+    let row = &rows[a_row];
+
+    assert_eq!(state_marker(row), '!');
+    assert!(
+        row.find('!').expect("marker") > row.find("untitled").expect("title"),
+        "the marker follows the title: {row}"
+    );
+    assert!(
+        row.starts_with("\u{2502}  untitled"),
+        "no marker before the title: {row}"
+    );
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_narrow_width_drops_the_age_before_the_title() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    app.storage
+        .update_session(&a, "a session title")
+        .expect("title");
+    app.sidebar.dirty = true;
+
+    let wide = sidebar_rows(&mut app);
+    let y = row_of(&wide, "a session title").expect("row");
+    assert!(
+        wide[y].contains(" now "),
+        "age shown when wide: {}",
+        wide[y]
+    );
+
+    app.sidebar.width = sessions_sidebar::MIN_WIDTH;
+    let narrow = sidebar_rows(&mut app);
+    let y = row_of(&narrow, "a session ti").expect("row");
+    assert!(
+        !narrow[y].contains("now"),
+        "the age is dropped first: {}",
+        narrow[y]
+    );
+    assert!(
+        narrow[y].contains("a session ti"),
+        "the title keeps the room: {}",
+        narrow[y]
+    );
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_search_row_starts_the_filter() {
+    let (mut app, a, b) = app_with_sidebar().await;
+    app.storage
+        .update_session(&a, "alpha parser")
+        .expect("title A");
+    app.storage
+        .update_session(&b, "beta lexer")
+        .expect("title B");
+    app.sidebar.dirty = true;
+    let rows = sidebar_rows(&mut app);
+    let search = row_of(&rows, "/ Search").expect("search row");
+    assert_eq!(search, row_of(&rows, "+ New session").expect("new") + 1);
+
+    app.sidebar.focused = true;
+    app.sidebar.cursor = 1;
+    app.handle_key_event(key(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    assert!(
+        app.sidebar.filter_editing,
+        "Enter on Search starts the filter"
+    );
+    for c in ['b', 'e', 't'] {
+        app.handle_key_event(key(KeyCode::Char(c), KeyModifiers::NONE))
+            .await;
+    }
+
+    let rows = sidebar_rows(&mut app);
+    assert!(row_of(&rows, "/ bet_").is_some(), "{rows:#?}");
+    assert!(row_of(&rows, "beta lexer").is_some());
+    assert!(row_of(&rows, "alpha parser").is_none());
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_n_on_a_heading_opens_a_session_in_that_project() {
+    let (mut app, _a, b) = app_with_sidebar().await;
+    let dir = fixture_dir("n_on_heading").join("other");
+    std::fs::create_dir_all(&dir).expect("dir");
+    let project = app
+        .storage
+        .ensure_project(&dir.display().to_string())
+        .expect("project");
+    app.sidebar.dirty = true;
+    app.sidebar.cursor = heading_index(&mut app, &project.id);
+    app.sidebar.focused = true;
+
+    app.handle_key_event(key(KeyCode::Char('n'), KeyModifiers::NONE))
+        .await;
+
+    let id = app.session.session_id.clone().expect("focused session");
+    assert_ne!(id, b, "a new session is focused");
+    let row = app.storage.get_session(&id).expect("get").expect("row");
+    assert_eq!(row.project_id, project.id);
+    assert_eq!(std::path::PathBuf::from(row.directory), dir);
+    assert_eq!(app.cwd_path, dir, "the TUI works in the project");
+    assert!(!app.sidebar.focused, "focus returns to the input");
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_b_on_a_heading_prefills_the_branch_command() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project_id = app
+        .storage
+        .get_session(&a)
+        .expect("get")
+        .expect("row")
+        .project_id;
+    app.sidebar.cursor = heading_index(&mut app, &project_id);
+    app.sidebar.focused = true;
+
+    app.handle_key_event(key(KeyCode::Char('b'), KeyModifiers::NONE))
+        .await;
+
+    assert_eq!(
+        app.session.input,
+        format!("/session new --project {project_id} --branch ")
+    );
+    assert!(!app.sidebar.focused);
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_project_update_reloads_the_rows() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project_id = app
+        .storage
+        .get_session(&a)
+        .expect("get")
+        .expect("row")
+        .project_id;
+    let _ = sidebar_rows(&mut app);
+    assert!(!app.sidebar.dirty);
+    // What the request-count service does when a stored count changes.
+    app.storage
+        .rename_project(&project_id, "Fresh Name")
+        .expect("rename");
+
+    app.handle_event(Event::ProjectUpdated { project_id }).await;
+
+    assert!(app.sidebar.dirty);
+    assert!(row_of(&sidebar_rows(&mut app), "Fresh Name v").is_some());
 }

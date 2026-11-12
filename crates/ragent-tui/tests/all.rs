@@ -601,6 +601,10 @@ mod test_multisession;
 mod test_panic_hook_thread_scope;
 #[path = "test_probe_t022.rs"]
 mod test_probe_t022;
+#[path = "test_project_base_model.rs"]
+mod test_project_base_model;
+#[path = "test_project_command.rs"]
+mod test_project_command;
 #[path = "test_project_services.rs"]
 mod test_project_services;
 #[path = "test_sessions_sidebar.rs"]

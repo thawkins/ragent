@@ -30,6 +30,9 @@ use crate::event::{Event, EventBus};
 pub const BASE_INTERVAL: Duration = Duration::from_mins(5);
 /// Longest interval a rate-limited project backs off to.
 pub const MAX_INTERVAL: Duration = Duration::from_hours(1);
+/// Shortest gap between two refreshes of one project that an activity hint
+/// ([`PullRequestCounts::nudge`]) can bring about.
+pub const NUDGE_GAP: Duration = Duration::from_mins(1);
 /// Requests per page; the maximum both APIs allow.
 const PER_PAGE: usize = 100;
 /// Pages read per project per refresh. A repository with more requests than
@@ -176,6 +179,7 @@ pub enum RefreshOutcome {
 struct Schedule {
     next_allowed: Instant,
     interval: Duration,
+    last_attempt: Instant,
 }
 
 /// Fetches and stores request counts, at most once per interval per
@@ -237,6 +241,23 @@ impl PullRequestCounts {
         }
     }
 
+    /// Hints that something just happened in `project_id` that may have
+    /// changed its requests (a turn ended, the project was focused). The
+    /// project becomes due once [`NUDGE_GAP`] has passed since its last
+    /// attempt, unless it is backing off after a rate limit.
+    pub fn nudge(&self, project_id: &str) {
+        if let Some(entry) = self
+            .schedule
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(project_id)
+        {
+            if entry.interval == BASE_INTERVAL {
+                entry.next_allowed = entry.next_allowed.min(entry.last_attempt + NUDGE_GAP);
+            }
+        }
+    }
+
     /// Records the outcome of an attempt and schedules the next one.
     fn reschedule(&self, project_id: &str, rate_limited: bool) {
         let mut schedule = self.schedule.lock().unwrap_or_else(PoisonError::into_inner);
@@ -248,11 +269,13 @@ impl PullRequestCounts {
         } else {
             BASE_INTERVAL
         };
+        let now = Instant::now();
         schedule.insert(
             project_id.to_string(),
             Schedule {
-                next_allowed: Instant::now() + interval,
+                next_allowed: now + interval,
                 interval,
+                last_attempt: now,
             },
         );
     }

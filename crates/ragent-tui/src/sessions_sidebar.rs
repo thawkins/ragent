@@ -1,27 +1,35 @@
-//! Left-hand session sidebar (spec MULTISESSION, milestone M5).
+//! Left-hand session sidebar (spec MULTISESSION, milestone M5; spec
+//! `projects`).
 //!
 //! Lists every stored session, a `Pinned` section first and then one section
 //! per project (the launch project first, the rest by most recent activity),
-//! with a `+ New session` row at the top. Each session row shows an attention
-//! marker, the title and a relative age; the focused session is highlighted.
+//! under a `+ New session` row and a `/ Search` row. A project heading shows
+//! the project's name, a chevron (`v` open, `>` collapsed) and its remote
+//! host kind; a project with no sessions is listed too. Each session row
+//! shows the title, a relative age, the branch marker with the count of
+//! pull/merge requests for the session's branch, and an attention marker at
+//! the right edge; the focused session is highlighted.
 //!
-//! Data from storage (groups, titles, pins, missing project directories) is
-//! cached in [`SidebarState`] and rebuilt only when the state is marked dirty
-//! by a session event or command (NFR-03). Attention markers come from the
-//! open views in memory, so they are read live each frame.
+//! Data from storage (groups, titles, pins, branches, request counts,
+//! missing project directories) is cached in [`SidebarState`] and rebuilt
+//! only when the state is marked dirty by a session or project event or a
+//! command (NFR-03). Attention markers come from the open views in memory,
+//! so they are read live each frame.
 //!
 //! Keys: `Alt+S` shows/focuses/hides the sidebar, `Ctrl+N` opens a session,
 //! `Ctrl+Up`/`Ctrl+Down` move to the previous/next session, `Alt+R` returns
 //! to the most recently focused one. While the sidebar has focus: arrows and
 //! `PageUp`/`PageDown` move, `Enter` acts on the row, `Left`/`Right` collapse
 //! and expand a section, `p` pins, `a` archives, `F2` renames, `/` filters,
-//! `Esc` clears the filter or returns focus to the input.
+//! `Esc` clears the filter or returns focus to the input. On a project
+//! heading `n` starts a session in that project and `b` prefills the command
+//! that starts one in its own worktree at a branch.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ragent_storage::{ProjectSessions, Storage, project_root};
+use ragent_storage::{ProjectSessions, SessionCheckout, Storage, project_root};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -39,8 +47,13 @@ pub const DEFAULT_WIDTH: u16 = 32;
 pub const MIN_WIDTH: u16 = 20;
 /// Below this terminal width the sidebar hides itself (FR-10).
 pub const MIN_TERMINAL_WIDTH: u16 = 100;
-/// Section key of the `Pinned` pseudo-project; NUL keeps it apart from paths.
+/// Section key of the `Pinned` pseudo-project; NUL keeps it apart from ids.
 const PINNED_KEY: &str = "\0pinned";
+/// ASCII marker shown before a session's request count; it stands for a
+/// branch.
+pub const BRANCH_MARK: char = 'Y';
+/// Narrowest title a session row keeps before it gives up its age column.
+const MIN_TITLE_WIDTH: usize = 12;
 
 /// Sidebar layout and cached session data.
 #[derive(Debug)]
@@ -59,7 +72,7 @@ pub struct SidebarState {
     pub filter: String,
     /// Whether keys are currently typed into the filter.
     pub filter_editing: bool,
-    /// Section keys (project roots, or the pinned key) that are collapsed.
+    /// Section keys (project ids, or the pinned key) that are collapsed.
     pub collapsed: BTreeSet<String>,
     /// Whether the cached storage data must be reloaded before the next use.
     pub dirty: bool,
@@ -67,8 +80,11 @@ pub struct SidebarState {
     pub groups: Vec<ProjectSessions>,
     /// Cached ids of pinned sessions.
     pub pinned: HashSet<String>,
-    /// Cached project roots whose directory no longer exists.
+    /// Cached ids of projects whose directory no longer exists.
     pub missing: HashSet<String>,
+    /// Cached branch, worktree and request count of each session that has a
+    /// branch (spec `projects`).
+    pub checkouts: HashMap<String, SessionCheckout>,
     /// Area painted last frame; zero-sized when hidden.
     pub area: Rect,
     /// Whether the right border is being dragged to resize.
@@ -90,6 +106,7 @@ impl Default for SidebarState {
             groups: Vec::new(),
             pinned: HashSet::new(),
             missing: HashSet::new(),
+            checkouts: HashMap::new(),
             area: Rect::default(),
             dragging: false,
         }
@@ -163,9 +180,11 @@ impl SidebarState {
 pub enum SidebarRow {
     /// The `+ New session` action.
     NewSession,
+    /// The `/ Search` action: starts the filter.
+    Search,
     /// A section heading.
     Header {
-        /// Project root, or the pinned key.
+        /// Project id, or the pinned key.
         key: String,
         /// Text shown for the section.
         label: String,
@@ -175,6 +194,8 @@ pub enum SidebarRow {
         collapsed: bool,
         /// Whether the project directory no longer exists.
         missing: bool,
+        /// The project's remote host kind (`github`, `gitlab`), if any.
+        remote: Option<String>,
     },
     /// A session.
     Session {
@@ -184,6 +205,12 @@ pub enum SidebarRow {
         title: String,
         /// RFC 3339 last-activity time.
         updated_at: String,
+        /// The session's branch, if it has one.
+        branch: Option<String>,
+        /// Whether the session owns its git worktree.
+        owns_worktree: bool,
+        /// Pull/merge requests whose source is `branch`; `None` when unknown.
+        requests: Option<i64>,
     },
 }
 
@@ -220,49 +247,47 @@ pub fn refresh_if_dirty(app: &mut App) {
     match (
         app.storage.list_sessions_grouped(),
         app.storage.pinned_session_ids(),
+        app.storage.session_checkouts(),
     ) {
-        (Ok(groups), Ok(pinned)) => {
+        (Ok(groups), Ok(pinned), Ok(checkouts)) => {
             app.sidebar.missing = groups
                 .iter()
-                .filter(|g| !Path::new(&g.project_id).exists())
+                .filter(|g| !Path::new(&g.project.worktree).exists())
                 .map(|g| g.project_id.clone())
                 .collect();
             app.sidebar.groups = groups;
             app.sidebar.pinned = pinned;
+            app.sidebar.checkouts = checkouts;
             app.sidebar.dirty = false;
         }
-        (Err(e), _) | (_, Err(e)) => {
+        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
             // Keep the stale rows and retry on the next frame.
             tracing::warn!(error = %e, "session sidebar refresh failed");
         }
     }
 }
 
-/// Section labels: each project's directory name, or `parent/name` when two
-/// projects share a name.
+/// Section labels: each project's name, or `parent/name` (the parent being
+/// the directory that holds the project's worktree) when two projects share
+/// a name.
 fn project_labels(groups: &[ProjectSessions]) -> HashMap<String, String> {
-    let base = |id: &str| {
-        Path::new(id)
-            .file_name()
-            .map_or_else(|| id.to_string(), |n| n.to_string_lossy().into_owned())
-    };
-    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut counts: HashMap<&str, usize> = HashMap::new();
     for g in groups {
-        *counts.entry(base(&g.project_id)).or_default() += 1;
+        *counts.entry(g.project.name.as_str()).or_default() += 1;
     }
     groups
         .iter()
         .map(|g| {
-            let name = base(&g.project_id);
-            let label = if counts.get(&name).copied().unwrap_or(0) > 1 {
-                let parent = Path::new(&g.project_id)
+            let name = g.project.name.as_str();
+            let label = if counts.get(name).copied().unwrap_or(0) > 1 {
+                let parent = Path::new(&g.project.worktree)
                     .parent()
                     .and_then(Path::file_name)
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 format!("{parent}/{name}")
             } else {
-                name
+                name.to_string()
             };
             (g.project_id.clone(), label)
         })
@@ -300,7 +325,7 @@ pub fn build_rows(app: &App) -> Vec<SidebarRow> {
     let filter = state.filter.to_lowercase();
     let labels = project_labels(&state.groups);
     let launch = project_root(&app.cwd_path.display().to_string());
-    let mut rows = vec![SidebarRow::NewSession];
+    let mut rows = vec![SidebarRow::NewSession, SidebarRow::Search];
 
     let mut pinned: Vec<(&ragent_storage::SessionRow, &str)> = state
         .groups
@@ -313,12 +338,22 @@ pub fn build_rows(app: &App) -> Vec<SidebarRow> {
         .collect();
     pinned.sort_by(|a, b| b.0.updated_at.cmp(&a.0.updated_at));
     push_section(
-        &mut rows, app, PINNED_KEY, "Pinned", &pinned, &filter, false,
+        &mut rows,
+        app,
+        Section {
+            key: PINNED_KEY,
+            label: "Pinned",
+            missing: false,
+            remote: None,
+            show_empty: false,
+        },
+        &pinned,
+        &filter,
     );
 
     let mut ordered: Vec<&ProjectSessions> = state.groups.iter().collect();
     // Stable sort: the launch project first, the rest keep recency order.
-    ordered.sort_by_key(|g| g.project_id != launch);
+    ordered.sort_by_key(|g| g.project.worktree != launch);
     for group in ordered {
         let label = labels.get(&group.project_id).map_or("", String::as_str);
         let sessions: Vec<(&ragent_storage::SessionRow, &str)> = group
@@ -327,29 +362,42 @@ pub fn build_rows(app: &App) -> Vec<SidebarRow> {
             .filter(|s| !state.pinned.contains(&s.id))
             .map(|s| (s, label))
             .collect();
-        let missing = state.missing.contains(&group.project_id);
         push_section(
             &mut rows,
             app,
-            &group.project_id,
-            label,
+            Section {
+                key: &group.project_id,
+                label,
+                missing: state.missing.contains(&group.project_id),
+                remote: group.project.remote.as_ref().map(|r| r.kind.as_str()),
+                // A project with no sessions is still listed, so a session
+                // can be started in it (spec `projects`).
+                show_empty: true,
+            },
             &sessions,
             &filter,
-            missing,
         );
     }
     rows
+}
+
+/// What [`push_section`] needs to know about one section.
+struct Section<'a> {
+    key: &'a str,
+    label: &'a str,
+    missing: bool,
+    remote: Option<&'a str>,
+    /// Whether the heading is shown when the section has no sessions.
+    show_empty: bool,
 }
 
 /// Appends one section (heading plus visible sessions) to `rows`.
 fn push_section(
     rows: &mut Vec<SidebarRow>,
     app: &App,
-    key: &str,
-    label: &str,
+    section: Section<'_>,
     sessions: &[(&ragent_storage::SessionRow, &str)],
     filter: &str,
-    missing: bool,
 ) {
     let matching: Vec<&ragent_storage::SessionRow> = sessions
         .iter()
@@ -360,23 +408,31 @@ fn push_section(
         })
         .map(|(s, _)| *s)
         .collect();
-    if matching.is_empty() {
+    // While filtering only sections with a match are shown.
+    if matching.is_empty() && !(section.show_empty && filter.is_empty()) {
         return;
     }
     // A filter shows every match, collapsed or not.
-    let collapsed = filter.is_empty() && app.sidebar.collapsed.contains(key);
+    let collapsed = filter.is_empty() && app.sidebar.collapsed.contains(section.key);
     rows.push(SidebarRow::Header {
-        key: key.to_string(),
-        label: label.to_string(),
+        key: section.key.to_string(),
+        label: section.label.to_string(),
         count: matching.len(),
         collapsed,
-        missing,
+        missing: section.missing,
+        remote: section.remote.map(str::to_string),
     });
     if !collapsed {
-        rows.extend(matching.into_iter().map(|s| SidebarRow::Session {
-            id: s.id.clone(),
-            title: display_title(&s.id, &s.title),
-            updated_at: s.updated_at.clone(),
+        rows.extend(matching.into_iter().map(|s| {
+            let checkout = app.sidebar.checkouts.get(&s.id);
+            SidebarRow::Session {
+                id: s.id.clone(),
+                title: display_title(&s.id, &s.title),
+                updated_at: s.updated_at.clone(),
+                branch: checkout.and_then(|c| c.branch.clone()),
+                owns_worktree: checkout.is_some_and(|c| c.worktree.is_some()),
+                requests: checkout.and_then(|c| c.pr_count),
+            }
         }));
     }
 }
@@ -515,17 +571,42 @@ fn row_line(
             fit(" + New session", width),
             Style::default().fg(Color::Green),
         )),
+        SidebarRow::Search => {
+            let state = &app.sidebar;
+            let text = if state.filter_editing || !state.filter.is_empty() {
+                let caret = if state.filter_editing { "_" } else { "" };
+                format!(" / {}{caret}", state.filter)
+            } else {
+                " / Search".to_string()
+            };
+            Line::from(Span::styled(
+                fit(&text, width),
+                Style::default().fg(Color::Gray),
+            ))
+        }
         SidebarRow::Header {
             label,
             count,
             collapsed,
             missing,
+            remote,
             ..
         } => {
+            // Name first, chevron after it: `ragent v`, `ragent >` when
+            // collapsed.
             let arrow = if *collapsed { '>' } else { 'v' };
-            let suffix = if *missing { " (missing)" } else { "" };
+            let mut suffix = String::new();
+            if *collapsed && *count > 0 {
+                suffix.push_str(&format!(" ({count})"));
+            }
+            if let Some(kind) = remote {
+                suffix.push_str(&format!(" [{kind}]"));
+            }
+            if *missing {
+                suffix.push_str(" (missing)");
+            }
             Line::from(Span::styled(
-                fit(&format!("{arrow} {label} ({count}){suffix}"), width),
+                fit(&format!("{label} {arrow}{suffix}"), width),
                 Style::default()
                     .fg(if *missing {
                         Color::DarkGray
@@ -539,11 +620,28 @@ fn row_line(
             id,
             title,
             updated_at,
+            branch,
+            owns_worktree,
+            requests,
         } => {
             let (marker, colour) = attention_marker(attention_of(app, id));
-            let age = relative_age(updated_at, now);
-            // "  m " prefix, title, one space, age.
-            let title_width = width.saturating_sub(4 + age.len() + 1);
+            // Branch marker and request count, e.g. `Y3`; the count is left
+            // out when it is zero or not known yet.
+            let branch_part = branch.as_ref().map(|_| match requests.filter(|n| *n > 0) {
+                Some(n) => format!("{BRANCH_MARK}{n}"),
+                None => BRANCH_MARK.to_string(),
+            });
+            // Right edge: `[age ][branch ]state`. Indent of two before the
+            // title and one space after it.
+            let branch_width = branch_part.as_ref().map_or(0, |b| b.len() + 1);
+            let fixed = 2 + 1 + branch_width + 1;
+            let mut age = relative_age(updated_at, now);
+            // When space is short the age goes first, then the title is cut.
+            if width.saturating_sub(fixed + age.len() + 1) < MIN_TITLE_WIDTH {
+                age.clear();
+            }
+            let age_width = if age.is_empty() { 0 } else { age.len() + 1 };
+            let title_width = width.saturating_sub(fixed + age_width);
             let title = fit(title, title_width);
             let pad = title_width.saturating_sub(title.chars().count());
             let focused = app.session.session_id.as_deref() == Some(id.as_str());
@@ -554,14 +652,31 @@ fn row_line(
             } else {
                 Style::default()
             };
-            Line::from(vec![
+            let mut spans = vec![
                 Span::raw("  "),
-                Span::styled(marker.to_string(), Style::default().fg(colour)),
-                Span::raw(" "),
                 Span::styled(title, title_style),
                 Span::raw(" ".repeat(pad + 1)),
-                Span::styled(age, Style::default().fg(Color::DarkGray)),
-            ])
+            ];
+            if !age.is_empty() {
+                spans.push(Span::styled(age, Style::default().fg(Color::DarkGray)));
+                spans.push(Span::raw(" "));
+            }
+            if let Some(part) = branch_part {
+                // A session with its own worktree stands out from one that
+                // only records a branch.
+                let branch_colour = if *owns_worktree {
+                    Color::Magenta
+                } else {
+                    Color::DarkGray
+                };
+                spans.push(Span::styled(part, Style::default().fg(branch_colour)));
+                spans.push(Span::raw(" "));
+            }
+            spans.push(Span::styled(
+                marker.to_string(),
+                Style::default().fg(colour),
+            ));
+            Line::from(spans)
         }
     }
 }
@@ -578,7 +693,7 @@ fn ordered_session_ids(app: &App) -> Vec<String> {
         .collect();
     pinned.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     let mut ordered: Vec<&ProjectSessions> = state.groups.iter().collect();
-    ordered.sort_by_key(|g| g.project_id != launch);
+    ordered.sort_by_key(|g| g.project.worktree != launch);
     pinned
         .into_iter()
         .chain(
@@ -658,6 +773,7 @@ fn activate_row(app: &mut App, index: usize) {
             report(app, result);
             app.sidebar.focused = false;
         }
+        Some(SidebarRow::Search) => start_filter(app),
         Some(SidebarRow::Header { key, .. }) => toggle_section(app, key, None),
         Some(SidebarRow::Session { id, .. }) => {
             let result = app.switch_to_session(id);
@@ -665,6 +781,26 @@ fn activate_row(app: &mut App, index: usize) {
             app.sidebar.focused = false;
         }
         None => {}
+    }
+}
+
+/// Starts typing a new filter (the `/` key and the `/ Search` row).
+fn start_filter(app: &mut App) {
+    app.sidebar.filter_editing = true;
+    app.sidebar.filter.clear();
+}
+
+/// The project whose heading is under the cursor, if the cursor is on a
+/// project heading (not the pinned one).
+fn cursor_project(app: &App) -> Option<ragent_storage::ProjectRow> {
+    match build_rows(app).get(app.sidebar.cursor) {
+        Some(SidebarRow::Header { key, .. }) => app
+            .sidebar
+            .groups
+            .iter()
+            .find(|g| g.project_id == *key)
+            .map(|g| g.project.clone()),
+        _ => None,
     }
 }
 
@@ -770,9 +906,26 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
                 toggle_section(app, &section, Some(key.code == KeyCode::Left));
             }
         }
-        KeyCode::Char('/') => {
-            state.filter_editing = true;
-            state.filter.clear();
+        KeyCode::Char('/') => start_filter(app),
+        // On a project heading: `n` starts a session in that project, `b`
+        // prefills the command that starts one on its own branch.
+        KeyCode::Char('n') => {
+            if let Some(project) = cursor_project(app) {
+                let result = app.open_new_session_in_project(&project.into(), None);
+                let ok = result.is_ok();
+                report(app, result);
+                if ok {
+                    app.sidebar.focused = false;
+                }
+            }
+        }
+        KeyCode::Char('b') => {
+            if let Some(project) = cursor_project(app) {
+                let text = format!("/session new --project {} --branch ", project.id);
+                app.session.input_cursor = text.chars().count();
+                app.session.input = text;
+                app.sidebar.focused = false;
+            }
         }
         KeyCode::Char('p') => {
             if let Some(id) = cursor_session(app) {

@@ -39,6 +39,9 @@ pub(super) const SESSION_HELP: &str = "## /session - Multiple sessions\n\n\
 | `/session` or `/session list` | List open sessions and what each needs |\n\
 | `/session new [path]` | Start a new session in `path` (default: this project); \
 the current one keeps running |\n\
+| `/session new --project <name>` | Start a new session in a named project |\n\
+| `/session new --branch <branch>` | Start a new session in its own git worktree at \
+`branch` (combine with `--project` or a path) |\n\
 | `/session switch <id-or-title>` | Focus a session by id, id prefix/suffix or title prefix |\n\
 | `/session close` | Close the focused session (it stays in storage) |\n\
 | `/session list --all` | List stored sessions grouped by project |\n\
@@ -131,9 +134,18 @@ impl App {
         // Session activity changes the sidebar's titles and ordering (NFR-03).
         if matches!(
             event,
-            Event::SessionCreated { .. } | Event::SessionUpdated { .. } | Event::MessageEnd { .. }
+            Event::SessionCreated { .. }
+                | Event::SessionUpdated { .. }
+                | Event::MessageEnd { .. }
+                | Event::ProjectUpdated { .. }
         ) {
             self.sidebar.dirty = true;
+        }
+        // A finished turn may have opened a pull/merge request.
+        if let Event::MessageEnd { session_id, .. } = &event {
+            if self.session.session_id.as_deref() == Some(session_id.as_str()) {
+                self.nudge_request_counts();
+            }
         }
         // The end of a real reply (not the AGENTS.md `init` exchange) is when
         // an untitled session gets its title (FR-07).
@@ -271,7 +283,7 @@ impl App {
 
     /// A fresh view that inherits the focused session's agent, model and
     /// directory.
-    fn fresh_session_view(&self) -> SessionView {
+    pub(super) fn fresh_session_view(&self) -> SessionView {
         let current = &self.session;
         let mut view = SessionView::new(
             current.agent_name.clone(),
@@ -291,7 +303,7 @@ impl App {
     ///
     /// A view without a session id has never been created in storage and
     /// holds nothing worth keeping, so it is dropped.
-    fn park_session(&mut self, previous: SessionView) {
+    pub(super) fn park_session(&mut self, previous: SessionView) {
         if previous.session_id.is_some() {
             self.background.insert_front(previous);
         }
@@ -299,7 +311,7 @@ impl App {
 
     /// Resets global UI that describes the previously focused session and
     /// moves the TUI into the focused session's directory.
-    fn after_focus_change(&mut self) {
+    pub(super) fn after_focus_change(&mut self) {
         self.session.unread = false;
         self.session.errored = false;
         self.sidebar.dirty = true;
@@ -320,6 +332,7 @@ impl App {
         self.status = format!("session {short}");
         self.persist_open_sessions();
         self.release_unused_projects();
+        self.nudge_request_counts();
     }
 
     /// Makes the focused session's directory the TUI's working directory
@@ -785,8 +798,8 @@ impl App {
         let mut text = String::new();
         for group in &groups {
             text.push_str(&format!(
-                "### {}\n\n| | Session | Title | Updated |\n|---|---|---|---|\n",
-                group.project_id
+                "### {} - `{}`\n\n| | Session | Title | Updated |\n|---|---|---|---|\n",
+                group.project.name, group.project.worktree
             ));
             for row in &group.sessions {
                 text.push_str(&format!(
@@ -859,10 +872,7 @@ impl App {
                 Err("usage: /session unarchive <id-or-title>".to_string())
             }
             "unarchive" => self.unarchive_session_query(rest),
-            "new" if rest.is_empty() => self.open_new_session(),
-            "new" => self
-                .allowed_session_directory(rest)
-                .and_then(|dir| self.open_new_session_in(dir)),
+            "new" => self.session_new_command(rest),
             "switch" if rest.is_empty() => Err("usage: /session switch <id-or-title>".to_string()),
             "switch" => self
                 .resolve_session_query(rest)
