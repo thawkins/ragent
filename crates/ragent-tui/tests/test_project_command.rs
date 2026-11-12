@@ -85,6 +85,61 @@ fn last_message(app: &App) -> String {
         .unwrap_or_default()
 }
 
+/// The cells of every table in a rendered message, with wrapped cells put
+/// back together.
+///
+/// The transcript renders a Markdown table as a boxed table fitted to its
+/// content, and a long cell (a path, a heading) is wrapped onto several
+/// lines, even mid-word. Where that happens depends on the lengths involved
+/// (the checkout path differs between machines), so assertions read the
+/// cells, not the painted lines. Fragments of one cell are joined without a
+/// separator.
+fn table_cells(text: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut row: Vec<String> = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('|') && line.ends_with('|') && line.len() > 1 {
+            let parts: Vec<&str> = line[1..line.len() - 1].split('|').collect();
+            if row.len() < parts.len() {
+                row.resize(parts.len(), String::new());
+            }
+            for (cell, part) in row.iter_mut().zip(parts) {
+                cell.push_str(part.trim());
+            }
+        } else {
+            cells.append(&mut row);
+        }
+    }
+    cells.append(&mut row);
+    cells
+}
+
+/// Whether some table cell of `text` contains `needle`. Spaces are ignored
+/// on both sides, because a cell wrapped at a space loses it.
+fn has_cell(text: &str, needle: &str) -> bool {
+    let squeeze = |t: &str| t.split_whitespace().collect::<String>();
+    let needle = squeeze(needle);
+    table_cells(text)
+        .iter()
+        .any(|cell| squeeze(cell).contains(&needle))
+}
+
+#[test]
+fn test_project_command_table_cells_rejoins_wrapped_cells() {
+    let painted = "\
+        +----------+---------+\n\
+        | Project  | Session |\n\
+        |          | s       |\n\
+        +----------+---------+\n\
+        | show_lis | `/a/b/s |\n\
+        | t        | how`    |\n\
+        +----------+---------+";
+    assert_eq!(
+        table_cells(painted),
+        vec!["Project", "Sessions", "show_list", "`/a/b/show`"]
+    );
+}
+
 #[tokio::test]
 async fn test_project_command_show_and_list() {
     let (mut app, project, _base) = app_with_project("show_list");
@@ -94,21 +149,24 @@ async fn test_project_command_show_and_list() {
     let launch = ragent_storage::project_root(&app.cwd_path.display().to_string());
     assert!(focused.contains("## Project"), "{focused}");
     assert!(
-        focused.contains(&launch),
+        has_cell(&focused, &launch),
         "shows the focused project: {focused}"
     );
 
     app.execute_slash_command("/project show show_list").await;
     let named = last_message(&app);
     assert!(named.contains("## Project show_list"), "{named}");
-    assert!(named.contains(&project.worktree.display().to_string()));
-    assert!(named.contains("none (local project)"), "{named}");
+    assert!(
+        has_cell(&named, &project.worktree.display().to_string()),
+        "{named}"
+    );
+    assert!(has_cell(&named, "none (local project)"), "{named}");
 
     app.execute_slash_command("/project list").await;
     let list = last_message(&app);
-    assert!(list.contains("show_list"), "{list}");
+    assert!(has_cell(&list, "show_list"), "{list}");
     assert!(
-        list.contains("Worktree") && list.contains("Base model"),
+        has_cell(&list, "Worktree") && has_cell(&list, "Base model"),
         "{list}"
     );
 
@@ -136,7 +194,7 @@ async fn test_project_command_help_lists_every_subcommand() {
         "list", "add", "rename", "model", "refresh", "prune", "remove",
     ] {
         assert!(
-            help.contains(&format!("/project {sub}")),
+            has_cell(&help, &format!("/project {sub}")),
             "missing {sub}: {help}"
         );
     }
