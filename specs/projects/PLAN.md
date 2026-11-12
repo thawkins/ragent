@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 ALTER TABLE sessions ADD COLUMN branch TEXT;
 ALTER TABLE sessions ADD COLUMN worktree TEXT;
+ALTER TABLE sessions ADD COLUMN pr_count INTEGER;   -- last known count, NULL = unknown
 ```
 
 Backfill: one project per distinct `sessions.project_id` path (archived sessions
@@ -133,6 +134,23 @@ lazily the first time a backfilled project is focused, not in the migration.
    those services by `project_id` so the worktree session shares them. Verify this in
    `project_services.rs` before T-006 lands.
 
+7. **Pull/merge request count.** The number beside a row's branch marker is the count of
+   pull requests (GitHub) or merge requests (GitLab) whose source branch is the session's
+   `branch`. A `PullRequestCounts` service in `ragent-agent/src/project/` fetches it:
+   - One paginated list call per project (all requests of the repository, grouped by
+     source branch in memory), not one call per row. It reuses the existing clients in
+     `ragent-tools-vcs` (`github/github_prs.rs`, `gitlab/gitlab_mrs.rs`) and their stored
+     credentials.
+   - It runs on a background task, never on the render path. Triggers: sidebar shown,
+     project focused, a session's turn ends, `/project refresh`, and a 5-minute interval
+     while the sidebar is visible. Results are cached per project and the sidebar is
+     marked dirty when they change (same pattern as the existing storage refresh).
+   - The last known count is stored in `sessions.pr_count` so the sidebar shows it at
+     startup before the first fetch completes.
+   - No credentials, an unknown host, a rate limit or a network error leaves the count
+     blank and logs at `debug!`; it never blocks or raises a dialog. A rate-limit
+     response doubles the interval for that project up to 1 hour.
+
 ## Sidebar: Screenshot Capabilities Mapped to Work
 
 | Screenshot element | Existing | Work |
@@ -142,7 +160,7 @@ lazily the first time a backfilled project is focused, not in the migration.
 | Project heading with chevron | Collapsible heading, no chevron | Render `v` / `>` after the name; show `[github]` / `[gitlab]` when a remote is known |
 | Projects with no sessions | Not listed (grouping comes from sessions) | List every non-archived project |
 | Branch icon on each row | None | Branch marker; colour distinguishes a session-owned worktree from the shared project worktree |
-| Number next to the branch icon | None | Count from `SessionSummary::files_changed` (see Open Question 3) |
+| Number next to the branch icon | None | Count of pull/merge requests whose source branch is the session's branch (Behaviour 7); blank when the session has no branch, the project has no remote, or the count is zero or unknown |
 | Right-aligned dot (unread, needs attention) | Marker at the row start | Move to the right edge; keep `*` `!` `o` `x` meanings and colours |
 | Cloud icon (remote session) | None | Out of scope: ragent has no cloud sessions |
 | Highlighted focused row | Exists | No change |
@@ -176,16 +194,17 @@ All glyphs stay ASCII, per the project style rule.
 | T-006 | Session worktree create/prune; per-project services keyed by `project_id` | ragent-agent, ragent-tui | L | T-005 |
 | T-007 | Base model seeding and `/project model` | ragent-tui | S | T-005 |
 | T-008 | `/project` command and `/session new --branch` | ragent-tui | M | T-006 |
-| T-009 | Sidebar data: headings from `Project::name`, empty projects, branch + count per row | ragent-tui | M | T-005 |
+| T-009 | Sidebar data: headings from `Project::name`, empty projects, branch + request count per row | ragent-tui | M | T-005, T-015 |
 | T-010 | Sidebar rendering: chevron, remote tag, branch marker, right-aligned state marker, `Search` row | ragent-tui | M | T-009 |
 | T-011 | CLI grouped `session list` and `project` subcommands | ragent (root) | S | T-005 |
 | T-012 | Server routes, `SessionResponse` fields, OpenAPI | ragent-server | M | T-005 |
 | T-013 | Session archive carries the project | ragent-agent | S | T-005 |
+| T-015 | `PullRequestCounts` service: per-project list call for GitHub and GitLab, grouping by source branch, cache, background refresh, back-off, `sessions.pr_count` | ragent-agent, ragent-tools-vcs, ragent-storage | L | T-004 |
 | T-014 | SPEC.md, QUICKSTART.md, TUI-QUICKSTART.md, CHANGELOG.md, `docs/plans/MULTISESSION.md` Q2 note | docs | S | all |
 
 Effort key: S = under half a day, M = about one day, L = two to three days. Total: about
-9 to 11 working days. T-001 to T-005 (about 3.5 days) deliver the stored project with
-attached sessions; T-009/T-010 (about 2 days) deliver the screenshot-level sidebar;
+11 to 14 working days. T-001 to T-005 (about 3.5 days) deliver the stored project with
+attached sessions; T-015 plus T-009/T-010 (about 4 to 5 days) deliver the screenshot-level sidebar;
 T-006 (2 to 3 days) delivers session worktrees.
 
 ## Verification
@@ -201,6 +220,7 @@ Each task lands with tests in the crate's `tests/` directory, registered in `tes
 | T-006 | `ragent-agent/tests/test_session_worktree.rs` | Worktree created at the requested branch; the session groups under the owning project, not a new one; prune skips a dirty worktree |
 | T-007 | `ragent-tui/tests/test_project_base_model.rs` | New session takes the project base model; `/model` in one session leaves the project base and other sessions unchanged |
 | T-009/10 | extend `ragent-tui/tests/test_sessions_sidebar.rs` | Painted rows show the chevron, remote tag, branch + count and right-aligned marker; an empty project is listed; a renamed project shows its new name; narrow widths drop the age before the title |
+| T-015 | `ragent-agent/tests/test_pull_request_counts.rs` | Against a local mock HTTP server: GitHub and GitLab list responses are grouped by source branch across pages; one request series per project regardless of session count; missing credentials, 403 rate limit and network failure leave counts unknown and widen the interval; the stored `pr_count` is shown before the first fetch |
 | T-012 | `ragent-server/tests/test_projects_routes.rs` | Route round trips; `POST /sessions` with `project_id`; containment check still rejects outside paths |
 
 Git-using tests build their repositories under `target/temp/<unique-name>` and pass the
@@ -215,9 +235,12 @@ worktree root explicitly; no test writes into the repository.
 2. **Worktree location.** Plan assumes the ragent data directory
    (`worktrees/<project>/<branch>`). Alternative: a sibling directory of the project
    worktree.
-3. **Meaning of the number beside the branch icon.** Plan uses files changed, which is
-   already tracked. Alternatives: commits ahead of the default branch, or an open
-   pull/merge request number (needs a GitHub/GitLab API call per row).
-4. **Icon colour in the screenshot.** One row has a green icon. Plan assumes colour means
-   "session owns a worktree". If it should mean "pull/merge request open or merged", that
-   adds a remote status poll and belongs in a follow-up.
+3. **Which requests are counted.** Decided: the number is a count of pull/merge
+   requests. Plan assumes all states (open, merged, closed) for the session's branch,
+   since the screenshot shows counts as high as 20. Alternative: open requests only.
+4. **Sessions without their own branch.** Plan shows no count for a session running in
+   the shared project worktree. Alternative: count requests for whatever branch that
+   worktree currently has checked out, which makes several rows show the same number.
+5. **Icon colour in the screenshot.** One row has a green icon. Plan assumes colour means
+   "session owns a worktree". Because request data is now fetched anyway, colour could
+   instead show request state (for example green = merged) at no extra API cost.
