@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added - plan for the Project object and sessions sidebar upgrade
+
+- `specs/projects/PLAN.md` plans a stored `Project` (local worktree, base
+  provider/model, optional GitHub or GitLab remote), sessions attached to a
+  project record, optional per-session git worktrees, and sidebar changes.
+  It builds on the unmerged `feat/multisession-m2-session-view` branch. No
+  code changes yet.
+
 ### Fixed - Gemini token totals and cost counted once per response
 
 - Gemini repeats `usageMetadata` on every stream chunk as running totals,
