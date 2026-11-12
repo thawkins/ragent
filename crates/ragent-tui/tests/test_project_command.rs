@@ -250,6 +250,16 @@ async fn test_project_command_session_new_in_a_named_project() {
     assert_eq!(PathBuf::from(row.directory), project.worktree);
     assert_eq!(app.cwd_path, project.worktree);
     assert!(!base.join("trees").exists(), "no worktree without --branch");
+    let transcript: String = app
+        .session
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect();
+    assert!(
+        transcript.contains("Session created"),
+        "a new project session prints the startup block: {transcript}"
+    );
 }
 
 #[tokio::test]

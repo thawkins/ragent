@@ -211,6 +211,8 @@ impl App {
         self.seed_project_base_model(project);
         self.park_session(previous);
         self.after_focus_change();
+        // Every newly created session prints the startup block.
+        self.announce_session_startup();
         self.request_counts.nudge(&project.id);
         Ok(())
     }
