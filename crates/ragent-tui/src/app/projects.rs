@@ -43,7 +43,7 @@ With `--branch` the session gets its own git worktree at that branch.";
 
 /// The outcome of creating a session with its own worktree in the
 /// background: the session and its project, or why it failed.
-pub type PendingProjectSession = Result<(ragent_agent::session::Session, Project), String>;
+pub(crate) type PendingProjectSession = Result<(ragent_agent::session::Session, Project), String>;
 
 /// Options of `/session new` that name a project or branch.
 #[derive(Debug, Default, PartialEq, Eq)]
