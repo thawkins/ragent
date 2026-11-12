@@ -109,6 +109,7 @@ async fn subagent_yolo_answers_the_prompt_while_a_read_only_run_is_prompted() {
         1,
         false,
         true,
+        &std::env::current_dir().expect("cwd"),
     )
     .await
     .expect("the automatic scope resolves without a prompt");
@@ -131,6 +132,7 @@ async fn subagent_yolo_answers_the_prompt_while_a_read_only_run_is_prompted() {
         1,
         false,
         false,
+        &std::env::current_dir().expect("cwd"),
     )
     .await
     .expect("a timed-out prompt counts as a denial, not an error");
@@ -163,6 +165,7 @@ async fn subagent_yolo_never_bypasses_a_forced_checkpoint() {
         1,
         false,
         true,
+        &std::env::current_dir().expect("cwd"),
     )
     .await
     .expect("the checkpoint prompt resolves by timeout into a denial");

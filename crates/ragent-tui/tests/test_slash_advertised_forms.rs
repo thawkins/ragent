@@ -17,7 +17,7 @@ fn description(trigger: &str) -> &'static str {
 #[tokio::test]
 async fn test_status_lists_history_newest_first() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.status_history
         .push(StatusMessage::working("first step"));
     app.status_history
@@ -26,7 +26,7 @@ async fn test_status_lists_history_newest_first() {
     app.execute_slash_command("/status").await;
 
     assert_eq!(app.status, "status: history shown");
-    let text = app.messages.last().expect("output").text_content();
+    let text = app.session.messages.last().expect("output").text_content();
     let first = text.find("first step").expect("first listed");
     let second = text.find("second step").expect("second listed");
     assert!(second < first, "newest first: {text}");
@@ -35,7 +35,7 @@ async fn test_status_lists_history_newest_first() {
 #[tokio::test]
 async fn test_status_clear_empties_history() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.status_history.push(StatusMessage::working("step"));
 
     app.execute_slash_command("/status clear").await;
@@ -47,23 +47,23 @@ async fn test_status_clear_empties_history() {
 #[tokio::test]
 async fn test_status_empty_history_says_so() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.status_history.clear();
 
     app.execute_slash_command("/status").await;
 
-    let text = app.messages.last().expect("output").text_content();
+    let text = app.session.messages.last().expect("output").text_content();
     assert!(text.contains("No status messages recorded yet."), "{text}");
 }
 
 #[tokio::test]
 async fn test_router_help_omits_unhandled_stats_and_tier() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/router help").await;
 
-    let text = app.messages.last().expect("output").text_content();
+    let text = app.session.messages.last().expect("output").text_content();
     assert!(!text.contains("/router stats"), "{text}");
     assert!(!text.contains("/router tier "), "{text}");
     assert!(!description("router").contains("stats"));
@@ -89,11 +89,11 @@ fn test_team_does_not_advertise_open() {
 #[tokio::test]
 async fn test_i18n_help_describes_bare_command_as_status() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/i18n help").await;
 
-    let text = app.messages.last().expect("output").text_content();
+    let text = app.session.messages.last().expect("output").text_content();
     assert!(
         text.contains("bare `/i18n` shows the status"),
         "help must match the dispatcher: {text}"

@@ -12,7 +12,7 @@ mod support;
 /// Give the app's session an id so `append_assistant_text` will create
 /// messages; make_app() leaves `session_id` unset for pure-TUI tests.
 fn with_session(mut app: ragent_tui::App) -> ragent_tui::App {
-    app.session_id = Some(ragent_types::SessionId::new().to_string());
+    app.session.session_id = Some(ragent_types::SessionId::new().to_string());
     app
 }
 
@@ -62,6 +62,7 @@ fn test_poll_govcreate_result_streams_then_renders_terminal_report() {
     // The panel refreshed in place rather than stacking: one message, text
     // contains the drained progress line.
     let panel = app
+        .session
         .messages
         .iter()
         .find_map(|m| m.text_content().find("[ .. ] guard").map(|_| m))
@@ -79,7 +80,7 @@ fn test_poll_govcreate_result_streams_then_renders_terminal_report() {
     );
     // Terminal report landed as a fresh assistant message with the NFR-005
     // surface prefix.
-    let terminal = app.messages.last().map(|m| m.text_content());
+    let terminal = app.session.messages.last().map(|m| m.text_content());
     let terminal = terminal.as_deref().unwrap_or_default();
     assert!(
         terminal.contains("From: /spec govcreate"),
@@ -120,7 +121,7 @@ fn test_poll_govcreate_result_renders_stage_failure_report() {
     app.poll_govcreate_result();
 
     assert!(!app.govcreate_running);
-    let terminal = app.messages.last().map(|m| m.text_content());
+    let terminal = app.session.messages.last().map(|m| m.text_content());
     let terminal = terminal.as_deref().unwrap_or_default();
     assert!(
         terminal.contains("[fail] extract") && terminal.contains("model timeout"),

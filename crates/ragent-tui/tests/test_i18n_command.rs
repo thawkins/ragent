@@ -114,7 +114,8 @@ fn enter_isolated_project() -> (
 
 /// Return the text of the most recently appended message.
 fn last_message_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(ragent_types::message::Message::text_content)
         .unwrap_or_default()

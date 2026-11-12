@@ -338,7 +338,8 @@ async fn system_prompt_append_and_show() {
     app.execute_slash_command("/system Be terse.").await;
     assert_eq!(app.status, "system prompt updated");
     assert!(
-        app.agent_info
+        app.session
+            .agent_info
             .prompt
             .as_deref()
             .is_some_and(|p| p.contains("Be terse.")),

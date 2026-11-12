@@ -16,7 +16,7 @@ mod support;
 #[tokio::test]
 async fn test_run_cost_summary_sets_banner_and_logs() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::RunCostSummary {
         session_id: "s1".to_string(),
@@ -29,6 +29,7 @@ async fn test_run_cost_summary_sets_banner_and_logs() {
     .await;
 
     let banner = app
+        .session
         .run_cost_banner
         .as_ref()
         .expect("banner should be populated");
@@ -72,7 +73,7 @@ async fn test_run_cost_summary_sets_banner_and_logs() {
 #[tokio::test]
 async fn test_run_cost_summary_other_session_is_ignored() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::RunCostSummary {
         session_id: "s2".to_string(),
@@ -85,7 +86,7 @@ async fn test_run_cost_summary_other_session_is_ignored() {
     .await;
 
     assert!(
-        app.run_cost_banner.is_none(),
+        app.session.run_cost_banner.is_none(),
         "banner should not be set for another session"
     );
     assert!(
@@ -99,8 +100,8 @@ async fn test_run_cost_summary_other_session_is_ignored() {
 #[tokio::test]
 async fn test_run_cost_banner_dismissed_on_keypress() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.run_cost_banner = Some("⟡ run complete · 1+2 tokens · $0.01 · 1.0s".to_string());
+    app.session.session_id = Some("s1".to_string());
+    app.session.run_cost_banner = Some("⟡ run complete · 1+2 tokens · $0.01 · 1.0s".to_string());
 
     // Drive the real key-dispatch path; the first keypress is consumed to
     // dismiss the banner.
@@ -110,7 +111,7 @@ async fn test_run_cost_banner_dismissed_on_keypress() {
     .await;
 
     assert!(
-        app.run_cost_banner.is_none(),
+        app.session.run_cost_banner.is_none(),
         "banner should be cleared after a keypress"
     );
 }
@@ -121,8 +122,8 @@ async fn test_run_cost_banner_dismissed_on_keypress() {
 #[tokio::test]
 async fn test_run_cost_banner_printable_char_not_consumed() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.run_cost_banner = Some("⟡ run complete · 1+2 tokens · $0.01 · 1.0s".to_string());
+    app.session.session_id = Some("s1".to_string());
+    app.session.run_cost_banner = Some("⟡ run complete · 1+2 tokens · $0.01 · 1.0s".to_string());
 
     // A plain printable character - no control/alt modifiers.
     let key = crossterm::event::KeyEvent::new(
@@ -133,12 +134,12 @@ async fn test_run_cost_banner_printable_char_not_consumed() {
 
     // Banner should be cleared.
     assert!(
-        app.run_cost_banner.is_none(),
+        app.session.run_cost_banner.is_none(),
         "banner should be cleared after a printable keypress"
     );
     // The character should have been inserted into the input buffer.
     assert_eq!(
-        app.input, "h",
+        app.session.input, "h",
         "the first printable character should be added to the input, not consumed"
     );
 }
@@ -147,5 +148,5 @@ async fn test_run_cost_banner_printable_char_not_consumed() {
 #[test]
 fn test_run_cost_banner_defaults_none() {
     let app = support::make_app();
-    assert!(app.run_cost_banner.is_none());
+    assert!(app.session.run_cost_banner.is_none());
 }

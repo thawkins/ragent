@@ -134,18 +134,18 @@ fn member(agent_id: &str, name: &str, status: MemberStatus) -> TeamMember {
 /// An app whose primary session is `s1` and whose agent is `general`.
 fn app_with_primary() -> App {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some("s1".to_string());
+    app.session.agent_name = "general".to_string();
     app
 }
 
 /// An app with the Teams window open on [`TEAM_NAME`], holding `members`.
 fn open_teams(members: Vec<TeamMember>) -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members = members;
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session.team_members = members;
     app.show_teams_window = true;
     app
 }
@@ -254,8 +254,9 @@ fn test_t019_agents_window_deterministic_offline_and_all_row_variants() {
         // The child sessions double as teammate sessions so the `[T]` badge
         // derives, and the custom definition makes the `[C]` badge derive
         // (FR-013, FR-062). All state is synthetic: no team store is read.
-        app.active_team = Some(TeamConfig::new(TEAM_NAME, "s1"));
-        app.team_members
+        app.session.active_team = Some(TeamConfig::new(TEAM_NAME, "s1"));
+        app.session
+            .team_members
             .push(member("tm-001", "reviewer", MemberStatus::Working));
         add_custom_agent(&mut app, "rust-coder");
 
@@ -533,13 +534,15 @@ fn test_t019_teams_window_deterministic_offline_all_statuses_and_strip() {
             provider_id: "ollama".to_string(),
             model_id: "qwen2.5".to_string(),
         });
-        app.team_members.push(overridden);
+        app.session.team_members.push(overridden);
         // The focused teammate highlights in the table and the strip (FR-022,
         // FR-027).
-        app.focused_teammate = Some("tm-002".to_string());
+        app.session.focused_teammate = Some("tm-002".to_string());
         // Synthetic message counters (FR-025) - the lead never increments
         // these, so the values are pure test state.
-        app.team_message_counts.insert("tm-002".to_string(), (4, 2));
+        app.session
+            .team_message_counts
+            .insert("tm-002".to_string(), (4, 2));
         app
     };
 
@@ -891,12 +894,12 @@ fn test_t019_renders_leave_the_repository_working_tree_untouched() {
     let before: Vec<Option<u64>> = paths.iter().map(|p| size_of(p)).collect();
 
     let mut app = app_with_primary();
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, "s1"));
-    app.team_members = vec![
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, "s1"));
+    app.session.team_members = vec![
         member("tm-001", "reviewer", MemberStatus::Working),
         member("tm-002", "tester", MemberStatus::Stopped),
     ];
-    app.focused_teammate = Some("tm-001".to_string());
+    app.session.focused_teammate = Some("tm-001".to_string());
     add_custom_agent(&mut app, "rust-coder");
     app.active_tasks = vec![
         task(

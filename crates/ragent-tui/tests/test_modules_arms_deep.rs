@@ -341,8 +341,8 @@ fn loop_dialog_start_guards_report_the_missing_configuration() {
         name: "Anthropic".to_string(),
         source: ragent_tui::app::ProviderSource::Database,
     });
-    app.selected_model = None;
-    app.agent_info.model = None;
+    app.session.selected_model = None;
+    app.session.agent_info.model = None;
     let mut state = LoopSetupState::new(vec![("general".to_string(), "g".to_string())], 0);
     state.goal_field = ragent_tui::input_field::InputField::with_text("ship it");
     app.loop_setup = Some(state);
@@ -358,7 +358,7 @@ fn loop_dialog_start_guards_report_the_missing_configuration() {
 fn bench_watchdog_detaches_a_stale_run() {
     let mut app = support::make_app();
     // `append_assistant_text` only records a message when a session is set.
-    app.session_id = Some("bench-watchdog".to_string());
+    app.session.session_id = Some("bench-watchdog".to_string());
     app.active_bench_task_id = Some("bench-stale".to_string());
     app.active_bench_started_at = Some(Utc::now() - chrono::Duration::minutes(45));
     app.active_bench_cancel = Some(Arc::new(AtomicBool::new(false)));
@@ -378,7 +378,7 @@ fn bench_watchdog_detaches_a_stale_run() {
 #[test]
 fn bench_show_status_and_open_last_render_the_recorded_state() {
     let mut app = support::make_app();
-    app.selected_model = Some("anthropic/claude-sonnet-4".to_string());
+    app.session.selected_model = Some("anthropic/claude-sonnet-4".to_string());
 
     // `show` with no workbooks yet.
     let show = app_execute(&mut app, "/bench show");
@@ -426,7 +426,7 @@ fn bench_show_status_and_open_last_render_the_recorded_state() {
 fn bench_run_guards_refuse_before_spawning() {
     let (_guard, _env, _temp) = enter_project(r#"{ "defaultAgent": "general" }"#);
     let mut app = app_with_session();
-    app.selected_model = Some("anthropic/claude-sonnet-4".to_string());
+    app.session.selected_model = Some("anthropic/claude-sonnet-4".to_string());
 
     // Guard 1: a run is already active.
     app.active_bench_task_id = Some("bench-active".to_string());
@@ -435,7 +435,7 @@ fn bench_run_guards_refuse_before_spawning() {
 
     // Guard 2: no model configured.
     app.active_bench_task_id = None;
-    app.selected_model = None;
+    app.session.selected_model = None;
     let _ = app_execute(&mut app, "/bench run humaneval");
     assert_eq!(
         app.status,
@@ -443,7 +443,7 @@ fn bench_run_guards_refuse_before_spawning() {
     );
 
     // Guard 3: an unusable model selection.
-    app.selected_model = Some("no-such-provider-no-such-model".to_string());
+    app.session.selected_model = Some("no-such-provider-no-such-model".to_string());
     let _ = app_execute(&mut app, "/bench run humaneval");
     assert!(
         app.status.starts_with("[warn] Invalid model selection:"),

@@ -29,8 +29,8 @@ use support::make_app;
 /// An app whose primary session is `s1`.
 fn app_with_session(session: &str) -> App {
     let mut app = make_app();
-    app.session_id = Some(session.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(session.to_string());
+    app.session.agent_name = "general".to_string();
     app
 }
 

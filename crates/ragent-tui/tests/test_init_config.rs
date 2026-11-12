@@ -38,7 +38,7 @@ async fn test_slash_init_config_creates_default_global_config() {
     let _lock = crate::global_env_lock();
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     let temp = tempfile::tempdir().expect("tempdir");
     let original_xdg = with_temp_xdg_config_home(&temp);
@@ -63,7 +63,7 @@ async fn test_slash_init_config_creates_default_global_config() {
         serde_json::from_str(&content).expect("created config should be valid JSON");
 
     // The assistant message should mention success and the path.
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Default config created"),
         "should report creation: {text}"
@@ -83,7 +83,7 @@ async fn test_slash_init_config_skips_when_config_exists() {
     let _lock = crate::global_env_lock();
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     let temp = tempfile::tempdir().expect("tempdir");
     let original_xdg = with_temp_xdg_config_home(&temp);
@@ -102,7 +102,7 @@ async fn test_slash_init_config_skips_when_config_exists() {
     let content = std::fs::read_to_string(&config_path).expect("read config");
     assert_eq!(content, existing, "existing config should not be modified");
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("already exists"),
         "should warn about existing config: {text}"
@@ -121,7 +121,7 @@ async fn test_slash_init_config_produces_status_message() {
     let _lock = crate::global_env_lock();
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     let temp = tempfile::tempdir().expect("tempdir");
     let original_xdg = with_temp_xdg_config_home(&temp);
@@ -137,7 +137,7 @@ async fn test_slash_init_config_produces_status_message() {
 
     // A message should have been produced.
     assert!(
-        !app.messages.is_empty(),
+        !app.session.messages.is_empty(),
         "init config should produce a user-facing message"
     );
 

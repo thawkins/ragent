@@ -78,8 +78,8 @@ fn history_row(id: &str, output_file: Option<&str>) -> CompletedTaskRow {
 /// An app with an explicit status baseline and a clean redraw flag.
 fn app() -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.status = "ready".to_string();
     app.needs_redraw = false;
     app

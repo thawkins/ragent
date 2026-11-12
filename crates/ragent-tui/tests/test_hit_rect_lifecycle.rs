@@ -129,8 +129,8 @@ fn row_containing(buffer: &Buffer, needle: &str) -> u16 {
 #[test]
 fn test_agents_row_maps_stay_index_aligned_with_the_painted_rows() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks = vec![
         task("live-a", LEAD_SESSION, "explore", TaskStatus::Running),
         task("done-b", LEAD_SESSION, "rust-coder", TaskStatus::Completed),
@@ -203,10 +203,10 @@ fn test_agents_row_maps_stay_index_aligned_with_the_painted_rows() {
 #[test]
 fn test_teams_row_maps_stay_index_aligned_with_the_painted_rows() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members = vec![
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session.team_members = vec![
         member("tm-001", "reviewer", MemberStatus::Working),
         member("tm-002", "tester", MemberStatus::Failed),
         member("tm-003", "archivist", MemberStatus::Idle),
@@ -249,8 +249,8 @@ fn test_teams_row_maps_stay_index_aligned_with_the_painted_rows() {
 #[test]
 fn test_agents_row_maps_are_unchanged_by_scrolling() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     for i in 0..12 {
         app.active_tasks.push(task(
             &format!("task-{i:02}"),
@@ -292,11 +292,11 @@ fn test_agents_row_maps_are_unchanged_by_scrolling() {
 #[test]
 fn test_teams_row_maps_are_unchanged_by_scrolling() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
     for i in 0..12 {
-        app.team_members.push(member(
+        app.session.team_members.push(member(
             &format!("tm-{i:03}"),
             &format!("member-{i:02}"),
             MemberStatus::Working,
@@ -335,8 +335,8 @@ fn test_teams_row_maps_are_unchanged_by_scrolling() {
 #[test]
 fn test_the_agents_cursor_painted_row_follows_the_scroll() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     for i in 0..12 {
         app.active_tasks.push(task(
             &format!("task-{i:02}"),
@@ -391,11 +391,11 @@ fn test_the_agents_cursor_painted_row_follows_the_scroll() {
 #[test]
 fn test_the_teams_cursor_painted_row_follows_the_scroll() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
     for i in 0..12 {
-        app.team_members.push(member(
+        app.session.team_members.push(member(
             &format!("tm-{i:03}"),
             &format!("member-{i:02}"),
             MemberStatus::Working,
@@ -433,8 +433,8 @@ fn test_the_teams_cursor_painted_row_follows_the_scroll() {
 #[test]
 fn test_moving_the_cursor_past_the_visible_edge_scrolls_the_row_into_view() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     for i in 0..12 {
         app.active_tasks.push(task(
             &format!("task-{i:02}"),

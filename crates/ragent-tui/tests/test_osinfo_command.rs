@@ -24,7 +24,8 @@ mod support;
 
 /// Text of the most recent assistant message, or `""` when there is none.
 fn last_message_text(app: &ragent_tui::App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(ragent_types::message::Message::text_content)
         .unwrap_or_default()
@@ -98,7 +99,7 @@ impl Drop for CwdPin {
 #[tokio::test]
 async fn test_osinfo_help_page_renders_and_sets_status() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
 
     app.execute_slash_command("/osinfo help").await;
 
@@ -142,7 +143,7 @@ async fn test_osinfo_help_aliases_render_identically() {
     let mut baseline: Option<String> = None;
     for input in ["/osinfo", "/osinfo help", "/osinfo --help", "/osinfo -h"] {
         let mut app = make_app();
-        app.session_id = Some("s".to_string());
+        app.session.session_id = Some("s".to_string());
         app.execute_slash_command(input).await;
 
         let text = last_message_text(&app);
@@ -171,7 +172,7 @@ async fn test_osinfo_help_aliases_render_identically() {
 #[tokio::test]
 async fn test_osinfo_show_renders_report_and_sets_status() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
 
     app.execute_slash_command("/osinfo show").await;
 
@@ -225,7 +226,7 @@ async fn test_osinfo_show_matches_tool_renderer() {
     // tempdir must not slip in between the slash report and the tool report.
     let _pin = CwdPin::acquire();
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     app.execute_slash_command("/osinfo show").await;
 
     let slash = last_message_text(&app);
@@ -267,7 +268,7 @@ async fn test_osinfo_show_no_probe_matches_process_free_tool_renderer() {
     // path, so the slash report matches the tool's own `probe: false` output
     // rather than the probed default.
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     app.execute_slash_command("/osinfo show --no-probe").await;
 
     let slash = last_message_text(&app);
@@ -301,7 +302,7 @@ async fn test_osinfo_show_no_probe_matches_process_free_tool_renderer() {
 #[tokio::test]
 async fn test_osinfo_unknown_subcommand_lists_valid_and_sets_usage() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
 
     app.execute_slash_command("/osinfo frobnicate").await;
 

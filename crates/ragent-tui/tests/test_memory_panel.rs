@@ -229,7 +229,7 @@ fn test_mouse_scroll_up_on_memory_increments_memory_scroll_offset() {
     app.handle_mouse_event(mouse_scroll_up(90, 10));
     assert_eq!(app.memory_scroll_offset, 3);
     // Messages pane must be untouched.
-    assert_eq!(app.scroll_offset, 0);
+    assert_eq!(app.session.scroll_offset, 0);
 }
 
 #[test]
@@ -617,14 +617,14 @@ async fn test_alt_m_does_not_insert_m_into_input() {
     // `input.rs` is placed before the generic `KeyCode::Char(c)` insertion
     // handler (NFR-002) so the event is consumed entirely by the toggle.
     let mut app = make_app();
-    assert!(app.input.is_empty(), "input should start empty");
+    assert!(app.session.input.is_empty(), "input should start empty");
 
     app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
         .await;
     assert!(
-        app.input.is_empty(),
+        app.session.input.is_empty(),
         "Alt+M must not insert 'm' into input; got {:?}",
-        app.input
+        app.session.input
     );
     assert!(app.show_memory, "Alt+M should have toggled show_memory on");
 }
@@ -639,9 +639,9 @@ async fn test_alt_m_does_not_insert_m_when_panel_already_visible() {
     app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
         .await;
     assert!(
-        app.input.is_empty(),
+        app.session.input.is_empty(),
         "Alt+M must not insert 'm' when hiding the panel; got {:?}",
-        app.input
+        app.session.input
     );
     assert!(
         !app.show_memory,
@@ -1041,7 +1041,7 @@ async fn test_memory_stored_event_marks_panel_cache_dirty() {
     let _guard = with_cwd(dir.path());
 
     let mut app = make_app();
-    app.session_id = Some("sess-dirty".to_string());
+    app.session.session_id = Some("sess-dirty".to_string());
     app.show_memory = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -1074,7 +1074,7 @@ async fn test_memory_panel_refreshes_after_stored_event() {
     let _guard = with_cwd(dir.path());
 
     let mut app = make_app();
-    app.session_id = Some("sess-refresh".to_string());
+    app.session.session_id = Some("sess-refresh".to_string());
     app.show_memory = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -1211,7 +1211,7 @@ async fn test_memory_enter_with_non_empty_input_sends_message() {
     app.show_profile = false;
     app.show_tasks_panel = false;
     app.current_screen = ScreenMode::Chat;
-    app.input = "send this message".to_string();
+    app.session.input = "send this message".to_string();
 
     let _ = render_app_to_string(&mut app, 140, 40);
     assert_eq!(app.memory_row_count, 1);

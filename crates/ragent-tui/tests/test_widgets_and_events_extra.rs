@@ -37,7 +37,7 @@ type StepMap = HashMap<String, (String, u32, u32)>;
 
 fn app_with_session(session: &str) -> ragent_tui::App {
     let mut app = support::make_app();
-    app.session_id = Some(session.to_string());
+    app.session.session_id = Some(session.to_string());
     app.needs_redraw = false;
     app
 }
@@ -949,12 +949,12 @@ fn cluster_progress_event_round_trip() {
 #[tokio::test]
 async fn event_session_created_populates_session_id() {
     let mut app = support::make_app();
-    app.session_id = None;
+    app.session.session_id = None;
     app.handle_event(Event::SessionCreated {
         session_id: "sess-created".to_string(),
     })
     .await;
-    assert_eq!(app.session_id.as_deref(), Some("sess-created"));
+    assert_eq!(app.session.session_id.as_deref(), Some("sess-created"));
     assert!(app.needs_redraw);
 }
 
@@ -976,9 +976,10 @@ async fn event_text_and_reasoning_delta_append_to_message() {
         text: "thinking".to_string(),
     })
     .await;
-    assert!(app.is_processing);
-    assert!(app.stream_in_bytes > 0);
+    assert!(app.session.is_processing);
+    assert!(app.session.stream_in_bytes > 0);
     let text = app
+        .session
         .messages
         .iter()
         .flat_map(|m| m.parts.iter())
@@ -1001,7 +1002,7 @@ async fn event_compression_started_and_finished_toggles_flag() {
         reason: "threshold".to_string(),
     })
     .await;
-    assert!(app.compress_in_progress);
+    assert!(app.session.compress_in_progress);
     let status = app.status.clone();
     assert!(status.contains("compressing"), "got: {status}");
 
@@ -1014,8 +1015,8 @@ async fn event_compression_started_and_finished_toggles_flag() {
         reason: "threshold".to_string(),
     })
     .await;
-    assert!(!app.compress_in_progress);
-    assert_eq!(app.last_input_tokens, 500);
+    assert!(!app.session.compress_in_progress);
+    assert_eq!(app.session.last_input_tokens, 500);
     assert!(app.status.contains("saved"), "got: {}", app.status);
 
     // The no-reduction branch.
@@ -1034,7 +1035,7 @@ async fn event_compression_started_and_finished_toggles_flag() {
 #[tokio::test]
 async fn event_message_end_sets_ready_and_handles_init() {
     let mut app = app_with_session("sess-1");
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.handle_event(Event::MessageEnd {
         session_id: "sess-1".to_string(),
         message_id: "init".to_string(),
@@ -1042,8 +1043,8 @@ async fn event_message_end_sets_ready_and_handles_init() {
     })
     .await;
     // The "init" marker must not reset processing state.
-    assert!(app.is_processing);
-    assert!(app.force_new_message);
+    assert!(app.session.is_processing);
+    assert!(app.session.force_new_message);
 
     app.handle_event(Event::MessageEnd {
         session_id: "sess-1".to_string(),
@@ -1051,21 +1052,21 @@ async fn event_message_end_sets_ready_and_handles_init() {
         reason: ragent_agent::event::FinishReason::Stop,
     })
     .await;
-    assert!(!app.is_processing);
+    assert!(!app.session.is_processing);
     assert_eq!(app.status, "ready");
 }
 
 #[tokio::test]
 async fn event_message_end_cancelled_halts_agent() {
     let mut app = app_with_session("sess-1");
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.handle_event(Event::MessageEnd {
         session_id: "sess-1".to_string(),
         message_id: "m".to_string(),
         reason: ragent_agent::event::FinishReason::Cancelled,
     })
     .await;
-    assert!(app.agent_halted);
+    assert!(app.session.agent_halted);
     assert!(app.status.contains("halted"), "got: {}", app.status);
 }
 
@@ -1078,9 +1079,9 @@ async fn event_token_usage_and_model_response_accumulate() {
         output_tokens: 40,
     })
     .await;
-    assert_eq!(app.last_input_tokens, 100);
-    assert_eq!(app.token_usage.0, 100);
-    assert_eq!(app.token_usage.1, 40);
+    assert_eq!(app.session.last_input_tokens, 100);
+    assert_eq!(app.session.token_usage.0, 100);
+    assert_eq!(app.session.token_usage.1, 40);
 
     app.handle_event(Event::ModelResponse {
         session_id: "sess-1".to_string(),
@@ -1111,7 +1112,7 @@ async fn event_request_started_accumulates_outbound_bytes() {
         outbound_bytes: 256,
     })
     .await;
-    assert_eq!(app.stream_out_bytes, 768);
+    assert_eq!(app.session.stream_out_bytes, 768);
 }
 
 #[tokio::test]
@@ -1133,13 +1134,13 @@ async fn event_tools_sent_logs_at_first_step() {
 #[tokio::test]
 async fn event_agent_error_clears_processing_and_status() {
     let mut app = app_with_session("sess-1");
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.handle_event(Event::AgentError {
         session_id: "sess-1".to_string(),
         error: "provider unreachable".to_string(),
     })
     .await;
-    assert!(!app.is_processing);
+    assert!(!app.session.is_processing);
     assert!(app.status.starts_with("error:"), "got: {}", app.status);
 }
 
@@ -1168,7 +1169,7 @@ async fn event_loop_terminated_and_change_summary_render_banner() {
         files: vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
     })
     .await;
-    assert!(app.pending_rollback.is_some());
+    assert!(app.session.pending_rollback.is_some());
     assert!(app.status.contains("roll back"), "got: {}", app.status);
 }
 
@@ -1184,9 +1185,10 @@ async fn event_run_cost_summary_sets_banner() {
         duration_ms: 4321,
     })
     .await;
-    assert!(app.run_cost_banner.is_some());
+    assert!(app.session.run_cost_banner.is_some());
     assert!(
-        app.run_cost_banner
+        app.session
+            .run_cost_banner
             .as_deref()
             .unwrap_or("")
             .contains("run complete")
@@ -1229,7 +1231,7 @@ async fn event_security_verdict_and_quota_update() {
         rationale: "read-only command".to_string(),
     })
     .await;
-    assert_eq!(app.security_verdicts, 1);
+    assert_eq!(app.session.security_verdicts, 1);
     assert_eq!(app.status, "security: allow Bash");
 
     app.handle_event(Event::SecurityVerdict {
@@ -1239,7 +1241,7 @@ async fn event_security_verdict_and_quota_update() {
         rationale: "destructive".to_string(),
     })
     .await;
-    assert_eq!(app.security_verdicts, 2);
+    assert_eq!(app.session.security_verdicts, 2);
 
     app.handle_event(Event::QuotaUpdate {
         session_id: "sess-1".to_string(),
@@ -1263,8 +1265,11 @@ async fn event_router_classification_records_tier_and_model() {
         dimensions: vec![("complexity".to_string(), 0.7)],
     })
     .await;
-    assert_eq!(app.router_current_tier.as_deref(), Some("standard"));
-    assert_eq!(app.router_current_model.as_deref(), Some("provider:model"));
+    assert_eq!(app.session.router_current_tier.as_deref(), Some("standard"));
+    assert_eq!(
+        app.session.router_current_model.as_deref(),
+        Some("provider:model")
+    );
 }
 
 #[tokio::test]
@@ -1398,7 +1403,7 @@ async fn event_permission_and_question_queue_push() {
         options: vec![],
     })
     .await;
-    assert_eq!(app.permission_queue.len(), 1);
+    assert_eq!(app.session.permission_queue.len(), 1);
 
     app.handle_event(Event::QuestionRequested {
         secret: false,
@@ -1409,7 +1414,7 @@ async fn event_permission_and_question_queue_push() {
         default_index: Some(0),
     })
     .await;
-    assert_eq!(app.question_queue.len(), 1);
+    assert_eq!(app.session.question_queue.len(), 1);
 }
 
 #[tokio::test]
@@ -1438,7 +1443,7 @@ async fn event_tool_call_args_and_result_update_part() {
         success: true,
     })
     .await;
-    let part = app.messages[0].parts[0].clone();
+    let part = app.session.messages[0].parts[0].clone();
     let MessagePart::ToolCall { state, .. } = part else {
         panic!("expected ToolCall part");
     };
@@ -1515,7 +1520,7 @@ async fn event_teammate_lifecycle_updates_members() {
         agent_id: "tm-001".to_string(),
     })
     .await;
-    assert_eq!(app.team_members.len(), 1);
+    assert_eq!(app.session.team_members.len(), 1);
     assert!(app.show_teams);
 
     app.handle_event(Event::TeamTaskClaimed {
@@ -1525,9 +1530,9 @@ async fn event_teammate_lifecycle_updates_members() {
         task_id: "task-001".to_string(),
     })
     .await;
-    assert_eq!(app.team_members[0].status, MemberStatus::Working);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Working);
     assert_eq!(
-        app.team_members[0].current_task_id.as_deref(),
+        app.session.team_members[0].current_task_id.as_deref(),
         Some("task-001")
     );
 
@@ -1538,7 +1543,7 @@ async fn event_teammate_lifecycle_updates_members() {
         task_id: "task-001".to_string(),
     })
     .await;
-    assert!(app.team_members[0].current_task_id.is_none());
+    assert!(app.session.team_members[0].current_task_id.is_none());
 
     app.handle_event(Event::TeammateIdle {
         session_id: "sess-1".to_string(),
@@ -1546,7 +1551,7 @@ async fn event_teammate_lifecycle_updates_members() {
         agent_id: "tm-001".to_string(),
     })
     .await;
-    assert_eq!(app.team_members[0].status, MemberStatus::Idle);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Idle);
 
     app.handle_event(Event::TeammateFailed {
         session_id: "sess-1".to_string(),
@@ -1555,9 +1560,9 @@ async fn event_teammate_lifecycle_updates_members() {
         error: "crashed".to_string(),
     })
     .await;
-    assert_eq!(app.team_members[0].status, MemberStatus::Failed);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Failed);
     assert_eq!(
-        app.team_members[0].last_spawn_error.as_deref(),
+        app.session.team_members[0].last_spawn_error.as_deref(),
         Some("crashed")
     );
 
@@ -1568,11 +1573,11 @@ async fn event_teammate_lifecycle_updates_members() {
         team_name: "alpha".to_string(),
     })
     .await;
-    assert!(app.team_members.is_empty());
+    assert!(app.session.team_members.is_empty());
     assert!(!app.show_teams);
     assert!(!app.show_teams_window);
-    assert!(app.team_message_counts.is_empty());
-    assert!(app.focused_teammate.is_none());
+    assert!(app.session.team_message_counts.is_empty());
+    assert!(app.session.focused_teammate.is_none());
 }
 
 #[tokio::test]
@@ -1587,7 +1592,10 @@ async fn event_teammate_message_tracks_counts() {
         preview: "hello".to_string(),
     })
     .await;
-    assert_eq!(app.team_message_counts.get("tm-001").copied(), Some((1, 0)));
+    assert_eq!(
+        app.session.team_message_counts.get("tm-001").copied(),
+        Some((1, 0))
+    );
 
     app.handle_event(Event::TeammateP2PMessage {
         session_id: "sess-1".to_string(),
@@ -1598,8 +1606,14 @@ async fn event_teammate_message_tracks_counts() {
         preview: "p2p".to_string(),
     })
     .await;
-    assert_eq!(app.team_message_counts.get("tm-001").copied(), Some((2, 0)));
-    assert_eq!(app.team_message_counts.get("tm-002").copied(), Some((0, 1)));
+    assert_eq!(
+        app.session.team_message_counts.get("tm-001").copied(),
+        Some((2, 0))
+    );
+    assert_eq!(
+        app.session.team_message_counts.get("tm-002").copied(),
+        Some((0, 1))
+    );
 }
 
 #[tokio::test]
@@ -1618,10 +1632,13 @@ async fn event_message_counters_ignore_lead() {
     })
     .await;
     assert!(
-        !app.team_message_counts.contains_key("lead"),
+        !app.session.team_message_counts.contains_key("lead"),
         "a lead sender must not gain a sent counter"
     );
-    assert_eq!(app.team_message_counts.get("tm-001").copied(), Some((0, 1)));
+    assert_eq!(
+        app.session.team_message_counts.get("tm-001").copied(),
+        Some((0, 1))
+    );
 
     app.handle_event(Event::TeammateMessage {
         session_id: "sess-1".to_string(),
@@ -1632,8 +1649,11 @@ async fn event_message_counters_ignore_lead() {
         preview: "to lead".to_string(),
     })
     .await;
-    assert_eq!(app.team_message_counts.get("tm-001").copied(), Some((1, 1)));
-    assert!(!app.team_message_counts.contains_key("lead"));
+    assert_eq!(
+        app.session.team_message_counts.get("tm-001").copied(),
+        Some((1, 1))
+    );
+    assert!(!app.session.team_message_counts.contains_key("lead"));
 
     app.handle_event(Event::TeammateP2PMessage {
         session_id: "sess-1".to_string(),
@@ -1645,10 +1665,13 @@ async fn event_message_counters_ignore_lead() {
     })
     .await;
     assert!(
-        !app.team_message_counts.contains_key("lead"),
+        !app.session.team_message_counts.contains_key("lead"),
         "a lead P2P sender must not gain a sent counter"
     );
-    assert_eq!(app.team_message_counts.get("tm-002").copied(), Some((0, 1)));
+    assert_eq!(
+        app.session.team_message_counts.get("tm-002").copied(),
+        Some((0, 1))
+    );
 
     app.handle_event(Event::TeammateP2PMessage {
         session_id: "sess-1".to_string(),
@@ -1659,8 +1682,11 @@ async fn event_message_counters_ignore_lead() {
         preview: "p2p to lead".to_string(),
     })
     .await;
-    assert_eq!(app.team_message_counts.get("tm-002").copied(), Some((1, 1)));
-    assert!(!app.team_message_counts.contains_key("lead"));
+    assert_eq!(
+        app.session.team_message_counts.get("tm-002").copied(),
+        Some((1, 1))
+    );
+    assert!(!app.session.team_message_counts.contains_key("lead"));
 }
 
 #[tokio::test]
@@ -1671,7 +1697,7 @@ async fn event_shell_cwd_and_user_input() {
         cwd: "/tmp/work".to_string(),
     })
     .await;
-    assert_eq!(app.shell_cwd.as_deref(), Some("/tmp/work"));
+    assert_eq!(app.session.shell_cwd.as_deref(), Some("/tmp/work"));
 
     app.handle_event(Event::UserInput {
         session_id: "sess-1".to_string(),
@@ -1682,7 +1708,7 @@ async fn event_shell_cwd_and_user_input() {
     // `UserInput` sets the working status; it does not by itself flip the
     // processing flag (that is `MessageStart`).
     assert!(
-        app.is_processing || app.status.contains("processing"),
+        app.session.is_processing || app.status.contains("processing"),
         "got: {}",
         app.status
     );
@@ -1799,7 +1825,7 @@ async fn swarm_without_prompt_shows_usage() {
 #[tokio::test]
 async fn swarm_when_already_active_warns() {
     let mut app = app_with_session("sess-lead");
-    app.swarm_state = Some(SwarmState {
+    app.session.swarm_state = Some(SwarmState {
         team_name: "swarm-live".to_string(),
         prompt: "existing".to_string(),
         decomposition: SwarmDecomposition { tasks: vec![] },
@@ -1824,7 +1850,7 @@ async fn swarm_status_renders_progress_bar_and_table_from_state() {
     let dir = temp_swarm_dir("swarm-status");
     let mut app = app_with_session("sess-lead");
     app.cwd_path = dir;
-    app.swarm_state = Some(SwarmState {
+    app.session.swarm_state = Some(SwarmState {
         team_name: "swarm-manual".to_string(),
         prompt: "do work".to_string(),
         decomposition: SwarmDecomposition {
@@ -1837,7 +1863,7 @@ async fn swarm_status_renders_progress_bar_and_table_from_state() {
         completed: false,
         default_agent_type: None,
     });
-    app.team_members = vec![TeamMember::new("swarm-s1", "tm-001", "general")];
+    app.session.team_members = vec![TeamMember::new("swarm-s1", "tm-001", "general")];
 
     app.execute_slash_command("/swarm status").await;
     let text = joined_text(&app);
@@ -1862,7 +1888,7 @@ async fn swarm_cancel_with_state_reports_shutdown() {
     app.cwd_path = dir.clone();
     let team_name = "swarm-cancel-me";
     let _ = TeamStore::create(team_name, "sess-lead", &dir, true);
-    app.swarm_state = Some(SwarmState {
+    app.session.swarm_state = Some(SwarmState {
         team_name: team_name.to_string(),
         prompt: "do work".to_string(),
         decomposition: SwarmDecomposition { tasks: vec![] },
@@ -1871,7 +1897,7 @@ async fn swarm_cancel_with_state_reports_shutdown() {
         default_agent_type: None,
     });
     app.execute_slash_command("/swarm cancel").await;
-    assert!(app.swarm_state.is_none());
+    assert!(app.session.swarm_state.is_none());
     assert!(app.status.contains("cancelled"), "got: {}", app.status);
 }
 
@@ -1936,7 +1962,8 @@ async fn research_list_open_search_show_archive_on_empty_store() {
 // ===========================================================================
 
 fn joined_text(app: &ragent_tui::App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .flat_map(|m| m.parts.iter())
         .filter_map(|p| match p {

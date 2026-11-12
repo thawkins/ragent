@@ -380,9 +380,9 @@ fn has_results_tracks_rows_across_every_status() {
 #[test]
 fn closing_a_loaded_panel_discards_the_browser_and_requests_a_repaint() {
     let mut app = support::make_app();
-    app.input = "draft".to_string();
-    app.input_cursor = 2;
-    app.input_queue.push_back(QueuedInput {
+    app.session.input = "draft".to_string();
+    app.session.input_cursor = 2;
+    app.session.input_queue.push_back(QueuedInput {
         text: "queued".to_string(),
         image_paths: Vec::new(),
     });
@@ -397,9 +397,9 @@ fn closing_a_loaded_panel_discards_the_browser_and_requests_a_repaint() {
     );
     assert!(app.needs_redraw, "the restored screen repaints");
     // Nothing else changes (FR-012).
-    assert_eq!(app.input, "draft");
-    assert_eq!(app.input_cursor, 2);
-    assert_eq!(app.input_queue.len(), 1);
+    assert_eq!(app.session.input, "draft");
+    assert_eq!(app.session.input_cursor, 2);
+    assert_eq!(app.session.input_queue.len(), 1);
 }
 
 #[test]

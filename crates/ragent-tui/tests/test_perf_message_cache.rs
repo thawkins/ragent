@@ -35,12 +35,12 @@ fn assistant_text(sid: &str, text: &str) -> Message {
 /// Build an app with `count` messages already rendered into the cache.
 fn primed_app(count: usize) -> ragent_tui::App {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.messages = (0..count)
+    app.session.session_id = Some("s1".to_string());
+    app.session.messages = (0..count)
         .map(|i| assistant_text("s1", &format!("message body {i}\nmore text {i}")))
         .collect();
     render(&mut app);
-    assert_eq!(app.message_line_cache.len(), count, "cache primed");
+    assert_eq!(app.session.message_line_cache.len(), count, "cache primed");
     app
 }
 
@@ -50,7 +50,7 @@ fn primed_app(count: usize) -> ragent_tui::App {
 async fn test_idle_frame_only_scans_dirty_groups() {
     let mut app = primed_app(50);
     assert_eq!(
-        app.message_cache_dirty_from, 50,
+        app.session.message_cache_dirty_from, 50,
         "a fully rendered transcript leaves the watermark at the end"
     );
 
@@ -61,8 +61,8 @@ async fn test_idle_frame_only_scans_dirty_groups() {
     })
     .await;
     assert_eq!(
-        app.message_cache_dirty_from,
-        app.messages.len() - 1,
+        app.session.message_cache_dirty_from,
+        app.session.messages.len() - 1,
         "the watermark must drop to the mutated group, not 0"
     );
 
@@ -71,11 +71,11 @@ async fn test_idle_frame_only_scans_dirty_groups() {
     // pending rather than re-parsing it. Pin the throttle clock so the frame is
     // unambiguously inside the window (a wall-clock throttle makes this racy
     // under load without it).
-    app.message_stream_throttle_at = Some(std::time::Instant::now());
+    app.session.message_stream_throttle_at = Some(std::time::Instant::now());
     render(&mut app);
     assert_eq!(
-        app.message_cache_dirty_from,
-        app.messages.len() - 1,
+        app.session.message_cache_dirty_from,
+        app.session.messages.len() - 1,
         "a throttled frame leaves only the mutated group pending"
     );
 
@@ -84,8 +84,8 @@ async fn test_idle_frame_only_scans_dirty_groups() {
     std::thread::sleep(ragent_tui::layout::MESSAGE_STREAM_MIN_INTERVAL);
     render(&mut app);
     assert_eq!(
-        app.message_cache_dirty_from,
-        app.messages.len(),
+        app.session.message_cache_dirty_from,
+        app.session.messages.len(),
         "the scan advanced past every up-to-date group"
     );
 }
@@ -93,8 +93,8 @@ async fn test_idle_frame_only_scans_dirty_groups() {
 #[tokio::test]
 async fn test_tool_call_status_update_lowers_watermark_only() {
     let mut app = primed_app(30);
-    app.messages[0].parts.clear();
-    app.messages[0].parts.push(MessagePart::ToolCall {
+    app.session.messages[0].parts.clear();
+    app.session.messages[0].parts.push(MessagePart::ToolCall {
         tool: "read".to_string(),
         call_id: "c1".to_string(),
         state: Box::new(ragent_agent::message::ToolCallState {
@@ -105,7 +105,7 @@ async fn test_tool_call_status_update_lowers_watermark_only() {
             duration_ms: None,
         }),
     });
-    app.messages[0].touch();
+    app.session.messages[0].touch();
     app.mark_message_dirty(0);
     render(&mut app);
 
@@ -118,7 +118,7 @@ async fn test_tool_call_status_update_lowers_watermark_only() {
     })
     .await;
     assert_eq!(
-        app.message_cache_dirty_from, 0,
+        app.session.message_cache_dirty_from, 0,
         "the mutated group (index 0) is the only one pending"
     );
 }
@@ -128,7 +128,7 @@ async fn test_tool_call_status_update_lowers_watermark_only() {
 #[tokio::test]
 async fn test_streaming_group_renders_immediately_when_never_populated() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     render(&mut app);
 
     app.handle_event(ragent_agent::event::Event::TextDelta {
@@ -140,11 +140,12 @@ async fn test_streaming_group_renders_immediately_when_never_populated() {
 
     // A brand-new group must never be left blank by the throttle.
     assert!(
-        !app.message_line_cache[0].lines.is_empty(),
+        !app.session.message_line_cache[0].lines.is_empty(),
         "a never-populated group renders on the first frame"
     );
     assert!(
-        app.message_content_lines
+        app.session
+            .message_content_lines
             .iter()
             .any(|l| l.contains("first token")),
         "the streamed text must be visible in the copy buffer"
@@ -163,7 +164,7 @@ async fn test_streaming_re_render_is_throttled_to_one_per_window() {
     // unambiguously inside the window. Sleeping and re-rendering is not enough:
     // the throttle only refreshes when something actually rendered, so a second
     // render in the same frame loop does not advance the timestamp.
-    app.message_stream_throttle_at = Some(std::time::Instant::now());
+    app.session.message_stream_throttle_at = Some(std::time::Instant::now());
 
     // First token after priming: already-populated group with a fresh render
     // timestamp, so the throttle defers this refresh and leaves the group
@@ -173,15 +174,15 @@ async fn test_streaming_re_render_is_throttled_to_one_per_window() {
         text: " alpha".to_string(),
     })
     .await;
-    let pending_edit_seq = app.messages[0].edit_seq;
+    let pending_edit_seq = app.session.messages[0].edit_seq;
     render(&mut app);
     assert_eq!(
-        app.message_line_cache[0].edit_seq,
+        app.session.message_line_cache[0].edit_seq,
         pending_edit_seq.wrapping_sub(1),
         "the throttled frame must not re-render the group"
     );
     assert_eq!(
-        app.message_cache_dirty_from, 0,
+        app.session.message_cache_dirty_from, 0,
         "the throttled group stays pending for the next frame"
     );
 
@@ -192,7 +193,7 @@ async fn test_streaming_re_render_is_throttled_to_one_per_window() {
     })
     .await;
     render(&mut app);
-    assert_eq!(app.message_cache_dirty_from, 0, "still pending");
+    assert_eq!(app.session.message_cache_dirty_from, 0, "still pending");
 
     // Once the window elapses the group catches up exactly once.
     //
@@ -206,18 +207,18 @@ async fn test_streaming_re_render_is_throttled_to_one_per_window() {
             break;
         }
         render(&mut app);
-        if app.message_cache_dirty_from != 0 {
+        if app.session.message_cache_dirty_from != 0 {
             break;
         }
     }
     render(&mut app);
     assert_eq!(
-        app.message_line_cache[0].edit_seq, app.messages[0].edit_seq,
+        app.session.message_line_cache[0].edit_seq, app.session.messages[0].edit_seq,
         "the group catches up after the throttle window"
     );
     assert_eq!(
-        app.message_cache_dirty_from,
-        app.messages.len(),
+        app.session.message_cache_dirty_from,
+        app.session.messages.len(),
         "and the watermark advances"
     );
 }
@@ -228,19 +229,19 @@ async fn test_streaming_re_render_is_throttled_to_one_per_window() {
 fn test_idle_frame_does_not_rebuild_copy_buffer_when_nothing_changed() {
     let mut app = primed_app(20);
     assert!(
-        !app.message_content_lines.is_empty(),
+        !app.session.message_content_lines.is_empty(),
         "buffer is populated after priming"
     );
 
     // A frame with no input/agent changes must not touch the buffer.
-    let before = std::mem::take(&mut app.message_content_lines);
+    let before = std::mem::take(&mut app.session.message_content_lines);
     render(&mut app);
     assert!(
-        app.message_content_lines.is_empty() || app.message_content_lines == before,
+        app.session.message_content_lines.is_empty() || app.session.message_content_lines == before,
         "an idle frame must not rebuild the copy buffer"
     );
     assert!(
-        !app.message_content_lines_dirty,
+        !app.session.message_content_lines_dirty,
         "nothing changed, so the buffer is not flagged stale"
     );
 }
@@ -261,30 +262,37 @@ async fn test_copy_buffer_rebuilds_on_demand_after_streaming() {
 
     app.ensure_copy_content_lines();
     assert!(
-        app.message_content_lines
+        app.session
+            .message_content_lines
             .iter()
             .any(|l| l.contains("freshly streamed")),
         "the on-demand rebuild must reflect the streamed text; got {:?}",
-        app.message_content_lines
+        app.session.message_content_lines
     );
 }
 
 #[test]
 fn test_reset_message_cache_clears_watermark_and_buffer() {
     let mut app = primed_app(10);
-    app.messages.clear();
+    app.session.messages.clear();
     app.reset_message_cache();
 
-    assert!(app.message_line_cache.is_empty());
-    assert_eq!(app.message_content_lines, [] as [std::string::String; 0]);
-    assert_eq!(app.message_cache_dirty_from, 0);
+    assert!(app.session.message_line_cache.is_empty());
+    assert_eq!(
+        app.session.message_content_lines,
+        [] as [std::string::String; 0]
+    );
+    assert_eq!(app.session.message_cache_dirty_from, 0);
 
     // The next frame rebuilds from scratch without a stale watermark.
-    app.messages.push(assistant_text("s1", "rebuilt body"));
+    app.session
+        .messages
+        .push(assistant_text("s1", "rebuilt body"));
     render(&mut app);
-    assert_eq!(app.message_line_cache.len(), 1);
+    assert_eq!(app.session.message_line_cache.len(), 1);
     assert!(
-        app.message_content_lines
+        app.session
+            .message_content_lines
             .iter()
             .any(|l| l.contains("rebuilt body"))
     );

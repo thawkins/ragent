@@ -26,7 +26,7 @@ fn test_panel_reflects_new_message_without_reopening() {
 
     // Simulate the event-driven state change (message received) while the
     // panel stays open.
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "session-1",
         Role::User,
         vec![MessagePart::Text {
@@ -66,7 +66,7 @@ fn test_panel_reflects_scroll_clamp_after_content_shrink() {
     let mut app = support::make_app();
     app.show_context_panel = true;
 
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "session-1",
         Role::Assistant,
         vec![MessagePart::Text {
@@ -77,8 +77,8 @@ fn test_panel_reflects_scroll_clamp_after_content_shrink() {
     assert!(big.history_tokens > 0);
 
     // Simulate a compaction replacing the history with a single summary.
-    app.messages.clear();
-    app.messages.push(Message::new(
+    app.session.messages.clear();
+    app.session.messages.push(Message::new(
         "session-1",
         Role::Compaction,
         vec![MessagePart::Text {

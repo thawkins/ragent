@@ -20,7 +20,7 @@ mod support;
 /// An app with a live session and no pending timers.
 fn app() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("lib-timers".to_string());
+    app.session.session_id = Some("lib-timers".to_string());
     app
 }
 
@@ -66,7 +66,9 @@ fn deadline_idles_at_the_redraw_interval() {
 #[test]
 fn deadline_wakes_for_permission_countdown() {
     let mut app = app();
-    app.permission_queue.push_back(permission_request("req-1"));
+    app.session
+        .permission_queue
+        .push_back(permission_request("req-1"));
     let deadline = compute_next_deadline_test(&app, Instant::now());
     assert!(
         deadline_is_at_most(deadline, Instant::now() + Duration::from_secs(1)),
@@ -93,7 +95,7 @@ fn deadline_honours_status_expiry() {
 fn deadline_honours_run_cost_banner_expiry() {
     let mut app = app();
     let shown = Instant::now();
-    app.run_cost_banner_at = Some(shown);
+    app.session.run_cost_banner_at = Some(shown);
     let deadline = compute_next_deadline_test(&app, Instant::now());
     let expected = shown + Duration::from_secs(ragent_tui::app::RUN_COST_BANNER_EXPIRY_SECS);
     assert!(
@@ -119,7 +121,7 @@ fn deadline_honours_history_save_deadline() {
 #[test]
 fn deadline_polls_active_swarm() {
     let mut app = app();
-    app.swarm_state = Some(ragent_agent::team::SwarmState {
+    app.session.swarm_state = Some(ragent_agent::team::SwarmState {
         team_name: "swarm-timers".to_string(),
         prompt: "do the thing".to_string(),
         decomposition: ragent_agent::team::SwarmDecomposition { tasks: Vec::new() },
@@ -158,11 +160,13 @@ fn should_not_render_when_idle_and_recently_drawn() {
 fn should_render_for_pending_stream_group_at_the_safety_interval() {
     let mut app = app();
     app.needs_redraw = false;
-    app.messages.push(ragent_types::message::Message::user_text(
-        "lib-timers",
-        "hello",
-    ));
-    app.message_cache_dirty_from = 0;
+    app.session
+        .messages
+        .push(ragent_types::message::Message::user_text(
+            "lib-timers",
+            "hello",
+        ));
+    app.session.message_cache_dirty_from = 0;
     let stale_draw = stale(2500);
     assert!(
         should_render(&app, stale_draw),
@@ -175,7 +179,9 @@ fn should_render_for_pending_stream_group_at_the_safety_interval() {
 fn should_render_for_periodic_display_at_the_safety_interval() {
     let mut app = app();
     app.needs_redraw = false;
-    app.permission_queue.push_back(permission_request("req-2"));
+    app.session
+        .permission_queue
+        .push_back(permission_request("req-2"));
     let stale_draw = stale(2500);
     assert!(
         should_render(&app, stale_draw),

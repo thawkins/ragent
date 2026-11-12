@@ -244,13 +244,14 @@ impl SessionManager {
         let id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now();
 
-        self.storage
-            .create_session(&id, &directory.display().to_string())?;
+        let directory_text = directory.display().to_string();
+        self.storage.create_session(&id, &directory_text)?;
 
         let session = Session {
             id: id.clone(),
             title: String::new(),
-            project_id: String::new(),
+            // Same value storage records for the row (MULTISESSION FR-02).
+            project_id: ragent_storage::project_root(&directory_text),
             directory,
             parent_id: None,
             version: 1,

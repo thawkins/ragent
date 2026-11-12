@@ -47,6 +47,8 @@ pub fn make_app() -> App {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
@@ -85,7 +87,7 @@ pub fn make_app() -> App {
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
 
-    App::new(
+    let mut app = App::new(
         event_bus,
         storage,
         provider_registry,
@@ -93,5 +95,11 @@ pub fn make_app() -> App {
         Arc::unwrap_or_clone(agent_info),
         false,
         std::path::PathBuf::new(),
-    )
+    );
+    // The session sidebar (MULTISESSION M5) is on by default and would take
+    // the left columns of every rendered layout; tests that are not about the
+    // sidebar keep the full-width chat layout they were written against.
+    // Sidebar tests turn it back on.
+    app.sidebar.visible = false;
+    app
 }

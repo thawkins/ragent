@@ -250,7 +250,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     if is_global_quit_key(key) {
         if key.code == KeyCode::Char('c') {
             // Copy if a keyboard selection is active; otherwise arm quit.
-            if app.kb_select_anchor.is_some() {
+            if app.session.kb_select_anchor.is_some() {
                 return Some(InputAction::CopyToClipboard);
             }
             return Some(InputAction::Quit);
@@ -282,7 +282,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     // Enter/Esc before any other dialog so the confirmation always takes
     // precedence. Note: like the modals above, pickers/windows handled by
     // `handle_key_event`'s pre-checks still outrank this dialog.
-    if app.pending_stop_confirm {
+    if app.session.pending_stop_confirm {
         match key.code {
             KeyCode::Enter => return Some(InputAction::ConfirmStopAgent),
             KeyCode::Esc => return Some(InputAction::CancelStopAgent),
@@ -511,8 +511,9 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     }
 
     // If question dialog is active, intercept keys.
-    if !app.question_queue.is_empty() {
+    if !app.session.question_queue.is_empty() {
         let has_options = app
+            .session
             .question_queue
             .front()
             .map(|r| !r.options.is_empty())
@@ -521,21 +522,21 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         if has_options {
             return match key.code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if app.question_selected_index > 0 {
-                        app.question_selected_index -= 1;
+                    if app.session.question_selected_index > 0 {
+                        app.session.question_selected_index -= 1;
                     }
                     None
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    if let Some(req) = app.question_queue.front() {
-                        if app.question_selected_index + 1 < req.options.len() {
-                            app.question_selected_index += 1;
+                    if let Some(req) = app.session.question_queue.front() {
+                        if app.session.question_selected_index + 1 < req.options.len() {
+                            app.session.question_selected_index += 1;
                         }
                     }
                     None
                 }
                 KeyCode::Enter => {
-                    if let Some(req) = app.question_queue.front().cloned() {
+                    if let Some(req) = app.session.question_queue.front().cloned() {
                         // FUNC-060: clamp the selection to the current option
                         // set. A stale index (e.g. the queue advanced while the
                         // selection was mid-flight) must never submit a blank
@@ -544,6 +545,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                         // the option list shrank; treat it as "no selection"
                         // and keep the dialog open rather than answering empty.
                         let selected = app
+                            .session
                             .question_selected_index
                             .min(req.options.len().saturating_sub(1));
                         if let Some(response) = req.options.get(selected).cloned() {
@@ -554,14 +556,14 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                                     response,
                                     secret: req.secret,
                                 });
-                            app.question_queue.pop_front();
-                            app.question_selected_index = 0;
+                            app.session.question_queue.pop_front();
+                            app.session.question_selected_index = 0;
                         }
                     }
                     None
                 }
                 KeyCode::Esc => {
-                    if let Some(req) = app.question_queue.front().cloned() {
+                    if let Some(req) = app.session.question_queue.front().cloned() {
                         app.event_bus
                             .publish(ragent_agent::event::Event::QuestionAnswered {
                                 session_id: req.session_id.clone(),
@@ -570,8 +572,8 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                                 secret: req.secret,
                             });
                     }
-                    app.question_queue.pop_front();
-                    app.question_selected_index = 0;
+                    app.session.question_queue.pop_front();
+                    app.session.question_selected_index = 0;
                     None
                 }
                 _ => None,
@@ -581,8 +583,8 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         // Free-text question: accept typed input, submit on Enter, cancel on Esc.
         return match key.code {
             KeyCode::Enter => {
-                if let Some(req) = app.question_queue.front().cloned() {
-                    let response = app.pending_question_input.trim().to_string();
+                if let Some(req) = app.session.question_queue.front().cloned() {
+                    let response = app.session.pending_question_input.trim().to_string();
                     if !response.is_empty() {
                         app.event_bus
                             .publish(ragent_agent::event::Event::QuestionAnswered {
@@ -591,14 +593,14 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                                 response,
                                 secret: req.secret,
                             });
-                        app.question_queue.pop_front();
-                        app.pending_question_input.clear();
+                        app.session.question_queue.pop_front();
+                        app.session.pending_question_input.clear();
                     }
                 }
                 None
             }
             KeyCode::Esc => {
-                if let Some(req) = app.question_queue.front().cloned() {
+                if let Some(req) = app.session.question_queue.front().cloned() {
                     app.event_bus
                         .publish(ragent_agent::event::Event::QuestionAnswered {
                             session_id: req.session_id.clone(),
@@ -607,16 +609,16 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                             secret: req.secret,
                         });
                 }
-                app.question_queue.pop_front();
-                app.pending_question_input.clear();
+                app.session.question_queue.pop_front();
+                app.session.pending_question_input.clear();
                 None
             }
             KeyCode::Backspace => {
-                app.pending_question_input.pop();
+                app.session.pending_question_input.pop();
                 None
             }
             KeyCode::Char(c) => {
-                app.pending_question_input.push(c);
+                app.session.pending_question_input.push(c);
                 None
             }
             _ => None,
@@ -624,11 +626,11 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     }
 
     // If permission dialog is active, intercept keys
-    if !app.permission_queue.is_empty() {
+    if !app.session.permission_queue.is_empty() {
         // Standard permission dialog: y/a/n only.
         return match key.code {
             KeyCode::Char('y') => {
-                if let Some(ref req) = app.permission_queue.front() {
+                if let Some(ref req) = app.session.permission_queue.front() {
                     tracing::info!(
                         session_id = %req.session_id,
                         request_id = %req.id,
@@ -645,7 +647,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 None
             }
             KeyCode::Char('a') => {
-                if let Some(ref req) = app.permission_queue.front() {
+                if let Some(ref req) = app.session.permission_queue.front() {
                     tracing::info!(
                         session_id = %req.session_id,
                         request_id = %req.id,
@@ -662,7 +664,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 None
             }
             KeyCode::Char('n') => {
-                if let Some(ref req) = app.permission_queue.front() {
+                if let Some(ref req) = app.session.permission_queue.front() {
                     tracing::info!(
                         session_id = %req.session_id,
                         request_id = %req.id,
@@ -764,7 +766,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     }
 
     // If a forcecleanup confirmation modal is active, intercept Enter/Esc
-    if app.pending_forcecleanup.is_some() {
+    if app.session.pending_forcecleanup.is_some() {
         match key.code {
             KeyCode::Enter => return Some(InputAction::ConfirmForceCleanup),
             KeyCode::Esc => return Some(InputAction::CancelForceCleanup),
@@ -776,7 +778,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     // Enter/Esc (FR-020, T-013): Enter rolls the workspace back to the
     // pre-loop snapshot, Esc keeps the changes. All other keys are consumed
     // so stray typing does not leak into the input box mid-decision.
-    if app.pending_rollback.is_some() {
+    if app.session.pending_rollback.is_some() {
         match key.code {
             KeyCode::Enter => return Some(InputAction::ConfirmRollback),
             KeyCode::Esc => return Some(InputAction::CancelRollback),
@@ -785,7 +787,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     }
 
     // If a plan approval dialog is active, intercept keys
-    if let Some(ref state) = app.plan_approval_pending {
+    if let Some(ref state) = app.session.plan_approval_pending {
         let cursor_approve = state.cursor_approve;
         match key.code {
             KeyCode::Enter => {
@@ -833,7 +835,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 // input so subcommands and arguments are not lost.
                 let command = {
                     let menu = app.slash_menu.as_ref()?;
-                    let raw = app.input.trim_end().to_string();
+                    let raw = app.session.input.trim_end().to_string();
                     if let Some(entry) = menu.matches.get(menu.selected) {
                         let with_slash = format!("/{}", entry.trigger);
                         // Raw input extends beyond the matched trigger with a space -> use raw
@@ -1038,6 +1040,12 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         };
     }
 
+    // Session sidebar (spec MULTISESSION M5): its global shortcuts, and every
+    // key while it has focus, after all modal dialogs had their chance.
+    if crate::sessions_sidebar::handle_key(app, key) {
+        return None;
+    }
+
     match key.code {
         KeyCode::Enter
             if key.modifiers.contains(KeyModifiers::SHIFT)
@@ -1049,7 +1057,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             app.insert_char_at_cursor('\n');
             None
         }
-        KeyCode::Enter if app.show_memory && app.input.is_empty() => {
+        KeyCode::Enter if app.show_memory && app.session.input.is_empty() => {
             // With the Memory side panel visible and an empty prompt, Enter
             // opens the selected memory. When the prompt has text, Enter
             // falls through to the normal send path so the memory panel
@@ -1057,7 +1065,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             Some(InputAction::OpenMemoryView)
         }
         KeyCode::Enter => {
-            let text = app.input.clone();
+            let text = app.session.input.clone();
             if text.is_empty() {
                 return None;
             }
@@ -1082,7 +1090,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             Some(InputAction::SendMessage(text))
         }
         KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if app.is_processing {
+            if app.session.is_processing {
                 Some(InputAction::CancelAgent)
             } else {
                 Some(InputAction::CutToClipboard)
@@ -1099,7 +1107,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             app.paste_image_from_clipboard();
             None
         }
-        KeyCode::Char('?') if app.input.is_empty() => {
+        KeyCode::Char('?') if app.session.input.is_empty() => {
             // Show keybindings help panel when '?' is typed on an empty input.
             app.show_shortcuts = true;
             None
@@ -1195,8 +1203,8 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         // is running - placed before generic char-insert handling so the `x`
         // is never inserted into the input buffer - NFR-002).
         KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::ALT) => {
-            if app.is_processing {
-                app.pending_stop_confirm = true;
+            if app.session.is_processing {
+                app.session.pending_stop_confirm = true;
                 app.needs_redraw = true;
             }
             None
@@ -1216,7 +1224,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             // Typing a character replaces the active keyboard selection.
             if let Some((start, end)) = app.kb_selection_char_range() {
                 app.remove_input_char_range(start, end);
-                app.kb_select_anchor = None;
+                app.session.kb_select_anchor = None;
             }
             app.insert_char_at_cursor(c);
             None
@@ -1225,7 +1233,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             // Backspace deletes the selection when one is active.
             if let Some((start, end)) = app.kb_selection_char_range() {
                 app.remove_input_char_range(start, end);
-                app.kb_select_anchor = None;
+                app.session.kb_select_anchor = None;
             } else {
                 app.delete_prev_char();
             }
@@ -1236,11 +1244,11 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             // under the cursor (forward delete).  When the Memory panel is
             // focused and the prompt is empty, Delete prompts to delete the
             // selected memory instead.
-            if app.show_memory && app.input.is_empty() {
+            if app.show_memory && app.session.input.is_empty() {
                 Some(InputAction::PromptMemoryDelete)
             } else if let Some((start, end)) = app.kb_selection_char_range() {
                 app.remove_input_char_range(start, end);
-                app.kb_select_anchor = None;
+                app.session.kb_select_anchor = None;
                 None
             } else {
                 app.delete_next_char();
@@ -1302,7 +1310,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::PageUp => Some(InputAction::ScrollUp),
         KeyCode::PageDown => Some(InputAction::ScrollDown),
         KeyCode::Tab | KeyCode::BackTab => Some(InputAction::SwitchAgent),
-        KeyCode::Esc if app.is_processing => Some(InputAction::CancelAgent),
+        KeyCode::Esc if app.session.is_processing => Some(InputAction::CancelAgent),
         _ => None,
     }
 }
@@ -1921,8 +1929,9 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         });
                         return;
                     }
-                    app.selected_model = Some(format!("azure_resource/{}", entry.id));
-                    app.selected_model_ctx_window = Some(entry.context_window.unwrap_or(128_000));
+                    app.session.selected_model = Some(format!("azure_resource/{}", entry.id));
+                    app.session.selected_model_ctx_window =
+                        Some(entry.context_window.unwrap_or(128_000));
                     app.configured_provider = Some(ConfiguredProvider {
                         id: "azure_resource".to_string(),
                         name: "Azure Resource (File)".to_string(),
@@ -2029,10 +2038,10 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             KeyCode::Enter => {
                 if let Some((name, _desc, _is_custom)) = agents.get(selected) {
                     if let Some(idx) = app.cycleable_agents.iter().position(|a| a.name == *name) {
-                        app.current_agent_index = idx;
-                        app.agent_info = app.cycleable_agents[idx].clone();
-                        app.agent_name = app.agent_info.name.clone();
-                        app.status = format!("Agent: {}", app.agent_name);
+                        app.session.current_agent_index = idx;
+                        app.session.agent_info = app.cycleable_agents[idx].clone();
+                        app.session.agent_name = app.session.agent_info.name.clone();
+                        app.status = format!("Agent: {}", app.session.agent_name);
                     }
                 }
                 app.provider_setup = None;
@@ -2080,6 +2089,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         app.provider_setup = Some(ProviderSetupStep::Done {
                             provider_name: prov_name,
                             model_name: app
+                                .session
                                 .selected_model
                                 .as_ref()
                                 .and_then(|m| crate::app::model_part_from_selected_model(m))
@@ -2185,14 +2195,15 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     .map_or(false, |p| p.id == pid);
                 if is_active {
                     app.configured_provider = None;
-                    app.selected_model = None;
-                    app.selected_model_ctx_window = None;
-                    app.selected_thinking_level = None;
+                    app.session.selected_model = None;
+                    app.session.selected_model_ctx_window = None;
+                    app.session.selected_thinking_level = None;
                     let _ = app.storage.delete_setting("selected_model"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
                     let _ = app.storage.delete_setting("selected_model_ctx_window"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
                     let _ = app.storage.delete_setting("thinking_level"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
                     let _ = app.storage.delete_setting("thinking_level_explicit"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
-                    app.provider_health
+                    app.session
+                        .provider_health
                         .store(0, std::sync::atomic::Ordering::Relaxed);
                 }
                 app.status = format!("[ok] Provider {} reset - credentials removed", pname);
@@ -2751,7 +2762,7 @@ pub(crate) fn start_copilot_device_flow_setup(app: &mut App) {
 /// and clears `provider_setup` (or reverts to the form with an error).
 fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
     let event_bus = app.event_bus.clone();
-    let sid = app.session_id.clone().unwrap_or_default();
+    let sid = app.session.session_id.clone().unwrap_or_default();
     let storage = app.storage.clone();
 
     let handle = match tokio::runtime::Handle::try_current() {

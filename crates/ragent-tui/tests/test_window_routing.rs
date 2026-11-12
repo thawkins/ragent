@@ -90,8 +90,8 @@ fn member(name: &str, agent_id: &str) -> TeamMember {
 /// A bare app with an explicit redraw baseline of "clean".
 fn app() -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.needs_redraw = false;
     app
 }
@@ -106,8 +106,8 @@ fn app_with_task() -> App {
 /// An app with an active team holding one teammate.
 fn app_with_team() -> App {
     let mut app = app();
-    app.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
-    app.team_members.push(member("reviewer", "tm-001"));
+    app.session.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
+    app.session.team_members.push(member("reviewer", "tm-001"));
     app
 }
 
@@ -186,7 +186,7 @@ fn agents_button_click_closes_an_open_window_even_when_the_subject_vanished() {
 #[test]
 fn opening_the_agents_window_closes_the_teams_window() {
     let mut app = app_with_task();
-    app.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
+    app.session.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
     render(&mut app);
     app.show_teams_window = true;
     let (col, row) = centre(app.agents_button_area);
@@ -274,7 +274,7 @@ fn teams_button_click_closes_an_open_window_even_when_the_team_is_gone() {
 async fn agents_escape_dismisses_the_window_and_leaves_state_untouched() {
     let mut app = app_with_task();
     app.active_tasks.push(running_task("task-2"));
-    app.input = "hello".to_string();
+    app.session.input = "hello".to_string();
     let tasks_before = app.active_tasks.len();
     app.show_agents_window = true;
     render(&mut app);
@@ -290,7 +290,7 @@ async fn agents_escape_dismisses_the_window_and_leaves_state_untouched() {
         "closing the window must not touch the task list"
     );
     assert_eq!(
-        app.input, "hello",
+        app.session.input, "hello",
         "closing the window must not touch the input"
     );
 }
@@ -298,7 +298,7 @@ async fn agents_escape_dismisses_the_window_and_leaves_state_untouched() {
 #[tokio::test]
 async fn teams_escape_dismisses_the_window_and_leaves_state_untouched() {
     let mut app = app_with_team();
-    app.input = "draft".to_string();
+    app.session.input = "draft".to_string();
     app.show_teams_window = true;
     render(&mut app);
 
@@ -308,12 +308,12 @@ async fn teams_escape_dismisses_the_window_and_leaves_state_untouched() {
     assert!(!app.show_teams_window, "Esc dismisses the window (FR-032)");
     assert!(app.needs_redraw, "dismissing requests a redraw");
     assert_eq!(
-        app.team_members.len(),
+        app.session.team_members.len(),
         1,
         "closing the window must not touch the member list"
     );
     assert_eq!(
-        app.input, "draft",
+        app.session.input, "draft",
         "closing the window must not touch the input"
     );
 }
@@ -355,7 +355,7 @@ fn routing_helpers_agree_with_the_buttons_enabled_state() {
     app.bg_tasks.clear();
     assert!(!app.agents_window_available());
 
-    app.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
+    app.session.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
     assert!(app.teams_window_available());
 }
 

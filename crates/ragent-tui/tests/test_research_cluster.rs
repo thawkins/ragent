@@ -13,8 +13,8 @@ use ragent_tui::App;
 /// command can build a `ModelRef` and proceed to the async phase.
 fn make_app() -> App {
     let mut app = support::make_app();
-    app.selected_model = Some("gemini/gemini-2.0-flash".to_string());
-    app.selected_model_ctx_window = Some(1_048_576);
+    app.session.selected_model = Some("gemini/gemini-2.0-flash".to_string());
+    app.session.selected_model_ctx_window = Some(1_048_576);
     app
 }
 
@@ -56,7 +56,7 @@ async fn test_research_cluster_valid_sources() {
     std::fs::write("research/foo/sources/web-01.md", "body").expect("write source");
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.execute_slash_command("/research cluster foo").await;
 
     assert!(app.status.starts_with("[wait]"), "status: {}", app.status);
@@ -65,7 +65,7 @@ async fn test_research_cluster_valid_sources() {
         "status: {}",
         app.status
     );
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("Clustering `foo`"), "{text}");
     assert!(!text.contains("overwriting CONCEPTS.md"), "{text}");
 }
@@ -77,7 +77,7 @@ async fn test_research_cluster_valid_sources_force() {
     std::fs::write("research/bar/sources/web-01.md", "body").expect("write source");
 
     let mut app = make_app();
-    app.session_id = Some("s2".to_string());
+    app.session.session_id = Some("s2".to_string());
     app.execute_slash_command("/research cluster bar --force")
         .await;
 
@@ -87,7 +87,7 @@ async fn test_research_cluster_valid_sources_force() {
         "status: {}",
         app.status
     );
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("(overwriting CONCEPTS.md)"), "{text}");
 }
 
@@ -96,12 +96,12 @@ async fn test_research_cluster_missing_folder() {
     let _guard = enter_with_cwd();
 
     let mut app = make_app();
-    app.session_id = Some("s3".to_string());
+    app.session.session_id = Some("s3".to_string());
 
     app.execute_slash_command("/research cluster missing").await;
 
     assert_eq!(app.status, "research: cluster 'missing' folder missing");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("research folder `research/missing` does not exist"),
         "{text}"
@@ -114,13 +114,13 @@ async fn test_research_cluster_no_sources_folder() {
     std::fs::create_dir_all("research/no-sources").expect("create dirs");
 
     let mut app = make_app();
-    app.session_id = Some("s4".to_string());
+    app.session.session_id = Some("s4".to_string());
 
     app.execute_slash_command("/research cluster no-sources")
         .await;
 
     assert_eq!(app.status, "research: cluster 'no-sources' no sources");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("`research/no-sources/sources/` folder not found"),
         "{text}"
@@ -133,12 +133,12 @@ async fn test_research_cluster_empty_sources() {
     std::fs::create_dir_all("research/empty/sources").expect("create dirs");
 
     let mut app = make_app();
-    app.session_id = Some("s5".to_string());
+    app.session.session_id = Some("s5".to_string());
 
     app.execute_slash_command("/research cluster empty").await;
 
     assert_eq!(app.status, "research: cluster 'empty' empty sources");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("`research/empty/sources/` is empty"),
         "{text}"
@@ -153,13 +153,13 @@ async fn test_research_cluster_rejects_existing_concepts_without_force() {
     std::fs::write("research/existing/CONCEPTS.md", "old").expect("write concepts");
 
     let mut app = make_app();
-    app.session_id = Some("s6".to_string());
+    app.session.session_id = Some("s6".to_string());
 
     app.execute_slash_command("/research cluster existing")
         .await;
 
     assert_eq!(app.status, "research: cluster 'existing' already clustered");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("`research/existing/CONCEPTS.md` already exists"),
         "{text}"
@@ -175,7 +175,7 @@ async fn test_research_cluster_force_overwrites_existing_concepts() {
     std::fs::write("research/forced/CONCEPTS.md", "old").expect("write concepts");
 
     let mut app = make_app();
-    app.session_id = Some("s7".to_string());
+    app.session.session_id = Some("s7".to_string());
     app.execute_slash_command("/research cluster forced --force")
         .await;
 
@@ -185,7 +185,7 @@ async fn test_research_cluster_force_overwrites_existing_concepts() {
         "status: {}",
         app.status
     );
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("(overwriting CONCEPTS.md)"), "{text}");
     assert!(text.contains("Clustering `forced`"), "{text}");
 }

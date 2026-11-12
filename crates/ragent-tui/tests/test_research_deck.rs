@@ -47,7 +47,7 @@ fn fixture(tag: &str) -> (tempfile::TempDir, App) {
     write_report(&research_root, "deckspec", "2025-02-14", NEWER);
     let mut app = support::make_app();
     // A unique session id keeps events from a previous test out of this one.
-    app.session_id = Some(format!("deck-{tag}"));
+    app.session.session_id = Some(format!("deck-{tag}"));
     app.cwd_path = dir.path().to_path_buf();
     (dir, app)
 }
@@ -181,7 +181,7 @@ async fn test_deck_command_reports_no_changes_for_identical_reports() {
     write_report(&research_root, "same", "2025-01-10", OLDER);
     write_report(&research_root, "same", "2025-02-14", OLDER);
     let mut app = support::make_app();
-    app.session_id = Some("deck-nochange".to_string());
+    app.session.session_id = Some("deck-nochange".to_string());
     app.cwd_path = dir.path().to_path_buf();
 
     app.execute_slash_command("/research deck same").await;
@@ -306,7 +306,7 @@ async fn test_deck_command_single_report_is_refused() {
     let research_root = root(&dir);
     write_report(&research_root, "lonely", "2025-01-10", OLDER);
     let mut app = support::make_app();
-    app.session_id = Some("deck-lonely".to_string());
+    app.session.session_id = Some("deck-lonely".to_string());
     app.cwd_path = dir.path().to_path_buf();
 
     app.execute_slash_command("/research deck lonely").await;

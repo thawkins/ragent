@@ -170,7 +170,7 @@ async fn router_save_modal_all_keys() {
 #[tokio::test]
 async fn forcecleanup_modal_all_keys() {
     let mut app = support::make_app();
-    app.pending_forcecleanup = Some(PendingForceCleanup {
+    app.session.pending_forcecleanup = Some(PendingForceCleanup {
         team_name: "t".to_string(),
         active_members: vec![],
     });
@@ -188,7 +188,7 @@ async fn forcecleanup_modal_all_keys() {
 #[tokio::test]
 async fn rollback_modal_all_keys() {
     let mut app = support::make_app();
-    app.pending_rollback = Some(RollbackOfferState {
+    app.session.pending_rollback = Some(RollbackOfferState {
         session_id: "s1".to_string(),
         status: "done".to_string(),
         iterations: 1,
@@ -213,7 +213,7 @@ async fn rollback_modal_all_keys() {
 #[tokio::test]
 async fn plan_approval_swallowed_key() {
     let mut app = support::make_app();
-    app.plan_approval_pending = Some(PlanApprovalState {
+    app.session.plan_approval_pending = Some(PlanApprovalState {
         plan_text: "p".to_string(),
         cursor_approve: true,
     });
@@ -222,7 +222,7 @@ async fn plan_approval_swallowed_key() {
             .await
             .is_none()
     );
-    assert!(app.plan_approval_pending.is_some());
+    assert!(app.session.plan_approval_pending.is_some());
 }
 
 // ===========================================================================
@@ -253,7 +253,7 @@ fn slash_entry(trigger: &str) -> ragent_tui::app::SlashMenuEntry {
 #[tokio::test]
 async fn slash_menu_up_down_on_empty_matches_is_a_noop() {
     let mut app = support::make_app();
-    app.input = "/".to_string();
+    app.session.input = "/".to_string();
     app.slash_menu = Some(slash_menu(vec![], ""));
     assert!(handle_key(&mut app, key(KeyCode::Up)).await.is_none());
     assert!(handle_key(&mut app, key(KeyCode::Down)).await.is_none());
@@ -263,7 +263,7 @@ async fn slash_menu_up_down_on_empty_matches_is_a_noop() {
 #[tokio::test]
 async fn slash_menu_enter_preserves_raw_command_with_arguments() {
     let mut app = support::make_app();
-    app.input = "/model llama3".to_string();
+    app.session.input = "/model llama3".to_string();
     app.slash_menu = Some(slash_menu(vec![slash_entry("model")], ""));
     match handle_key(&mut app, key(KeyCode::Enter)).await {
         Some(InputAction::SlashCommand(cmd)) => assert_eq!(cmd, "/model llama3"),
@@ -274,7 +274,7 @@ async fn slash_menu_enter_preserves_raw_command_with_arguments() {
 #[tokio::test]
 async fn slash_menu_enter_with_no_matches_uses_filter() {
     let mut app = support::make_app();
-    app.input = "/zzz".to_string();
+    app.session.input = "/zzz".to_string();
     app.slash_menu = Some(slash_menu(vec![], "zzz"));
     match handle_key(&mut app, key(KeyCode::Enter)).await {
         Some(InputAction::SlashCommand(cmd)) => assert_eq!(cmd, "zzz"),
@@ -285,29 +285,29 @@ async fn slash_menu_enter_with_no_matches_uses_filter() {
 #[tokio::test]
 async fn slash_menu_backspace_routes_into_input() {
     let mut app = support::make_app();
-    app.input = "/mo".to_string();
-    app.input_cursor = 3;
+    app.session.input = "/mo".to_string();
+    app.session.input_cursor = 3;
     app.slash_menu = Some(slash_menu(vec![slash_entry("model")], "mo"));
     assert!(
         handle_key(&mut app, key(KeyCode::Backspace))
             .await
             .is_none()
     );
-    assert_eq!(app.input, "/m");
+    assert_eq!(app.session.input, "/m");
 }
 
 #[tokio::test]
 async fn slash_menu_typed_char_routes_into_input() {
     let mut app = support::make_app();
-    app.input = "/".to_string();
-    app.input_cursor = 1;
+    app.session.input = "/".to_string();
+    app.session.input_cursor = 1;
     app.slash_menu = Some(slash_menu(vec![slash_entry("model")], ""));
     assert!(
         handle_key(&mut app, key(KeyCode::Char('m')))
             .await
             .is_none()
     );
-    assert_eq!(app.input, "/m");
+    assert_eq!(app.session.input, "/m");
 }
 
 // ===========================================================================
@@ -692,7 +692,10 @@ async fn select_azure_resource_enter_persists_selection() {
         error: None,
     });
     assert!(handle_key(&mut app, key(KeyCode::Enter)).await.is_none());
-    assert_eq!(app.selected_model.as_deref(), Some("azure_resource/gpt-4o"));
+    assert_eq!(
+        app.session.selected_model.as_deref(),
+        Some("azure_resource/gpt-4o")
+    );
     assert!(matches!(
         app.provider_setup,
         Some(ProviderSetupStep::Done { .. })
@@ -722,7 +725,10 @@ async fn select_thinking_level_empty_levels_navigate_and_other() {
         ProviderSetupStep::Done { model_name, .. } => assert!(model_name.is_some()),
         other => panic!("expected Done, got {other:?}"),
     }
-    assert_eq!(app.selected_thinking_level, Some(ThinkingLevel::Off));
+    assert_eq!(
+        app.session.selected_thinking_level,
+        Some(ThinkingLevel::Off)
+    );
 }
 
 // ===========================================================================
@@ -1182,8 +1188,8 @@ fn right_click_outside_any_pane_leaves_no_menu() {
 fn messages_scrollbar_gutter_click_starts_a_drag() {
     let mut app = support::make_app();
     app.message_area = ratatui::layout::Rect::new(0, 1, 80, 20);
-    app.message_max_scroll = 100;
-    app.scroll_offset = 40;
+    app.session.message_max_scroll = 100;
+    app.session.scroll_offset = 40;
     // Click the rightmost column (scrollbar gutter) inside the messages pane.
     app.handle_mouse_event(mouse(
         MouseEventKind::Down(MouseButton::Left),

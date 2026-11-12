@@ -113,7 +113,7 @@ async fn team_create_without_blueprint_reports_usage() {
     let (_g, _e, _t, mut app) = team_app();
     app.execute_slash_command("/team create").await;
     assert_eq!(app.status, "Usage: /team create <blueprint> [name]");
-    assert!(app.active_team.is_none());
+    assert!(app.session.active_team.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -134,7 +134,7 @@ async fn team_status_lists_populated_roster_and_empty_roster() {
         provider_id: "ollama".to_string(),
         model_id: "qwen2.5".to_string(),
     });
-    app.team_members.push(member);
+    app.session.team_members.push(member);
 
     app.execute_slash_command("/team status").await;
     let text = last_message(&app);
@@ -259,7 +259,8 @@ async fn team_blueprint_lists_and_reports_missing() {
 async fn team_message_reports_send_failure_and_missing_team() {
     let (_g, _e, _t, mut app) = team_app();
     active_team_on_disk(&mut app, "msg-team").await;
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("alice", "tm-001", "general"));
 
     // A message over the mailbox size limit is the real error path of the
@@ -383,7 +384,7 @@ async fn team_cleanup_removes_on_disk_team() {
 
     app.execute_slash_command("/team cleanup").await;
     assert_eq!(app.status, "team cleaned up");
-    assert!(app.active_team.is_none());
+    assert!(app.session.active_team.is_none());
     assert!(!dir.exists(), "team dir must be removed");
     assert!(last_message(&app).contains("cleaned up"));
 }
@@ -404,7 +405,7 @@ async fn team_forcecleanup_deactivates_persisted_members() {
     app.execute_slash_command("/team forcecleanup confirm")
         .await;
     assert_eq!(app.status, "team force cleaned up");
-    assert!(app.active_team.is_none());
+    assert!(app.session.active_team.is_none());
     assert!(!dir.exists(), "team dir must be removed");
     let text = last_message(&app);
     assert!(text.contains("alice"), "text: {text}");
@@ -704,7 +705,7 @@ async fn thinking_rejects_level_when_model_has_no_thinking_support() {
     let (_g, _e, _t, mut app) = isolated_app();
     // An Azure Foundry model resolves to no picker entry, so the model reports
     // an empty set of thinking levels.
-    app.selected_model = Some("azure_foundry/unknown-model".to_string());
+    app.session.selected_model = Some("azure_foundry/unknown-model".to_string());
 
     app.execute_slash_command("/thinking high").await;
     assert_eq!(
@@ -716,7 +717,7 @@ async fn thinking_rejects_level_when_model_has_no_thinking_support() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn thinking_off_is_persisted_without_support_check() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.selected_model = Some("azure_foundry/unknown-model".to_string());
+    app.session.selected_model = Some("azure_foundry/unknown-model".to_string());
 
     app.execute_slash_command("/thinking off").await;
     assert_eq!(app.status, "thinking: off");
@@ -1175,7 +1176,7 @@ async fn swarm_decomposition_runs_with_an_unusable_provider() {
     let (_g, _e, _t, mut app) = isolated_app();
     // An unregistered provider makes the background completer fail fast, so
     // the spawned decomposition task still records a result.
-    app.selected_model = Some("no-such-provider/no-such-model".to_string());
+    app.session.selected_model = Some("no-such-provider/no-such-model".to_string());
 
     app.execute_slash_command("/swarm audit the repository")
         .await;
@@ -1184,12 +1185,13 @@ async fn swarm_decomposition_runs_with_an_unusable_provider() {
 
     // Wait for the background task to deposit its (error) outcome.
     for _ in 0..200 {
-        if app.swarm_result.lock().is_ok_and(|g| g.is_some()) {
+        if app.session.swarm_result.lock().is_ok_and(|g| g.is_some()) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     let result = app
+        .session
         .swarm_result
         .lock()
         .expect("swarm result mutex")
@@ -1314,7 +1316,7 @@ async fn init_analysis_dispatches_a_background_run() {
 
     app.execute_slash_command("/init").await;
     assert_eq!(app.status, "init: analysing project...");
-    assert!(app.is_processing);
+    assert!(app.session.is_processing);
     let text = all_messages(&app);
     assert!(text.contains("Analysing project"), "text: {text}");
     assert!(text.contains("PROJECT_ANALYSIS.md"), "text: {text}");
@@ -1362,14 +1364,14 @@ async fn doctor_reports_provider_model_and_guidelines() {
     unsafe {
         std::env::set_var("GITHUB_TOKEN", "ghp_armsdeeptoken");
     }
-    let health = Arc::clone(&app.provider_health);
+    let health = Arc::clone(&app.session.provider_health);
     health.store(2, Ordering::Relaxed);
     app.configured_provider = Some(ConfiguredProvider {
         id: "anthropic".to_string(),
         name: "Anthropic (Claude)".to_string(),
         source: ProviderSource::EnvVar,
     });
-    app.selected_model = Some("anthropic/claude-sonnet-4".to_string());
+    app.session.selected_model = Some("anthropic/claude-sonnet-4".to_string());
     app.code_index = None;
     app.code_index_enabled = false;
 
@@ -1663,7 +1665,7 @@ async fn router_reload_reports_whole_file_parse_error() {
 async fn router_status_reports_disabled_without_a_tier() {
     let (_g, _e, _t, mut app) = isolated_app();
     app.router_enabled = false;
-    app.router_current_tier = None;
+    app.session.router_current_tier = None;
 
     app.execute_slash_command("/router status").await;
     assert_eq!(app.status, "router: status");
@@ -1846,7 +1848,7 @@ async fn router_reload_reports_a_read_error() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn doctor_reports_database_provider_and_healthy_state() {
     let (_g, _e, _t, mut app) = isolated_app();
-    let health = Arc::clone(&app.provider_health);
+    let health = Arc::clone(&app.session.provider_health);
     health.store(1, Ordering::Relaxed);
     app.configured_provider = Some(ConfiguredProvider {
         id: "ollama".to_string(),

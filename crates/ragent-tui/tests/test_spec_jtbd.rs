@@ -88,7 +88,7 @@ const SAMPLE_SPEC_MD: &str = "\
 #[tokio::test(flavor = "multi_thread")]
 async fn test_spec_jtbd_no_args_shows_usage() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec jtbd").await;
 
@@ -104,7 +104,7 @@ async fn test_spec_jtbd_no_args_shows_usage() {
         app.status
     );
     assert!(
-        !app.is_processing,
+        !app.session.is_processing,
         "should not start processing with no spec ID"
     );
 }
@@ -114,7 +114,7 @@ async fn test_spec_jtbd_no_args_shows_usage() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_spec_jtbd_invalid_spec_id_rejected() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // `bad!id` contains `!` which is invalid per SpecId::new.
     app.execute_slash_command("/spec jtbd bad!id").await;
@@ -124,14 +124,17 @@ async fn test_spec_jtbd_invalid_spec_id_rejected() {
         "status should report invalid spec ID: {}",
         app.status
     );
-    assert!(!app.messages.is_empty(), "should produce an error message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "should produce an error message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Invalid spec ID") || text.contains("invalid"),
         "message should explain the invalid ID: {text}"
     );
     assert!(
-        !app.is_processing,
+        !app.session.is_processing,
         "should not start processing for an invalid spec ID"
     );
 }
@@ -145,7 +148,7 @@ async fn test_spec_jtbd_unknown_spec_not_found() {
     let (_temp, _guard) = temp_cwd();
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // `nonexistent-spec` is a valid SpecId but no specs/ dir exists for it.
     app.execute_slash_command("/spec jtbd nonexistent-spec")
@@ -156,14 +159,17 @@ async fn test_spec_jtbd_unknown_spec_not_found() {
         "status should report spec not found: {}",
         app.status
     );
-    assert!(!app.messages.is_empty(), "should produce an error message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "should produce an error message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found") || text.contains("Error"),
         "message should explain the missing spec: {text}"
     );
     assert!(
-        !app.is_processing,
+        !app.session.is_processing,
         "should not start processing for a missing spec"
     );
 }
@@ -179,7 +185,7 @@ async fn test_spec_jtbd_empty_spec_md_rejected() {
     create_spec_dir("emptyspec", "   \n\n  ");
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec jtbd emptyspec").await;
 
@@ -189,7 +195,7 @@ async fn test_spec_jtbd_empty_spec_md_rejected() {
         app.status
     );
     assert!(
-        !app.is_processing,
+        !app.session.is_processing,
         "should not start processing when SPEC.md is empty"
     );
 }
@@ -206,7 +212,7 @@ async fn test_spec_jtbd_guard_refuses_existing_without_force() {
     create_jtbd_file("myspec", "# Existing JTBD\nOld content");
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec jtbd myspec").await;
 
@@ -217,11 +223,14 @@ async fn test_spec_jtbd_guard_refuses_existing_without_force() {
         app.status
     );
     assert!(
-        !app.is_processing,
+        !app.session.is_processing,
         "should not start processing when JTBD.md exists without --force"
     );
-    assert!(!app.messages.is_empty(), "should produce a guard message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "should produce a guard message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("JTBD.md already exists"),
         "message should explain the guard: {text}"
@@ -250,7 +259,7 @@ async fn test_spec_jtbd_force_bypasses_guard() {
     create_jtbd_file("myspec", "# Existing JTBD\nOld content");
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec jtbd myspec --force").await;
 
@@ -261,7 +270,7 @@ async fn test_spec_jtbd_force_bypasses_guard() {
         app.status
     );
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "should start processing with --force even when JTBD.md exists"
     );
 }
@@ -277,7 +286,7 @@ async fn test_spec_jtbd_starts_generation() {
     create_spec_dir("validspec", SAMPLE_SPEC_MD);
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec jtbd validspec").await;
 
@@ -288,16 +297,16 @@ async fn test_spec_jtbd_starts_generation() {
         app.status
     );
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "should set is_processing for a valid spec"
     );
 
     // FR-011: message parity - should contain build_jtbd_message content
     assert!(
-        !app.messages.is_empty(),
+        !app.session.messages.is_empty(),
         "should push the jtbd task message"
     );
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("validspec"),
         "message should mention the spec ID: {text}"
@@ -326,7 +335,7 @@ async fn test_spec_jtbd_unknown_agent_rejected() {
     create_spec_dir("validspec", SAMPLE_SPEC_MD);
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec jtbd validspec --agent nonexistent-agent")
         .await;
@@ -337,11 +346,14 @@ async fn test_spec_jtbd_unknown_agent_rejected() {
         app.status
     );
     assert!(
-        !app.is_processing,
+        !app.session.is_processing,
         "should not start processing when agent is not found"
     );
-    assert!(!app.messages.is_empty(), "should produce an error message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "should produce an error message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found") || text.contains("Error"),
         "message should explain the unknown agent: {text}"
@@ -359,7 +371,7 @@ async fn test_spec_jtbd_valid_agent_override_starts() {
     create_spec_dir("validspec", SAMPLE_SPEC_MD);
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // `general` is always in the built-in agent roster.
     app.execute_slash_command("/spec jtbd validspec --agent general")
@@ -371,7 +383,7 @@ async fn test_spec_jtbd_valid_agent_override_starts() {
         app.status
     );
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "should start processing with a valid agent override"
     );
 }

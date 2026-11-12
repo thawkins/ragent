@@ -32,33 +32,36 @@ fn app_ready_to_send() -> App {
         name: "Ollama".to_string(),
         source: ProviderSource::AutoDiscovered,
     });
-    app.selected_model = Some("ollama/qwen3:latest".to_string());
+    app.session.selected_model = Some("ollama/qwen3:latest".to_string());
     app
 }
 
 /// Simulate the user typing `text` at the end of the prompt and pressing Enter.
 async fn type_and_submit(app: &mut App, text: &str) {
-    app.input = text.to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = text.to_string();
+    app.session.input_cursor = app.input_len_chars();
     app.handle_key_event(key(KeyCode::Enter)).await;
 }
 
 #[tokio::test]
 async fn test_enter_enqueues_plain_message_while_processing() {
     let mut app = app_ready_to_send();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     type_and_submit(&mut app, "queued while busy").await;
 
     assert_eq!(app.input_queue_len(), 1, "FR-005: Enter must enqueue");
-    assert_eq!(app.input_queue[0].text, "queued while busy");
+    assert_eq!(app.session.input_queue[0].text, "queued while busy");
     assert!(
-        app.input.is_empty(),
+        app.session.input.is_empty(),
         "FR-005: the input field is cleared after enqueueing"
     );
-    assert_eq!(app.input_cursor, 0, "the cursor resets to the line start");
+    assert_eq!(
+        app.session.input_cursor, 0,
+        "the cursor resets to the line start"
+    );
     assert!(
-        app.messages.is_empty(),
+        app.session.messages.is_empty(),
         "FR-016: a queued entry must not dispatch while the turn runs"
     );
 }
@@ -66,18 +69,21 @@ async fn test_enter_enqueues_plain_message_while_processing() {
 #[tokio::test]
 async fn test_enter_enqueues_while_compaction_is_in_progress() {
     let mut app = app_ready_to_send();
-    app.compact_in_progress = true;
+    app.session.compact_in_progress = true;
 
     type_and_submit(&mut app, "queued during compaction").await;
 
     assert_eq!(app.input_queue_len(), 1);
-    assert!(app.messages.is_empty(), "no dispatch while compacting");
+    assert!(
+        app.session.messages.is_empty(),
+        "no dispatch while compacting"
+    );
 }
 
 #[tokio::test]
 async fn test_enqueue_adds_to_history_at_submission_time() {
     let mut app = app_ready_to_send();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     type_and_submit(&mut app, "HISTORY-PROBE").await;
 
@@ -86,7 +92,10 @@ async fn test_enqueue_adds_to_history_at_submission_time() {
         app.input_history.last().map(String::as_str),
         Some("HISTORY-PROBE")
     );
-    assert!(app.history_index.is_none(), "history browsing resets");
+    assert!(
+        app.session.history_index.is_none(),
+        "history browsing resets"
+    );
 
     type_and_submit(&mut app, "HISTORY-PROBE-2").await;
     assert_eq!(
@@ -98,13 +107,14 @@ async fn test_enqueue_adds_to_history_at_submission_time() {
 #[tokio::test]
 async fn test_enqueue_preserves_fifo_order_across_submissions() {
     let mut app = app_ready_to_send();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     type_and_submit(&mut app, "first").await;
     type_and_submit(&mut app, "second").await;
     type_and_submit(&mut app, "third").await;
 
     let queued: Vec<&str> = app
+        .session
         .input_queue
         .iter()
         .map(|entry| entry.text.as_str())
@@ -119,19 +129,19 @@ async fn test_enqueue_preserves_fifo_order_across_submissions() {
 #[tokio::test]
 async fn test_enqueue_keeps_staged_image_attachments() {
     let mut app = app_ready_to_send();
-    app.is_processing = true;
-    app.pending_attachments = vec![std::path::PathBuf::from("/tmp/shot.png")];
+    app.session.is_processing = true;
+    app.session.pending_attachments = vec![std::path::PathBuf::from("/tmp/shot.png")];
 
     type_and_submit(&mut app, "see attached").await;
 
     assert_eq!(app.input_queue_len(), 1);
     assert_eq!(
-        app.input_queue[0].image_paths,
+        app.session.input_queue[0].image_paths,
         vec![std::path::PathBuf::from("/tmp/shot.png")],
         "FR-005: staged attachments travel with the queued entry"
     );
     assert!(
-        app.pending_attachments.is_empty(),
+        app.session.pending_attachments.is_empty(),
         "attachments are taken from the staging area when queued"
     );
 }
@@ -139,7 +149,7 @@ async fn test_enqueue_keeps_staged_image_attachments() {
 #[tokio::test]
 async fn test_enqueue_rejects_overflow_and_keeps_typed_text() {
     let mut app = app_ready_to_send();
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.input_queue_capacity = 1;
 
     type_and_submit(&mut app, "accepted").await;
@@ -148,12 +158,15 @@ async fn test_enqueue_rejects_overflow_and_keeps_typed_text() {
     type_and_submit(&mut app, "rejected").await;
 
     assert_eq!(app.input_queue_len(), 1, "FR-004: the cap is enforced");
-    assert_eq!(app.input_queue[0].text, "accepted", "FR-019: no reordering");
     assert_eq!(
-        app.input, "rejected",
+        app.session.input_queue[0].text, "accepted",
+        "FR-019: no reordering"
+    );
+    assert_eq!(
+        app.session.input, "rejected",
         "FR-004/FR-018: the rejected text is restored, not lost"
     );
-    assert_eq!(app.input_cursor, app.input_len_chars());
+    assert_eq!(app.session.input_cursor, app.input_len_chars());
     assert!(
         app.status.contains("queue full"),
         "a status message explains the rejection, got: {}",
@@ -164,15 +177,15 @@ async fn test_enqueue_rejects_overflow_and_keeps_typed_text() {
 #[tokio::test]
 async fn test_enqueue_rejection_restores_staged_attachments() {
     let mut app = app_ready_to_send();
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.input_queue_capacity = 1;
     type_and_submit(&mut app, "accepted").await;
 
-    app.pending_attachments = vec![std::path::PathBuf::from("/tmp/shot.png")];
+    app.session.pending_attachments = vec![std::path::PathBuf::from("/tmp/shot.png")];
     type_and_submit(&mut app, "rejected").await;
 
     assert_eq!(
-        app.pending_attachments,
+        app.session.pending_attachments,
         vec![std::path::PathBuf::from("/tmp/shot.png")],
         "a rejected submission keeps its staged attachments"
     );
@@ -181,7 +194,7 @@ async fn test_enqueue_rejection_restores_staged_attachments() {
 #[tokio::test]
 async fn test_enqueue_respects_configured_capacity() {
     let mut app = app_ready_to_send();
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.input_queue_capacity = 2;
 
     type_and_submit(&mut app, "one").await;
@@ -194,7 +207,7 @@ async fn test_enqueue_respects_configured_capacity() {
         "FR-015: enforcement uses the configured capacity"
     );
     assert_eq!(
-        app.input, "three",
+        app.session.input, "three",
         "the overflow entry is kept in the field"
     );
 }
@@ -202,7 +215,7 @@ async fn test_enqueue_respects_configured_capacity() {
 #[tokio::test]
 async fn test_enqueue_requests_redraw_for_the_counter() {
     let mut app = app_ready_to_send();
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.needs_redraw = false;
 
     type_and_submit(&mut app, "queue me").await;
@@ -216,7 +229,7 @@ async fn test_enqueue_requests_redraw_for_the_counter() {
 #[tokio::test]
 async fn test_enqueue_echoes_queued_notice_with_post_append_depth() {
     let mut app = app_ready_to_send();
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.log_entries.clear();
 
     type_and_submit(&mut app, "first").await;
@@ -240,7 +253,7 @@ async fn test_enqueue_echoes_queued_notice_with_post_append_depth() {
 #[tokio::test]
 async fn test_enqueue_overflow_does_not_echo_a_success_notice() {
     let mut app = app_ready_to_send();
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.input_queue_capacity = 1;
     app.log_entries.clear();
 

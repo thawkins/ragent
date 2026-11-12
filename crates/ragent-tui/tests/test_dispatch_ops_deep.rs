@@ -48,13 +48,13 @@ fn key_ctrl(code: KeyCode) -> KeyEvent {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn send_without_a_session_reports_no_active_session() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.session_id = None;
+    app.session.session_id = None;
     app.configured_provider = Some(ragent_tui::app::ConfiguredProvider {
         id: "ollama".to_string(),
         name: "Ollama".to_string(),
         source: ragent_tui::app::ProviderSource::Database,
     });
-    app.selected_model = Some("ollama/qwen2.5".to_string());
+    app.session.selected_model = Some("ollama/qwen2.5".to_string());
 
     // Typing `hello` then Enter goes through the SendMessage branch of
     // `handle_key_event`, which creates a session first when none exists.
@@ -65,7 +65,7 @@ async fn send_without_a_session_reports_no_active_session() {
     // Either a session is created (the create-then-dispatch path) or the
     // command is staged; both leave a message or a status behind.
     assert!(
-        app.session_id.is_some() || app.status.contains("session"),
+        app.session.session_id.is_some() || app.status.contains("session"),
         "status: {}",
         app.status
     );
@@ -80,7 +80,7 @@ async fn send_with_reference_token_resolves_it() {
         name: "Ollama".to_string(),
         source: ragent_tui::app::ProviderSource::Database,
     });
-    app.selected_model = Some("ollama/qwen2.5".to_string());
+    app.session.selected_model = Some("ollama/qwen2.5".to_string());
 
     for ch in "@notes.txt summarise".chars() {
         app.handle_key_event(key(KeyCode::Char(ch))).await;
@@ -89,7 +89,9 @@ async fn send_with_reference_token_resolves_it() {
     // The reference may expand into the message body or a file-menu selection
     // may be required; either way the app must not panic and must record state.
     assert!(
-        !app.messages.is_empty() || app.session_id.is_some() || !app.status.is_empty(),
+        !app.session.messages.is_empty()
+            || app.session.session_id.is_some()
+            || !app.status.is_empty(),
         "the send path must record something"
     );
 }
@@ -108,6 +110,7 @@ async fn bang_command_runs_and_records_output() {
     // Give the spawned bash tool a moment to finish and publish its result.
     for _ in 0..200 {
         if app
+            .session
             .messages
             .iter()
             .any(|m| m.text_content().contains("bang-marker"))
@@ -117,7 +120,8 @@ async fn bang_command_runs_and_records_output() {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     assert!(
-        app.messages
+        app.session
+            .messages
             .iter()
             .any(|m| m.text_content().contains("bang-marker"))
             || app.status.contains("bang"),
@@ -147,7 +151,7 @@ async fn paste_image_without_a_clipboard_image_reports_it() {
     // Ctrl+V with an empty clipboard must not attach anything.
     app.handle_key_event(key_ctrl(KeyCode::Char('v'))).await;
     assert!(
-        app.pending_attachments.is_empty(),
+        app.session.pending_attachments.is_empty(),
         "no attachment may be staged from an empty clipboard"
     );
 }

@@ -388,7 +388,7 @@ impl App {
         }
 
         // 2. ragent.json config file.
-        if let Ok(cfg) = ragent_config::Config::load()
+        if let Ok(cfg) = ragent_config::Config::load_for(&self.cwd_path)
             && let Some(ref t) = cfg.gitlab.token
             && !t.is_empty()
         {
@@ -469,7 +469,7 @@ impl App {
         // failure) is reported immediately and the run continues, so the prompt
         // is always produced; the scaffold itself needs no GitHub credential.
         if let Some(request) = scaffold.as_ref() {
-            let target = folder_for_scaffold(folder.as_deref());
+            let target = folder_for_scaffold(folder.as_deref(), &self.cwd_path);
             self.append_assistant_text(&format!(
                 "From: /spec reverse\n\n[wait] **Scaffolding project in `{target}`...**"
             ));
@@ -524,27 +524,28 @@ impl App {
             .iter()
             .find(|a| a.name == "explore")
             .cloned();
-        let mut agent = explore_agent.unwrap_or_else(|| self.agent_info.clone());
+        let mut agent = explore_agent.unwrap_or_else(|| self.session.agent_info.clone());
         self.apply_selected_model_and_thinking(&mut agent);
         agent.permission = ragent_agent::agent::default_permissions();
 
-        let sid = self.session_id.clone().unwrap_or_default();
+        let sid = self.session.session_id.clone().unwrap_or_default();
         let context_msg = Message::user_text(
             &sid,
             format!("[wait] Reverse-engineering {provider_label}: {repo_id}..."),
         );
-        self.messages.push(context_msg);
+        self.session.messages.push(context_msg);
 
         let processor = self.session_processor.clone();
         let flag = Arc::new(AtomicBool::new(false));
-        self.cancel_flag = Some(flag.clone());
-        self.is_processing = true;
+        self.session.cancel_flag = Some(flag.clone());
+        self.session.is_processing = true;
 
         let event_bus = self.event_bus.clone();
         let provider_for_spawn = provider.clone();
         let provider_label_for_spawn = provider_label.clone();
         let tech_for_spawn = parsed.tech.clone();
         let create_for_spawn = parsed.create.clone();
+        let cwd_for_spawn = self.cwd_path.clone();
         let folder_for_spawn = folder.clone();
         let repo_id_for_spawn = repo_id.clone();
         let depth_for_spawn = depth;
@@ -557,14 +558,14 @@ impl App {
         // FR-012: store the spec name so MessageEnd can chain into
         // `/spec create <name> <generated-prompt>` after the LLM finishes.
         if let Some(ref name) = parsed.create {
-            self.pending_reverse_create = Some(name.clone());
+            self.session.pending_reverse_create = Some(name.clone());
         }
 
         // FR-027: when a project folder was scaffolded, the chained
         // `specs/<name>/` must land inside it (the scaffold stage already created
         // `<folder>/specs/`). Record the folder so the `MessageEnd` chain can
         // retarget `/spec create` at the scaffolded project.
-        self.pending_reverse_create_folder = match (scaffold.is_some(), folder.as_deref()) {
+        self.session.pending_reverse_create_folder = match (scaffold.is_some(), folder.as_deref()) {
             (true, Some(path)) if !path.trim().is_empty() => Some(path.to_string()),
             _ => None,
         };
@@ -707,7 +708,7 @@ impl App {
             // hosting/spec identifier (`--create <name>`), not the folder, so a
             // `--folder` run lands `specs/<name>/` inside the scaffolded project.
             if let Some(name) = &create_for_spawn {
-                let project = folder_for_scaffold(folder_for_spawn.as_deref());
+                let project = folder_for_scaffold(folder_for_spawn.as_deref(), &cwd_for_spawn);
                 let notice = format!(
                     "reverse: generated prompt for {repo_id_for_spawn} via \
                      {provider_label_for_spawn}. Chaining into /spec create {name} \
@@ -732,14 +733,12 @@ impl App {
 /// Resolve the scaffold target for `/spec reverse --folder <path>` (FR-027).
 ///
 /// An explicit non-empty path is used verbatim; otherwise the scaffold runs in
-/// the current working directory, exactly as `ragent new` with no positional
-/// path does.
-fn folder_for_scaffold(folder: Option<&str>) -> String {
+/// `default_dir`, the focused session's directory, exactly as `ragent new`
+/// with no positional path runs in the current directory.
+fn folder_for_scaffold(folder: Option<&str>, default_dir: &std::path::Path) -> String {
     match folder {
         Some(path) if !path.trim().is_empty() => path.to_string(),
-        _ => crate::app::helpers::current_working_dir()
-            .to_string_lossy()
-            .into_owned(),
+        _ => default_dir.to_string_lossy().into_owned(),
     }
 }
 

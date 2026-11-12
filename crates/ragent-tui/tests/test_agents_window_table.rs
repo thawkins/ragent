@@ -98,8 +98,8 @@ fn bg_task(id: &str, command: &str, status: &str) -> ragent_tui::app::BgTaskView
 /// An app whose primary session is `s1` and whose agent is `general`.
 fn app_with_primary() -> App {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some("s1".to_string());
+    app.session.agent_name = "general".to_string();
     app
 }
 
@@ -520,7 +520,7 @@ fn test_agent_label_never_exceeds_thirty_two_columns() {
     let mut member = TeamMember::new("watcher", "tm-001", long_agent);
     member.session_id = Some("s2".to_string());
     member.status = MemberStatus::Working;
-    app.team_members.push(member);
+    app.session.team_members.push(member);
 
     let buffer = render(&mut app, 200, 50);
     let area = app.active_agents_area;
@@ -617,7 +617,7 @@ fn test_badges_follow_the_current_custom_agents_and_members() {
     let mut member = TeamMember::new("reviewer", "tm-001", "explore");
     member.session_id = Some("s3".to_string());
     member.status = MemberStatus::Working;
-    app.team_members.push(member);
+    app.session.team_members.push(member);
     let buffer = render(&mut app, 160, 44);
     let area = app.active_agents_area;
     let first = find_row(&buffer, area, "first-0001").expect("first row paints");
@@ -634,7 +634,7 @@ fn test_badges_follow_the_current_custom_agents_and_members() {
     );
 
     // Dropping the member removes the badge again.
-    app.team_members.clear();
+    app.session.team_members.clear();
     let buffer = render(&mut app, 160, 44);
     let area = app.active_agents_area;
     let second = find_row(&buffer, area, "second-0002").expect("second row paints");

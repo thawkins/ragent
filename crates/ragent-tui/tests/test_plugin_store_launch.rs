@@ -111,13 +111,13 @@ fn enter_project(config_json: &str) -> (MutexGuard<'static, ()>, LaunchEnv, temp
 /// An app with a session, so the `/plugins` launch reaches the dispatch arm.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
 /// The number of assistant messages on `app`.
 fn assistant_count(app: &App) -> usize {
-    app.messages.len()
+    app.session.messages.len()
 }
 
 /// The project config used by every no-`stores`-block case: the `plugins` key
@@ -408,6 +408,7 @@ async fn a_disabled_subsystem_reports_and_opens_no_panel() {
         "a disabled subsystem must open no panel"
     );
     let text = app
+        .session
         .messages
         .last()
         .expect("a report must be appended")
@@ -429,6 +430,7 @@ async fn help_and_unknown_subcommands_still_render_the_usage_block() {
     for invocation in ["/plugins help", "/plugins", "/plugins bogus"] {
         app.execute_slash_command(invocation).await;
         let text = app
+            .session
             .messages
             .last()
             .expect("usage block appended")

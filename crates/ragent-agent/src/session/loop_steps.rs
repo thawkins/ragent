@@ -84,6 +84,10 @@ pub(crate) struct TurnClient {
     ///
     /// [`resolve_inbound_tool_name`]: crate::tool::alias_table::resolve_inbound_tool_name
     pub alias_table: crate::tool::alias_table::AliasTable,
+    /// The tool registry for the session's project (spec MULTISESSION M8):
+    /// the base registry, or the project's own when it opened its MCP
+    /// servers. Every list, lookup and dispatch in the turn reads this one.
+    pub tool_registry: Arc<crate::tool::ToolRegistry>,
 }
 
 /// Mutable state shared across loop iterations.
@@ -165,9 +169,29 @@ impl SessionProcessor {
         // `load_config_cached` helper caches the resolved config keyed by
         // the mtimes of every contributing file, so a session whose config
         // has not changed pays zero disk I/O on subsequent turns.
+        // Resolve working directory. A deleted CWD falls back to `.` (never
+        // an empty path, which would silently misdirect context collection).
+        let working_dir = {
+            let _scope = profiler.scope("session.resolve_working_dir");
+            self.session_manager.get_session(session_id)?.map_or_else(
+                || {
+                    std::env::current_dir().unwrap_or_else(|e| {
+                        tracing::warn!(
+                            error = %e,
+                            "current_dir failed; using '.' as working directory",
+                        );
+                        std::path::PathBuf::from(".")
+                    })
+                },
+                |s| s.directory,
+            )
+        };
+
         let cfg = {
             let _scope = profiler.scope("config.load");
-            self.load_config_cached()
+            // MULTISESSION M6: the session's own project config, so a session
+            // in another directory runs under that project's settings.
+            self.load_config_for(&working_dir)
         };
 
         let model_ref = {
@@ -309,24 +333,6 @@ impl SessionProcessor {
             }
         };
 
-        // Resolve working directory. A deleted CWD falls back to `.` (never
-        // an empty path, which would silently misdirect context collection).
-        let working_dir = {
-            let _scope = profiler.scope("session.resolve_working_dir");
-            self.session_manager.get_session(session_id)?.map_or_else(
-                || {
-                    std::env::current_dir().unwrap_or_else(|e| {
-                        tracing::warn!(
-                            error = %e,
-                            "current_dir failed; using '.' as working directory",
-                        );
-                        std::path::PathBuf::from(".")
-                    })
-                },
-                |s| s.directory,
-            )
-        };
-
         // Resolve team context with 5-second cache (M8-T1).
         let team_context = {
             let _scope = profiler.scope("team.resolve_context");
@@ -424,7 +430,8 @@ impl SessionProcessor {
         // instead.
         let alias_table =
             crate::tool::alias_table::AliasTable::from_tools_config(&session_config.tools);
-        alias_table.report_unresolved_targets_once(&self.tool_registry);
+        let tool_registry = self.tool_registry_for(&working_dir);
+        alias_table.report_unresolved_targets_once(&tool_registry);
 
         // FR-017: the payload trace is process-wide, so it is set here - once per
         // turn, from the turn's resolved config (after the automation override
@@ -441,6 +448,7 @@ impl SessionProcessor {
             working_dir,
             team_context,
             alias_table,
+            tool_registry,
         })
     }
 
@@ -457,6 +465,7 @@ impl SessionProcessor {
         alias_table: &crate::tool::alias_table::AliasTable,
         profiler: &Arc<crate::session::profiler::AgentLoopProfiler>,
     ) -> Result<Arc<str>> {
+        let tool_registry = self.tool_registry_for(working_dir);
         // Load skill registry for system prompt injection. C-001: the
         // registry is cached keyed by skill-directory mtimes, so this only
         // touches disk on the first turn (or when a skill directory changes).
@@ -555,13 +564,13 @@ impl SessionProcessor {
             // reference lists exactly the names the wire list carries.
             self.system_prompt_cache()
                 .get_tool_definitions(
-                    &self.tool_registry,
+                    &tool_registry,
                     &alias_table,
                     session_config.tools.expose_alias_names,
                 )
                 .unwrap_or_else(|| {
                     alias_table.outbound_definitions(
-                        &self.tool_registry.definitions(),
+                        &tool_registry.definitions(),
                         session_config.tools.expose_alias_names,
                     )
                 })
@@ -573,7 +582,7 @@ impl SessionProcessor {
             // matching the wire list the same allowlist shapes.
             alias_table
                 .outbound_definitions(
-                    &self.tool_registry.definitions(),
+                    &tool_registry.definitions(),
                     session_config.tools.expose_alias_names,
                 )
                 .iter()
@@ -632,7 +641,7 @@ impl SessionProcessor {
             );
         }
 
-        let code_index_active = self.code_index.get().is_some();
+        let code_index_active = self.code_index_for(&working_dir).is_some();
         let codeindex_section = {
             let cache = self.system_prompt_cache();
             cache

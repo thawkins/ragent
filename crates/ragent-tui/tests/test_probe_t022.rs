@@ -48,7 +48,7 @@ fn button_line(app: &mut ragent_tui::App) -> String {
 #[tokio::test]
 async fn probe_gaps() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // FR-031: terminating row must be excluded from the live count.
     app.active_tasks

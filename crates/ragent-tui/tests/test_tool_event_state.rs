@@ -13,7 +13,7 @@ mod support;
 
 fn app_with_session() -> ragent_tui::App {
     let mut app = support::make_app();
-    app.session_id = Some("sess-1".to_string());
+    app.session.session_id = Some("sess-1".to_string());
     app.needs_redraw = false;
     app
 }
@@ -30,7 +30,7 @@ async fn test_tool_event_sequence_updates_state() {
     .await;
 
     assert!(app.needs_redraw, "ToolCallStart must request a redraw");
-    let part = app.messages[0].parts[0].clone();
+    let part = app.session.messages[0].parts[0].clone();
     let MessagePart::ToolCall { state, .. } = part else {
         panic!("expected ToolCall part");
     };
@@ -47,7 +47,7 @@ async fn test_tool_event_sequence_updates_state() {
     .await;
 
     assert!(app.needs_redraw, "ToolCallArgs must request a redraw");
-    let part = app.messages[0].parts[0].clone();
+    let part = app.session.messages[0].parts[0].clone();
     let MessagePart::ToolCall { state, .. } = part else {
         panic!("expected ToolCall part");
     };
@@ -64,7 +64,7 @@ async fn test_tool_event_sequence_updates_state() {
     .await;
 
     assert!(app.needs_redraw, "ToolCallEnd must request a redraw");
-    let part = app.messages[0].parts[0].clone();
+    let part = app.session.messages[0].parts[0].clone();
     let MessagePart::ToolCall { state, .. } = part else {
         panic!("expected ToolCall part");
     };
@@ -102,7 +102,7 @@ async fn test_tool_call_batch_updates_status_and_duration() {
     .await;
 
     assert!(app.needs_redraw, "ToolCallBatch must request a redraw");
-    let part = app.messages[0].parts[0].clone();
+    let part = app.session.messages[0].parts[0].clone();
     let MessagePart::ToolCall { state, .. } = part else {
         panic!("expected ToolCall part");
     };
@@ -131,7 +131,7 @@ async fn test_tool_call_batch_creates_missing_part() {
     })
     .await;
 
-    let part = app.messages[0].parts[0].clone();
+    let part = app.session.messages[0].parts[0].clone();
     let MessagePart::ToolCall { tool, state, .. } = part else {
         panic!("expected ToolCall part");
     };
@@ -168,7 +168,7 @@ async fn test_tool_call_batch_marks_error() {
     })
     .await;
 
-    let part = app.messages[0].parts[0].clone();
+    let part = app.session.messages[0].parts[0].clone();
     let MessagePart::ToolCall { state, .. } = part else {
         panic!("expected ToolCall part");
     };
@@ -196,21 +196,23 @@ async fn test_pending_args_drained_by_next_lifecycle_event() {
     // Simulate the Start handler having been processed by a path that created
     // the part without consuming the pending args (mirrors the reported bug:
     // the log shows the args but the message header never displays them).
-    app.messages.push(ragent_agent::message::Message::new(
-        "sess-1",
-        Role::Assistant,
-        vec![MessagePart::ToolCall {
-            tool: "Bash".to_string(),
-            call_id: "c9".to_string(),
-            state: Box::new(ToolCallState {
-                status: ToolCallStatus::Running,
-                input: serde_json::Value::Null,
-                output: None,
-                error: None,
-                duration_ms: None,
-            }),
-        }],
-    ));
+    app.session
+        .messages
+        .push(ragent_agent::message::Message::new(
+            "sess-1",
+            Role::Assistant,
+            vec![MessagePart::ToolCall {
+                tool: "Bash".to_string(),
+                call_id: "c9".to_string(),
+                state: Box::new(ToolCallState {
+                    status: ToolCallStatus::Running,
+                    input: serde_json::Value::Null,
+                    output: None,
+                    error: None,
+                    duration_ms: None,
+                }),
+            }],
+        ));
 
     // The next tool-lifecycle event should drain the pending buffer.
     app.handle_event(Event::ToolCallArgs {
@@ -222,6 +224,7 @@ async fn test_pending_args_drained_by_next_lifecycle_event() {
     .await;
 
     let part = app
+        .session
         .messages
         .iter()
         .flat_map(|m| &m.parts)
@@ -250,6 +253,7 @@ async fn test_pending_args_drained_by_next_lifecycle_event() {
     })
     .await;
     let part = app
+        .session
         .messages
         .iter()
         .flat_map(|m| &m.parts)
@@ -292,7 +296,7 @@ async fn test_tool_call_batch_args_populate_missing_input() {
     })
     .await;
 
-    let part = app.messages[0].parts[0].clone();
+    let part = app.session.messages[0].parts[0].clone();
     let MessagePart::ToolCall { state, .. } = part else {
         panic!("expected ToolCall part");
     };
@@ -328,6 +332,7 @@ async fn test_tool_args_decode_through_the_shared_helper() {
     .await;
 
     let ws_part = app
+        .session
         .messages
         .iter()
         .flat_map(|m| &m.parts)
@@ -359,6 +364,7 @@ async fn test_tool_args_decode_through_the_shared_helper() {
     .await;
 
     let enc_part = app
+        .session
         .messages
         .iter()
         .flat_map(|m| &m.parts)

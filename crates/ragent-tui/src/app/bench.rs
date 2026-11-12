@@ -110,7 +110,7 @@ impl App {
                 self.bench_last_summary = Some(message.clone());
                 self.bench_last_workbooks = workbook_paths.clone();
                 self.bench_last_finished_at = Some(chrono::Utc::now());
-                self.force_new_message = true;
+                self.session.force_new_message = true;
                 self.append_assistant_text(&message);
                 self.status = "bench: done".to_string();
                 self.push_log_no_agent(
@@ -125,7 +125,7 @@ impl App {
                 self.bench_last_summary = Some(format!("Benchmark run failed: {msg}"));
                 self.bench_last_finished_at = Some(chrono::Utc::now());
                 self.status = format!("[warn] bench failed: {msg}");
-                self.force_new_message = true;
+                self.session.force_new_message = true;
                 self.append_assistant_text(&format!("From: /bench run\n[err] {msg}"));
                 self.push_log_no_agent(LogLevel::Warn, format!("bench error: {msg}"));
             }
@@ -137,7 +137,7 @@ impl App {
         if let Some(handle) = &self.active_bench_progress {
             let events = handle.drain_events();
             for event in events {
-                self.force_new_message = true;
+                self.session.force_new_message = true;
                 self.append_assistant_text(&self.render_bench_run_event(&event));
             }
         }
@@ -352,7 +352,11 @@ impl App {
     }
 
     pub(crate) fn render_bench_show(&self) -> String {
-        let selected_model = self.selected_model.as_deref().unwrap_or("(not selected)");
+        let selected_model = self
+            .session
+            .selected_model
+            .as_deref()
+            .unwrap_or("(not selected)");
         let last = if self.bench_last_workbooks.is_empty() {
             "(none)".to_string()
         } else {
@@ -453,7 +457,7 @@ impl App {
             return;
         }
 
-        let selected_model = match self.selected_model.as_deref() {
+        let selected_model = match self.session.selected_model.as_deref() {
             Some(model) => model,
             None => {
                 self.status =
@@ -461,13 +465,13 @@ impl App {
                 return;
             }
         };
-        let config = ragent_agent::Config::load().unwrap_or_default();
+        let config = ragent_agent::Config::load_for(&self.cwd_path).unwrap_or_default();
         let selection = match ragent_bench::resolve_model_context(
             selected_model,
             self.provider_registry.as_ref(),
             self.storage.as_ref(),
             &config,
-            self.effective_thinking_config_for_agent(&self.agent_info),
+            self.effective_thinking_config_for_agent(&self.session.agent_info),
         ) {
             Ok(selection) => selection,
             Err(e) => {
@@ -518,7 +522,7 @@ impl App {
 
         let entry = ragent_agent::task::TaskEntry {
             id: task_id,
-            parent_session_id: self.session_id.clone().unwrap_or_default(),
+            parent_session_id: self.session.session_id.clone().unwrap_or_default(),
             child_session_id: "bench".to_string(),
             agent_name: "bench".to_string(),
             task_prompt: raw_command.to_string(),

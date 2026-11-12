@@ -530,8 +530,8 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     app.agents_row_task_ids.clear();
     app.agents_subagent_task_ids.clear();
 
-    let primary_session = app.session_id.clone().unwrap_or_default();
-    let primary_name = app.agent_name.clone();
+    let primary_session = app.session.session_id.clone().unwrap_or_default();
+    let primary_name = app.session.agent_name.clone();
     let mut tasks_map: HashMap<&str, Vec<&TaskEntry>> = HashMap::new();
     for task in &app.active_tasks {
         tasks_map
@@ -547,6 +547,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
         .map(|def| def.agent_info.name.clone())
         .collect();
     let teammate_ids: HashSet<String> = app
+        .session
         .team_members
         .iter()
         .filter_map(|member| member.session_id.clone())

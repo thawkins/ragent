@@ -26,7 +26,7 @@ fn make_app() -> App {
 /// summary and one assistant message, and return the overlay text.
 fn render_overlay(child_session: &str, app: &mut App) -> String {
     app.current_screen = ScreenMode::Chat;
-    app.session_id = Some("lead-s1".to_string());
+    app.session.session_id = Some("lead-s1".to_string());
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::Session {
             session_id: child_session.to_string(),

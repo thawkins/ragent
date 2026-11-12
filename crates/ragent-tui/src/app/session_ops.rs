@@ -329,9 +329,9 @@ impl App {
     /// Clone the current agent info, apply the selected model/thinking settings,
     /// and inject the role-mode system prompt addition when active.
     pub(crate) fn prepare_agent_for_dispatch(&self) -> ragent_agent::agent::AgentInfo {
-        let mut agent = self.agent_info.clone();
+        let mut agent = self.session.agent_info.clone();
         self.apply_selected_model_and_thinking(&mut agent);
-        if let Some(ref mode) = self.role_mode {
+        if let Some(ref mode) = self.session.role_mode {
             let addition = mode.system_prompt_addition();
             if !addition.is_empty() {
                 let existing = agent.prompt.clone().unwrap_or_default();
@@ -370,16 +370,19 @@ impl App {
     /// wins, then the agent's pinned/unpinned model, then the first provider
     /// in the registry that advertises a default model.
     fn active_provider_id(&self) -> Option<String> {
-        if let Some(model_str) = self.selected_model.as_deref()
+        if let Some(model_str) = self.session.selected_model.as_deref()
             && let Some((provider, _)) = model_str.split_once('/')
         {
             return Some(provider.to_string());
         }
-        if let Some(model) = &self.agent_info.model {
+        if let Some(model) = &self.session.agent_info.model {
             return Some(model.provider_id.clone());
         }
-        ragent_agent::agent::resolve_default_model(&self.agent_info, &self.provider_registry)
-            .map(|m| m.provider_id)
+        ragent_agent::agent::resolve_default_model(
+            &self.session.agent_info,
+            &self.provider_registry,
+        )
+        .map(|m| m.provider_id)
     }
 
     /// Resolve the LLM tool wire format for a provider id.
@@ -436,7 +439,8 @@ impl App {
     /// provider-reported prompt tokens.
     pub fn conversation_history_token_count(&self) -> u64 {
         bytes_to_tokens(
-            self.messages
+            self.session
+                .messages
                 .iter()
                 .map(|msg| {
                     let content_len: usize = msg
@@ -463,7 +467,7 @@ impl App {
     /// Return the number of messages currently held in the active session's
     /// conversation history (FR-008).
     pub fn conversation_message_count(&self) -> usize {
-        self.messages.len()
+        self.session.messages.len()
     }
 
     /// Compute the token size of the assembled system prompt.
@@ -477,7 +481,7 @@ impl App {
     /// therefore tracks the stable prompt core. The assembled prompt's byte
     /// length is converted to tokens via [`BYTES_PER_TOKEN`].
     pub fn system_prompt_token_count(&self) -> u64 {
-        let working_dir = crate::app::helpers::current_working_dir();
+        let working_dir = self.cwd_path.clone();
         let config = self.current_config();
         let memory_config = config.memory.clone();
         let skills = self
@@ -508,7 +512,7 @@ impl App {
     /// can show where the prompt's weight comes from. Uses the same
     /// discovery-and-load precedence as the prompt builder.
     pub fn agents_md_token_count(&self) -> u64 {
-        let working_dir = crate::app::helpers::current_working_dir();
+        let working_dir = self.cwd_path.clone();
         let (content, _) =
             ragent_agent::agent::collect_agents_md_content_with_discovery(&working_dir);
         bytes_to_tokens(content.len())
@@ -521,7 +525,7 @@ impl App {
     /// section builder the agent loop passes through `spawn_blocking` is
     /// measured here synchronously.
     pub fn memory_injection_token_count(&self) -> u64 {
-        let working_dir = crate::app::helpers::current_working_dir();
+        let working_dir = self.cwd_path.clone();
         let config = self.current_config();
         bytes_to_tokens(
             ragent_agent::agent::build_memory_prompt_section(
@@ -541,7 +545,7 @@ impl App {
     /// can never drift from what the model actually receives. Zero when no
     /// agent-invocable skills resolve for the active agent.
     pub fn skills_token_count(&self) -> u64 {
-        let working_dir = crate::app::helpers::current_working_dir();
+        let working_dir = self.cwd_path.clone();
         let config = self.current_config();
         let Some(registry) = self
             .session_processor
@@ -549,7 +553,7 @@ impl App {
         else {
             return 0;
         };
-        let agent = self.agent_info.clone();
+        let agent = self.session.agent_info.clone();
         bytes_to_tokens(ragent_agent::agent::skills_prompt_section(&registry, &agent).len())
     }
 
@@ -565,7 +569,7 @@ impl App {
     /// when the provider does not advertise a limit - the panel shows
     /// "unknown" percentages rather than guessing (FR-011).
     pub fn active_context_window_tokens(&self) -> Option<usize> {
-        if let Some(model_str) = self.selected_model.as_deref()
+        if let Some(model_str) = self.session.selected_model.as_deref()
             && let Some((provider_id, model_id)) = model_str.split_once('/')
             && let Some(window) = self
                 .provider_registry
@@ -575,7 +579,7 @@ impl App {
         {
             return Some(window);
         }
-        if let Some(model) = &self.agent_info.model
+        if let Some(model) = &self.session.agent_info.model
             && let Some(window) = self
                 .provider_registry
                 .resolve_model(&model.provider_id, &model.model_id)
@@ -584,7 +588,7 @@ impl App {
         {
             return Some(window);
         }
-        self.selected_model_ctx_window.filter(|w| *w > 0)
+        self.session.selected_model_ctx_window.filter(|w| *w > 0)
     }
 
     /// Collect a snapshot of every context partition for the Context panel.
@@ -598,12 +602,12 @@ impl App {
     /// T-013/FR-015: disk- and SQLite-backed partitions (system prompt build,
     /// AGENTS.md discovery, memory section, skill registry) make this
     /// unsuitable for per-frame renders on the UI thread. The panel render
-    /// path uses the cached snapshot from [`App::context_snapshot_cache`]
+    /// path uses the cached snapshot from [`crate::app::SessionView::context_snapshot_cache`]
     /// instead; this method is the synchronous fallback (first frame) and the
     /// reference implementation the blocking refresh task mirrors via
     /// [`compute_disk_context_partitions`].
     pub fn context_partition_snapshot(&self) -> ContextPartitionSnapshot {
-        let working_dir = crate::app::helpers::current_working_dir();
+        let working_dir = self.cwd_path.clone();
         let config = self.current_config();
         // Pre-compute the UI-thread-safe partitions (registry caches only)
         // before handing the disk/SQLite-bound work to the shared helper.
@@ -612,7 +616,7 @@ impl App {
         let tool_catalog_tokens = self.tool_catalog_token_count();
         let tool_metadata_tokens = self.tool_metadata_token_count();
         let context_window_tokens = self.active_context_window_tokens();
-        let last_input_tokens = self.last_input_tokens;
+        let last_input_tokens = self.session.last_input_tokens;
 
         let disk = compute_disk_context_partitions(
             &working_dir,
@@ -638,19 +642,19 @@ impl App {
     /// on `tokio::task::spawn_blocking`, combining its result with the
     /// UI-thread-safe partitions captured here. Calls are coalesced: while a
     /// refresh is in flight, further scheduling is a no-op. The finished
-    /// snapshot is deposited into [`App::context_snapshot_result`] and
+    /// snapshot is deposited into [`crate::app::SessionView::context_snapshot_result`] and
     /// adopted by [`App::poll_context_snapshot_refresh`] on a later frame.
     pub fn schedule_context_snapshot_refresh(&mut self) {
         // Only schedule when the panel is actually open: the snapshot exists
         // purely for the panel render, and skipping while closed also keeps
         // non-TUI code paths that poll without a tokio reactor (unit tests,
         // headless flows) from reaching `spawn_blocking` needlessly.
-        if self.context_refresh_inflight || !self.show_context_panel {
+        if self.session.context_refresh_inflight || !self.show_context_panel {
             return;
         }
-        self.context_refresh_inflight = true;
+        self.session.context_refresh_inflight = true;
 
-        let working_dir = crate::app::helpers::current_working_dir();
+        let working_dir = self.cwd_path.clone();
         let agent = self.prepare_agent_for_dispatch();
         let storage = Arc::clone(&self.storage);
         let session_processor = Arc::clone(&self.session_processor);
@@ -660,11 +664,12 @@ impl App {
         let tool_catalog_tokens = self.tool_catalog_token_count();
         let tool_metadata_tokens = self.tool_metadata_token_count();
         let context_window_tokens = self.active_context_window_tokens();
-        let last_input_tokens = self.last_input_tokens;
-        let result_slot = Arc::clone(&self.context_snapshot_result);
+        let last_input_tokens = self.session.last_input_tokens;
+        let result_slot = Arc::clone(&self.session.context_snapshot_result);
+        let config_dir = self.cwd_path.clone();
 
         tokio::task::spawn_blocking(move || {
-            let config = match ragent_agent::Config::load() {
+            let config = match ragent_agent::Config::load_for(&config_dir) {
                 Ok(cfg) => cfg,
                 Err(_) => ragent_agent::Config::default(),
             };
@@ -694,7 +699,7 @@ impl App {
     /// Adopt a completed background context snapshot, if one has landed.
     ///
     /// T-013/FR-015: called from the TUI main loop every frame. Drains
-    /// [`App::context_snapshot_result`], stores the snapshot in the render
+    /// [`crate::app::SessionView::context_snapshot_result`], stores the snapshot in the render
     /// cache, clears the in-flight latch and flags a redraw.
     ///
     /// Stale-snapshot guard: when the conversation history size has changed
@@ -707,7 +712,7 @@ impl App {
     pub fn poll_context_snapshot_refresh(&mut self) {
         let deposited = {
             let mut guard = recover_poisoned(
-                self.context_snapshot_result.lock(),
+                self.session.context_snapshot_result.lock(),
                 "context_snapshot_result",
             );
             guard.take()
@@ -721,12 +726,12 @@ impl App {
                 current = self.conversation_message_count(),
                 "dropping stale context snapshot - history changed mid-refresh"
             );
-            self.context_refresh_inflight = false;
+            self.session.context_refresh_inflight = false;
             self.schedule_context_snapshot_refresh();
             return;
         }
-        self.context_snapshot_cache = Some(snapshot);
-        self.context_refresh_inflight = false;
+        self.session.context_snapshot_cache = Some(snapshot);
+        self.session.context_refresh_inflight = false;
         self.needs_redraw = true;
     }
 
@@ -734,20 +739,23 @@ impl App {
     /// when available, else the synchronous computation as a first-frame
     /// fallback (the async refresh then replaces it with identical values).
     pub fn context_effective_snapshot(&self) -> ContextPartitionSnapshot {
-        if let Some(snapshot) = &self.context_snapshot_cache {
+        if let Some(snapshot) = &self.session.context_snapshot_cache {
             return *snapshot;
         }
         self.context_partition_snapshot()
     }
 
     pub(crate) fn should_auto_compact_before_send(&self) -> bool {
-        if self.auto_compact_in_progress
-            || self.auto_compact_failed
-            || self.pending_send_after_compact.is_some()
+        if self.session.auto_compact_in_progress
+            || self.session.auto_compact_failed
+            || self.session.pending_send_after_compact.is_some()
         {
             return false;
         }
-        if self.session_id.is_none() || self.messages.is_empty() || self.last_input_tokens == 0 {
+        if self.session.session_id.is_none()
+            || self.session.messages.is_empty()
+            || self.session.last_input_tokens == 0
+        {
             return false;
         }
         let Some(context_window) = self.selected_model_context_window() else {
@@ -764,7 +772,7 @@ impl App {
             self.current_config().compaction.buffer,
             self.current_config().compaction.threshold,
         ) as u64;
-        self.last_input_tokens > threshold
+        self.session.last_input_tokens > threshold
     }
 
     /// Start manual compaction (the `/compact` / `/compress` slash commands)
@@ -780,11 +788,11 @@ impl App {
     /// marks the threshold-driven path, which blocks the next send until the
     /// compacted history is applied.
     pub(crate) fn start_compaction(&mut self, auto_triggered: bool) -> bool {
-        let Some(sid) = self.session_id.clone() else {
+        let Some(sid) = self.session.session_id.clone() else {
             self.status = "[warn] No active session to compact".to_string();
             return false;
         };
-        if self.messages.is_empty() {
+        if self.session.messages.is_empty() {
             self.status = "[warn] No messages to compact".to_string();
             return false;
         }
@@ -808,8 +816,8 @@ impl App {
             return;
         }
 
-        self.auto_compact_failed = false;
-        let Some(sid) = self.session_id.clone() else {
+        self.session.auto_compact_failed = false;
+        let Some(sid) = self.session.session_id.clone() else {
             self.status = "[warn] No active session".to_string();
             return;
         };
@@ -817,18 +825,18 @@ impl App {
         // Show the command in the chat as a user message.
         let display_text = format!("$ {command}");
         let msg = Message::user_text(&sid, &display_text);
-        self.messages.push(msg);
-        self.last_prompt = raw.clone();
+        self.session.messages.push(msg);
+        self.session.last_prompt = raw.clone();
         // T-010/FR-013: user message added; refresh the Context panel so the
         // history message count stays current while the panel is open.
         self.schedule_context_snapshot_refresh();
         self.add_to_history(raw.clone());
-        self.input.clear();
-        self.input_cursor = 0;
+        self.session.input.clear();
+        self.session.input_cursor = 0;
         self.file_menu = None;
         self.set_status_working("running command");
-        self.stream_in_bytes = 0;
-        self.stream_out_bytes = 0;
+        self.session.stream_in_bytes = 0;
+        self.session.stream_out_bytes = 0;
         // R-10: trim messages to bound memory.
         self.trim_messages_if_needed();
 
@@ -839,11 +847,11 @@ impl App {
         let processor = self.session_processor.clone();
         let event_bus = self.event_bus.clone();
         let flag = Arc::new(AtomicBool::new(false));
-        self.cancel_flag = Some(flag.clone());
+        self.session.cancel_flag = Some(flag.clone());
 
         // Build a minimal tool context so the validated `Bash` tool can run
         // the command with the same security and timeout as a normal tool call.
-        let working_dir = crate::app::helpers::current_working_dir();
+        let working_dir = self.cwd_path.clone();
         let tool_ctx = ToolContext {
             session_id: sid.clone(),
             working_dir: working_dir.clone(),
@@ -888,8 +896,8 @@ impl App {
         text: String,
         image_paths: Vec<std::path::PathBuf>,
     ) {
-        self.auto_compact_failed = false;
-        let Some(sid) = self.session_id.clone() else {
+        self.session.auto_compact_failed = false;
+        let Some(sid) = self.session.session_id.clone() else {
             self.status = "[warn] No active session".to_string();
             return;
         };
@@ -904,18 +912,18 @@ impl App {
             format!("[attach {}] {}", names.join(", "), text)
         };
         let msg = Message::user_text(&sid, &display_text);
-        self.messages.push(msg);
-        self.last_prompt = text.clone();
+        self.session.messages.push(msg);
+        self.session.last_prompt = text.clone();
         // T-010/FR-013: user message added; refresh the Context panel so the
         // history message count stays current while the panel is open.
         self.schedule_context_snapshot_refresh();
         self.add_to_history(text.clone());
-        self.input.clear();
-        self.input_cursor = 0;
+        self.session.input.clear();
+        self.session.input_cursor = 0;
         self.file_menu = None;
         self.set_status_working("processing");
-        self.stream_in_bytes = 0;
-        self.stream_out_bytes = 0;
+        self.session.stream_in_bytes = 0;
+        self.session.stream_out_bytes = 0;
         // R-10: trim messages to bound memory.
         self.trim_messages_if_needed();
         let refs = ragent_agent::reference::parse::parse_refs(&text);
@@ -929,7 +937,7 @@ impl App {
         }
 
         let truncated = crate::app::helpers::truncate_to_char_boundary(&text, 120);
-        let model_tag = if let Some(ref model_str) = self.selected_model {
+        let model_tag = if let Some(ref model_str) = self.session.selected_model {
             format!(" [{}]", model_str)
         } else {
             String::new()
@@ -943,10 +951,12 @@ impl App {
 
         let processor = self.session_processor.clone();
         let flag = Arc::new(AtomicBool::new(false));
-        self.cancel_flag = Some(flag.clone());
+        self.session.cancel_flag = Some(flag.clone());
+        // `@` references resolve against the focused session's directory.
+        let ref_root = self.cwd_path.clone();
         tokio::spawn(async move {
             let final_text = if has_refs {
-                let wd = crate::app::helpers::current_working_dir();
+                let wd = ref_root;
                 match ragent_agent::reference::resolve::resolve_all_refs(&text, &wd).await {
                     Ok((resolved, _)) => resolved,
                     Err(e) => {
@@ -1026,10 +1036,10 @@ impl App {
     /// still accepted (FR-002) but slash commands, bang commands, and
     /// teammate-targeted messages are refused (FR-017).
     pub(crate) fn is_input_blocked(&self) -> bool {
-        self.is_processing
-            || self.compact_in_progress
-            || self.auto_compact_in_progress
-            || self.pending_send_after_compact.is_some()
+        self.session.is_processing
+            || self.session.compact_in_progress
+            || self.session.auto_compact_in_progress
+            || self.session.pending_send_after_compact.is_some()
     }
 
     /// Return whether the input field is genuinely locked, as opposed to merely
@@ -1040,18 +1050,18 @@ impl App {
     /// locked when an overlay would swallow keystrokes (a modal dialog, picker,
     /// or full-screen view) or while a compaction run owns the turn.
     pub(crate) fn is_input_locked(&self) -> bool {
-        !self.permission_queue.is_empty()
-            || !self.question_queue.is_empty()
+        !self.session.permission_queue.is_empty()
+            || !self.session.question_queue.is_empty()
             || self.provider_setup.is_some()
             || self.mcp_discover.is_some()
             || self.plugins_list.is_some()
             || self.loop_setup.is_some()
-            || self.pending_forcecleanup.is_some()
-            || self.pending_rollback.is_some()
-            || self.plan_approval_pending.is_some()
+            || self.session.pending_forcecleanup.is_some()
+            || self.session.pending_rollback.is_some()
+            || self.session.plan_approval_pending.is_some()
             || self.pending_memory_delete.is_some()
             || self.pending_router_save.is_some()
-            || self.pending_stop_confirm
+            || self.session.pending_stop_confirm
             // The destructive row-action confirmation dialog (spec `agentui`
             // T-009) is likewise a modal overlay: every key routes to it, so
             // no character may reach the input buffer while it is open.
@@ -1063,9 +1073,9 @@ impl App {
             || self.history_picker.is_some()
             || self.context_menu.is_some()
             || self.show_shortcuts
-            || self.compact_in_progress
-            || self.auto_compact_in_progress
-            || self.pending_send_after_compact.is_some()
+            || self.session.compact_in_progress
+            || self.session.auto_compact_in_progress
+            || self.session.pending_send_after_compact.is_some()
             // The queue-control menu (ALT-Q) is a modal overlay that swallows
             // every keystroke, so it must never let a character reach the input
             // buffer (spec `inputqueue` FR-031). The per-key interception lives
@@ -1092,13 +1102,13 @@ impl App {
 
     /// Return the number of Unicode code points currently in the input buffer.
     pub fn input_len_chars(&self) -> usize {
-        self.input.chars().count()
+        self.session.input.chars().count()
     }
 
     /// Return the number of messages currently waiting in the input queue
     /// (spec `inputqueue` FR-001).
     pub fn input_queue_len(&self) -> usize {
-        self.input_queue.len()
+        self.session.input_queue.len()
     }
 
     /// Labels for the four queue-control menu rows, in fixed order: `Next`,
@@ -1220,7 +1230,7 @@ impl App {
     /// Move the queue-entry panel highlight down one entry. A no-op at the last
     /// entry. The changed selection is painted on the next frame.
     pub fn queue_show_move_down(&mut self) {
-        if self.queue_show_selected + 1 < self.input_queue.len() {
+        if self.queue_show_selected + 1 < self.session.input_queue.len() {
             self.queue_show_selected += 1;
             self.needs_redraw = true;
         }
@@ -1235,10 +1245,10 @@ impl App {
     /// other entry.
     pub fn queue_show_promote_selected(&mut self) {
         let index = self.queue_show_selected;
-        if index == 0 || index >= self.input_queue.len() {
+        if index == 0 || index >= self.session.input_queue.len() {
             return;
         }
-        self.input_queue.swap(index, index - 1);
+        self.session.input_queue.swap(index, index - 1);
         self.queue_show_selected = index - 1;
         self.needs_redraw = true;
     }
@@ -1249,10 +1259,10 @@ impl App {
     /// the queue counter repaints on the next frame. A no-op on an empty queue.
     pub fn queue_show_delete_selected(&mut self) {
         let index = self.queue_show_selected;
-        if index >= self.input_queue.len() {
+        if index >= self.session.input_queue.len() {
             return;
         }
-        if let Some(entry) = self.input_queue.remove(index) {
+        if let Some(entry) = self.session.input_queue.remove(index) {
             let text = crate::app::helpers::truncate_to_char_boundary(&entry.text, 120);
             self.push_log_no_agent(
                 LogLevel::Info,
@@ -1261,8 +1271,8 @@ impl App {
         }
         self.queue_show_selected = self
             .queue_show_selected
-            .min(self.input_queue.len().saturating_sub(1));
-        if self.input_queue.is_empty() {
+            .min(self.session.input_queue.len().saturating_sub(1));
+        if self.session.input_queue.is_empty() {
             // An empty queue has nothing left to show, so the panel closes
             // itself (the counter also disappears).
             self.queue_show_open = false;
@@ -1290,15 +1300,15 @@ impl App {
     pub fn clear_input_queue(&mut self) {
         // A pending queue-control `Next` is meaningless once the queue is
         // emptied, so drop it with the entries (FR-024).
-        self.queue_next_pending = false;
+        self.session.queue_next_pending = false;
         // The queue-entry panel has nothing left to list once the queue is
         // emptied, so it closes with the entries.
         self.queue_show_open = false;
         self.queue_show_selected = 0;
-        if self.input_queue.is_empty() {
+        if self.session.input_queue.is_empty() {
             return;
         }
-        self.input_queue.clear();
+        self.session.input_queue.clear();
         // The prompt's queue counter disappears once the queue is empty, so the
         // change must be painted on the next frame (NFR-003).
         self.needs_redraw = true;
@@ -2754,7 +2764,7 @@ impl App {
         text: String,
         image_paths: Vec<std::path::PathBuf>,
     ) -> Result<(), QueuedInput> {
-        if self.input_queue.len() >= self.input_queue_capacity {
+        if self.session.input_queue.len() >= self.input_queue_capacity {
             self.status = format!(
                 "queue full (max {}) - wait for the current turn to finish",
                 self.input_queue_capacity
@@ -2763,20 +2773,21 @@ impl App {
         }
         // History is updated at entry time, before execution (FR-003).
         self.add_to_history(text.clone());
-        self.input.clear();
-        self.input_cursor = 0;
-        self.history_index = None;
+        self.session.input.clear();
+        self.session.input_cursor = 0;
+        self.session.history_index = None;
         self.file_menu = None;
         // A queued slash command (FR-017 amendment) must also dismiss the
         // completion menu, otherwise it would float over a field it no longer
         // belongs to once the entry runs.
         self.slash_menu = None;
-        self.input_queue
+        self.session
+            .input_queue
             .push_back(QueuedInput { text, image_paths });
         // FR-014: echo the enqueue into the log panel with the post-enqueue depth.
         self.push_log_no_agent(
             LogLevel::Info,
-            format!("queued ({} in queue)", self.input_queue.len()),
+            format!("queued ({} in queue)", self.session.input_queue.len()),
         );
         // The counter renders the new length on the next frame (NFR-003).
         self.needs_redraw = true;
@@ -2816,23 +2827,23 @@ impl App {
         // so consecutive command entries run back-to-back; the boundary guard at
         // the top of each pass stops the moment an entry leaves the turn busy.
         loop {
-            let next_pending = self.queue_next_pending;
-            self.queue_next_pending = false;
-            if self.session_id.is_none()
-                || self.is_processing
-                || self.compact_in_progress
-                || self.auto_compact_in_progress
-                || self.pending_send_after_compact.is_some()
+            let next_pending = self.session.queue_next_pending;
+            self.session.queue_next_pending = false;
+            if self.session.session_id.is_none()
+                || self.session.is_processing
+                || self.session.compact_in_progress
+                || self.session.auto_compact_in_progress
+                || self.session.pending_send_after_compact.is_some()
             {
                 // FR-030: a `Next` that cannot dispatch yet stays pending and is
                 // retried at the next safe turn boundary instead of being lost.
-                self.queue_next_pending = next_pending;
+                self.session.queue_next_pending = next_pending;
                 return;
             }
-            if !next_pending && self.input_queue.is_empty() {
+            if !next_pending && self.session.input_queue.is_empty() {
                 return;
             }
-            let Some(entry) = self.input_queue.pop_front() else {
+            let Some(entry) = self.session.input_queue.pop_front() else {
                 return;
             };
             // FR-008: the counter decrements, so the field must repaint next frame.
@@ -2842,14 +2853,14 @@ impl App {
                 // so snapshot the live draft and restore it once the queued entry has
                 // been handed to the (asynchronous) dispatch path. `Next` runs exactly
                 // one entry, so the drain ends here.
-                let saved_input = std::mem::take(&mut self.input);
-                let saved_cursor = self.input_cursor;
-                let saved_anchor = self.kb_select_anchor;
+                let saved_input = std::mem::take(&mut self.session.input);
+                let saved_cursor = self.session.input_cursor;
+                let saved_anchor = self.session.kb_select_anchor;
                 self.dispatch_queued_input(entry.text, entry.image_paths)
                     .await;
-                self.input = saved_input;
-                self.input_cursor = saved_cursor;
-                self.kb_select_anchor = saved_anchor;
+                self.session.input = saved_input;
+                self.session.input_cursor = saved_cursor;
+                self.session.kb_select_anchor = saved_anchor;
                 return;
             }
             // A plain message starts an asynchronous turn that sets `is_processing`,
@@ -2898,7 +2909,7 @@ impl App {
     /// Stops the running turn exactly as `InputAction::CancelAgent` does (FR-024)
     /// and dispatches the oldest queued entry. A live turn cannot be dispatched
     /// over (FR-016), so while the agent is executing the dispatch is *deferred*:
-    /// the selection is recorded in [`App::queue_next_pending`] and runs at the
+    /// the selection is recorded in [`crate::app::SessionView::queue_next_pending`] and runs at the
     /// turn boundary the cancel opens, never overlapping the running turn (FR-029,
     /// FR-030). The deferral reuses the shared asynchronous dispatch path, so the
     /// UI thread is never blocked (NFR-006). The menu closes and the change paints
@@ -2913,7 +2924,7 @@ impl App {
     /// invokes it is added by the menu key-handling task; it is not part of this
     /// action.
     pub async fn queue_menu_select_next(&mut self) {
-        if self.input_queue.is_empty() {
+        if self.session.input_queue.is_empty() {
             // FR-023: the `Next` row is non-selectable with an empty queue, so
             // this is only reachable defensively; report and close.
             self.status = "queue: nothing to run - the queue is empty".to_string();
@@ -2924,9 +2935,9 @@ impl App {
         // FR-030: never dispatch over a compaction run or a post-compact send.
         // There is no live turn to cancel in that window, so refuse with a status
         // message rather than deferring an entry that no boundary would pick up.
-        if self.compact_in_progress
-            || self.auto_compact_in_progress
-            || self.pending_send_after_compact.is_some()
+        if self.session.compact_in_progress
+            || self.session.auto_compact_in_progress
+            || self.session.pending_send_after_compact.is_some()
         {
             self.status = "queue: next deferred - compaction in progress".to_string();
             self.push_log_no_agent(
@@ -2937,14 +2948,14 @@ impl App {
             self.needs_redraw = true;
             return;
         }
-        if self.is_processing {
+        if self.session.is_processing {
             // FR-024/FR-029: stop the running turn exactly like `CancelAgent`.
             // The queue is untouched - halt never advances it - so the oldest
             // entry survives into the resumed turn.
             self.halt_turn_like_cancel_agent();
             // FR-030: the live turn cannot be dispatched over, so defer the run
             // of the oldest entry to the turn boundary the cancel opens.
-            self.queue_next_pending = true;
+            self.session.queue_next_pending = true;
             self.status = "queue: stopping turn - running the next queued entry".to_string();
             self.push_log_no_agent(
                 LogLevel::Info,
@@ -2956,6 +2967,7 @@ impl App {
             // shared asynchronous path (FR-024, NFR-006). The same pending flag
             // drives it so the editable draft is preserved (FR-031).
             let text = self
+                .session
                 .input_queue
                 .front()
                 .map(|e| crate::app::helpers::truncate_to_char_boundary(&e.text, 120))
@@ -2964,7 +2976,7 @@ impl App {
                 LogLevel::Info,
                 format!("queue: Next - dispatching oldest queued entry: {text}"),
             );
-            self.queue_next_pending = true;
+            self.session.queue_next_pending = true;
             self.advance_input_queue().await;
         }
         self.close_queue_menu();
@@ -2992,7 +3004,7 @@ impl App {
         } else {
             // FR-027: the agent is already stopped, so the row resumes the
             // interrupted work instead of halting.
-            if !self.agent_halted {
+            if !self.session.agent_halted {
                 self.status = "Nothing to resume - agent was not halted".to_string();
             } else if !self.dispatch_resume_continuation() {
                 self.status = "No active session".to_string();
@@ -3020,21 +3032,23 @@ impl App {
     /// Returns `false` without side effects when there is no active session, so
     /// the caller can report `No active session`.
     pub(crate) fn dispatch_resume_continuation(&mut self) -> bool {
-        let Some(sid) = self.session_id.clone() else {
+        let Some(sid) = self.session.session_id.clone() else {
             return false;
         };
-        self.agent_halted = false;
+        self.session.agent_halted = false;
         let resume_text = "You were previously interrupted by the user. Continue the task from where you left off.";
-        self.messages.push(Message::user_text(&sid, resume_text));
+        self.session
+            .messages
+            .push(Message::user_text(&sid, resume_text));
         self.set_status_working("processing");
         self.push_log_no_agent(LogLevel::Info, "Resuming halted agent".to_string());
 
-        let mut agent = self.agent_info.clone();
+        let mut agent = self.session.agent_info.clone();
         self.apply_selected_model_and_thinking(&mut agent);
 
         let processor = self.session_processor.clone();
         let flag = Arc::new(AtomicBool::new(false));
-        self.cancel_flag = Some(flag.clone());
+        self.session.cancel_flag = Some(flag.clone());
         tokio::spawn(async move {
             if let Err(e) = processor
                 .process_message(&sid, resume_text, &agent, flag)
@@ -3289,7 +3303,7 @@ impl App {
     }
 
     pub(crate) fn assert_input_cursor_invariant(&self) {
-        debug_assert!(self.input_cursor <= self.input_len_chars());
+        debug_assert!(self.session.input_cursor <= self.input_len_chars());
     }
 
     pub(crate) fn pane_area(&self, pane: SelectionPane) -> Rect {
@@ -3354,7 +3368,7 @@ impl App {
         // a panel is focused, modifier-only keys, swallowed dialog keys) leave
         // the buffer untouched, so this is the cheap early out and it is what
         // keeps the spool small enough to read.
-        if before_input == self.input && before_cursor == self.input_cursor {
+        if before_input == self.session.input && before_cursor == self.session.input_cursor {
             return;
         }
         tracing::debug!(
@@ -3362,7 +3376,7 @@ impl App {
             before_chars = before_input.chars().count(),
             before_cursor = before_cursor,
             after_chars = self.input_len_chars(),
-            after_cursor = self.input_cursor,
+            after_cursor = self.session.input_cursor,
             screen = ?self.current_screen,
             slash_menu = self.slash_menu.is_some(),
             file_menu = self.file_menu.is_some(),
@@ -3429,11 +3443,11 @@ impl App {
              before={:?} after={:?}\n",
             chrono::Utc::now().to_rfc3339(),
             self.input_len_chars(),
-            self.input_cursor,
-            self.input_cursor as i64 - before_cursor as i64,
+            self.session.input_cursor,
+            self.session.input_cursor as i64 - before_cursor as i64,
             self.current_screen,
             escape(before_input),
-            escape(&self.input),
+            escape(&self.session.input),
         );
         if let Err(e) = file.write_all(line.as_bytes()) {
             tracing::debug!(error = %e, "failed to append input transition to spool");
@@ -3441,17 +3455,17 @@ impl App {
     }
 
     pub(crate) fn set_cursor_char_index_clamped(&mut self, index: usize) {
-        self.input_cursor = index.min(self.input_len_chars());
+        self.session.input_cursor = index.min(self.input_len_chars());
         self.assert_input_cursor_invariant();
     }
 
     pub(crate) fn refresh_input_menus(&mut self) {
-        if self.input.starts_with('/') {
+        if self.session.input.starts_with('/') {
             self.update_slash_menu();
         } else {
             self.slash_menu = None;
         }
-        if self.input.contains('@') {
+        if self.session.input.contains('@') {
             self.update_file_menu();
         } else {
             self.file_menu = None;
@@ -3508,7 +3522,7 @@ impl App {
     }
 
     pub(crate) fn refresh_project_files_cache(&mut self) {
-        let wd = crate::app::helpers::current_working_dir();
+        let wd = self.cwd_path.clone();
         let files = ragent_agent::reference::fuzzy::collect_project_files(&wd, 10_000);
         self.project_files_cache_count = files.len();
         self.project_files_cache = Some(files);
@@ -3519,7 +3533,7 @@ impl App {
     /// Insert a single character at the cursor and refresh autocomplete menus.
     pub fn insert_char_at_cursor(&mut self, c: char) {
         let insert_pos = self.cursor_byte_pos();
-        self.input.insert(insert_pos, c);
+        self.session.input.insert(insert_pos, c);
         self.cursor_move_right();
         self.refresh_input_menus();
         self.assert_input_cursor_invariant();
@@ -3532,19 +3546,19 @@ impl App {
         }
         let insert_pos = self.cursor_byte_pos();
         let added = text.chars().count();
-        self.input.insert_str(insert_pos, text);
-        self.set_cursor_char_index_clamped(self.input_cursor + added);
+        self.session.input.insert_str(insert_pos, text);
+        self.set_cursor_char_index_clamped(self.session.input_cursor + added);
         self.refresh_input_menus();
         self.assert_input_cursor_invariant();
     }
 
     /// Delete the character before the cursor (backspace).
     pub fn delete_prev_char(&mut self) {
-        if self.input_cursor == 0 {
+        if self.session.input_cursor == 0 {
             return;
         }
-        let delete_pos = self.cursor_byte_pos_at_char_index(self.input_cursor - 1);
-        self.input.remove(delete_pos);
+        let delete_pos = self.cursor_byte_pos_at_char_index(self.session.input_cursor - 1);
+        self.session.input.remove(delete_pos);
         self.cursor_move_left();
         self.refresh_input_menus();
         self.assert_input_cursor_invariant();
@@ -3552,11 +3566,11 @@ impl App {
 
     /// Delete the character at the cursor (delete).
     pub fn delete_next_char(&mut self) {
-        if self.input_cursor >= self.input_len_chars() {
+        if self.session.input_cursor >= self.input_len_chars() {
             return;
         }
         let delete_pos = self.cursor_byte_pos();
-        self.input.remove(delete_pos);
+        self.session.input.remove(delete_pos);
         self.refresh_input_menus();
         self.assert_input_cursor_invariant();
     }
@@ -3574,7 +3588,7 @@ impl App {
         }
         let byte_start = self.cursor_byte_pos_at_char_index(clamped_start);
         let byte_end = self.cursor_byte_pos_at_char_index(clamped_end);
-        self.input.replace_range(byte_start..byte_end, "");
+        self.session.input.replace_range(byte_start..byte_end, "");
         self.set_cursor_char_index_clamped(clamped_start);
         self.refresh_input_menus();
         self.assert_input_cursor_invariant();
@@ -3627,7 +3641,7 @@ impl App {
     /// Return the byte offset in `self.input` corresponding to the current
     /// cursor character index.
     pub(crate) fn cursor_byte_pos(&self) -> usize {
-        self.cursor_byte_pos_at_char_index(self.input_cursor)
+        self.cursor_byte_pos_at_char_index(self.session.input_cursor)
     }
 
     /// Return the byte offset in `self.input` for a given character index.
@@ -3637,45 +3651,46 @@ impl App {
             return 0;
         }
         // Single pass: nth() returns None when char_index is past the end.
-        self.input
+        self.session
+            .input
             .char_indices()
             .nth(char_index)
             .map(|(byte, _)| byte)
-            .unwrap_or_else(|| self.input.len())
+            .unwrap_or_else(|| self.session.input.len())
     }
 
     pub(crate) fn cursor_move_left(&mut self) {
-        if self.input_cursor > 0 {
-            self.input_cursor -= 1;
+        if self.session.input_cursor > 0 {
+            self.session.input_cursor -= 1;
         }
         self.assert_input_cursor_invariant();
     }
 
     pub(crate) fn cursor_move_right(&mut self) {
-        if self.input_cursor < self.input_len_chars() {
-            self.input_cursor += 1;
+        if self.session.input_cursor < self.input_len_chars() {
+            self.session.input_cursor += 1;
         }
         self.assert_input_cursor_invariant();
     }
 
     pub(crate) fn cursor_move_word_left(&mut self) {
-        if self.input_cursor == 0 {
+        if self.session.input_cursor == 0 {
             return;
         }
         // Walk backwards from the cursor byte position without materialising
         // the whole input into a char vector on every keypress.
         let cursor_byte = self.cursor_byte_pos();
-        let mut cursor_chars = self.input_cursor;
+        let mut cursor_chars = self.session.input_cursor;
         let mut byte = cursor_byte;
         let prev_is_ws = |b: usize| {
-            self.input[..b]
+            self.session.input[..b]
                 .chars()
                 .next_back()
                 .is_some_and(char::is_whitespace)
         };
         while cursor_chars > 0 && prev_is_ws(byte) {
             // Step back one char.
-            let prev = self.input[..byte]
+            let prev = self.session.input[..byte]
                 .char_indices()
                 .next_back()
                 .map(|(b, _)| b)
@@ -3684,7 +3699,7 @@ impl App {
             cursor_chars -= 1;
         }
         while cursor_chars > 0 && !prev_is_ws(byte) {
-            let prev = self.input[..byte]
+            let prev = self.session.input[..byte]
                 .char_indices()
                 .next_back()
                 .map(|(b, _)| b)
@@ -3696,22 +3711,30 @@ impl App {
     }
 
     pub(crate) fn cursor_move_word_right(&mut self) {
-        let mut cursor_chars = self.input_cursor;
+        let mut cursor_chars = self.session.input_cursor;
         let mut byte = self.cursor_byte_pos();
         let total_chars = self.input_len_chars();
         let at_char = |b: usize| {
-            self.input[b..]
+            self.session.input[b..]
                 .chars()
                 .next()
                 .is_some_and(char::is_whitespace)
         };
         while cursor_chars < total_chars && !at_char(byte) {
-            let next = byte + self.input[byte..].chars().next().map_or(1, char::len_utf8);
+            let next = byte
+                + self.session.input[byte..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
             byte = next;
             cursor_chars += 1;
         }
         while cursor_chars < total_chars && at_char(byte) {
-            let next = byte + self.input[byte..].chars().next().map_or(1, char::len_utf8);
+            let next = byte
+                + self.session.input[byte..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
             byte = next;
             cursor_chars += 1;
         }
@@ -3719,28 +3742,28 @@ impl App {
     }
 
     pub(crate) fn cursor_move_home(&mut self) {
-        self.input_cursor = 0;
+        self.session.input_cursor = 0;
         self.assert_input_cursor_invariant();
     }
 
     pub(crate) fn cursor_move_end(&mut self) {
-        self.input_cursor = self.input_len_chars();
+        self.session.input_cursor = self.input_len_chars();
         self.assert_input_cursor_invariant();
     }
 
     pub(crate) fn cursor_on_first_logical_line(&self) -> bool {
         let byte = self.cursor_byte_pos();
-        !self.input[..byte].contains('\n')
+        !self.session.input[..byte].contains('\n')
     }
 
     pub(crate) fn cursor_on_last_logical_line(&self) -> bool {
         let byte = self.cursor_byte_pos();
-        !self.input[byte..].contains('\n')
+        !self.session.input[byte..].contains('\n')
     }
 
     pub(crate) fn cursor_move_up_logical_line(&mut self) {
         let byte = self.cursor_byte_pos();
-        let before = &self.input[..byte];
+        let before = &self.session.input[..byte];
         let Some(nl_pos) = before.rfind('\n') else {
             return;
         };
@@ -3754,38 +3777,38 @@ impl App {
         let prev_line_len = before[prev_line_start..nl_pos].chars().count();
 
         let target_col = col.min(prev_line_len);
-        let new_char = self.input[..prev_line_start].chars().count() + target_col;
+        let new_char = self.session.input[..prev_line_start].chars().count() + target_col;
         self.set_cursor_char_index_clamped(new_char);
     }
 
     pub(crate) fn cursor_move_down_logical_line(&mut self) {
         let byte = self.cursor_byte_pos();
-        let after = &self.input[byte..];
+        let after = &self.session.input[byte..];
         let Some(nl_offset) = after.find('\n') else {
             return;
         };
 
         // Column within current line
-        let before = &self.input[..byte];
+        let before = &self.session.input[..byte];
         let line_start_byte = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
         let col = before[line_start_byte..].chars().count();
 
         // Next line
         let next_start = byte + nl_offset + 1;
-        let next_line = &self.input[next_start..];
+        let next_line = &self.session.input[next_start..];
         let next_line_end = next_line.find('\n').unwrap_or(next_line.len());
         let next_line_len = next_line[..next_line_end].chars().count();
 
         let target_col = col.min(next_line_len);
-        let new_char = self.input[..next_start].chars().count() + target_col;
+        let new_char = self.session.input[..next_start].chars().count() + target_col;
         self.set_cursor_char_index_clamped(new_char);
     }
 
     /// Return the `(start, end)` character range of the current keyboard
     /// selection, or `None` when the anchor and cursor coincide.
     pub(crate) fn kb_selection_char_range(&self) -> Option<(usize, usize)> {
-        let anchor = self.kb_select_anchor?;
-        let cursor = self.input_cursor;
+        let anchor = self.session.kb_select_anchor?;
+        let cursor = self.session.input_cursor;
         if anchor == cursor {
             None
         } else if anchor < cursor {
@@ -3797,17 +3820,29 @@ impl App {
 
     pub(crate) fn copy_kb_selection(&mut self) {
         if let Some((start, end)) = self.kb_selection_char_range() {
-            let selected: String = self.input.chars().skip(start).take(end - start).collect();
+            let selected: String = self
+                .session
+                .input
+                .chars()
+                .skip(start)
+                .take(end - start)
+                .collect();
             Self::set_clipboard(&selected);
         }
     }
 
     pub(crate) fn cut_kb_selection(&mut self) {
         if let Some((start, end)) = self.kb_selection_char_range() {
-            let selected: String = self.input.chars().skip(start).take(end - start).collect();
+            let selected: String = self
+                .session
+                .input
+                .chars()
+                .skip(start)
+                .take(end - start)
+                .collect();
             Self::set_clipboard(&selected);
             self.remove_input_char_range(start, end);
-            self.kb_select_anchor = None;
+            self.session.kb_select_anchor = None;
         }
     }
 
@@ -3836,29 +3871,29 @@ impl App {
         // Replace the keyboard-driven selection, if any.
         if let Some((start, end)) = self.kb_selection_char_range() {
             self.remove_input_char_range(start, end);
-            self.kb_select_anchor = None;
+            self.session.kb_select_anchor = None;
         }
 
         self.insert_text_at_cursor(&clean);
     }
 
     pub(crate) fn clear_kb_selection(&mut self) {
-        self.kb_select_anchor = None;
+        self.session.kb_select_anchor = None;
     }
 
     pub(crate) fn delete_prev_word(&mut self) {
-        if self.input_cursor == 0 {
+        if self.session.input_cursor == 0 {
             return;
         }
-        let end = self.input_cursor;
+        let end = self.session.input_cursor;
         self.cursor_move_word_left();
-        let start = self.input_cursor;
+        let start = self.session.input_cursor;
         self.remove_input_char_range(start, end);
     }
 
     pub(crate) fn delete_to_end_of_line(&mut self) {
         let end = self.input_len_chars();
-        self.remove_input_char_range(self.input_cursor, end);
+        self.remove_input_char_range(self.session.input_cursor, end);
     }
 
     /// Set the active code index handle and trigger stats refresh.
@@ -4106,7 +4141,7 @@ impl App {
     /// snapshot..." forever and a failed restore is invisible to the user.
     pub fn poll_rollback_result(&mut self) {
         let outcome = {
-            let mut guard = match self.rollback_result.lock() {
+            let mut guard = match self.session.rollback_result.lock() {
                 Ok(g) => g,
                 Err(poisoned) => poisoned.into_inner(),
             };
@@ -4177,7 +4212,7 @@ impl App {
         }
         self.memory_stats_last_refresh = std::time::Instant::now();
         let storage = self.storage.clone();
-        let project_dir = crate::app::helpers::current_working_dir();
+        let project_dir = self.cwd_path.clone();
         let pending = self.memory_entry_count_pending.clone();
         tokio::task::spawn_blocking(move || {
             let count = storage
@@ -4188,10 +4223,10 @@ impl App {
     }
     /// Map the primary session's short id to the current agent name for log display.
     pub(crate) fn register_primary_session_mapping(&mut self) {
-        if let Some(ref sid) = self.session_id {
+        if let Some(ref sid) = self.session.session_id {
             let short_sid = short_session_id(sid);
             self.sid_to_display_name
-                .insert(short_sid, self.agent_name.clone());
+                .insert(short_sid, self.session.agent_name.clone());
         }
     }
 
@@ -4216,7 +4251,7 @@ impl App {
         // Surface a malformed config rather than defaulting to "no servers
         // configured": defaulting would read as "currently disabled" and flip
         // an enabled server off on a parse error.
-        let configured = match Config::load() {
+        let configured = match Config::load_for(&self.cwd_path) {
             Ok(c) => c.mcp,
             Err(e) => return (format!("[x] failed to load config: {e}"), false),
         };
@@ -4283,12 +4318,8 @@ impl App {
         // is where the MCP client reads server definitions from, so discovery
         // writes there. A project-local file is used only when no global config
         // directory can be resolved.
-        let config_path = ragent_config::Config::global_config_path().unwrap_or_else(|| {
-            std::env::current_dir()
-                .unwrap_or_default()
-                .join(".ragent")
-                .join("ragent.json")
-        });
+        let config_path = ragent_config::Config::global_config_path()
+            .unwrap_or_else(|| self.cwd_path.clone().join(".ragent").join("ragent.json"));
         if let Some(parent) = config_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("create {}: {e}", parent.display()))?;
@@ -4330,19 +4361,24 @@ impl App {
     }
 
     pub(crate) fn ensure_session(&mut self) -> bool {
-        if self.session_id.is_some() {
+        if self.session.session_id.is_some() {
             return true;
         }
-        let dir = crate::app::helpers::current_working_dir();
+        // A new session works in its view's directory (set by
+        // `/session new <path>` or inherited), else the focused directory.
+        if self.session.directory.as_os_str().is_empty() {
+            self.session.directory = self.cwd_path.clone();
+        }
+        let dir = self.session.directory.clone();
         match self.session_processor.session_manager.create_session(dir) {
             Ok(session) => {
-                self.session_id = Some(session.id.clone());
+                self.session.session_id = Some(session.id.clone());
                 // A fresh session starts with an empty queue (NFR-005).
                 self.clear_input_queue();
                 // Map the primary session's short_sid to the current agent name
                 let short_sid = short_session_id(&session.id);
                 self.sid_to_display_name
-                    .insert(short_sid, self.agent_name.clone());
+                    .insert(short_sid, self.session.agent_name.clone());
                 true
             }
             Err(e) => {
@@ -4369,15 +4405,15 @@ impl App {
     /// target; not part of the crate's public API surface.
     #[doc(hidden)]
     pub fn refresh_team_member_session_ids(&mut self) {
-        let Some(team_name) = self.active_team.as_ref().map(|t| t.name.clone()) else {
+        let Some(team_name) = self.session.active_team.as_ref().map(|t| t.name.clone()) else {
             return;
         };
-        let working_dir = crate::app::helpers::current_working_dir();
+        let working_dir = self.cwd_path.clone();
         let Ok(store) = TeamStore::load_by_name(&team_name, &working_dir) else {
             return;
         };
 
-        for member in &mut self.team_members {
+        for member in &mut self.session.team_members {
             // If a stored entry exists for this agent, copy session_id, status,
             // and current_task_id so the UI reflects the authoritative on-disk state.
             if let Some(stored_member) = store
@@ -4399,7 +4435,7 @@ impl App {
             }
         }
         // Register session_id -> teammate name mappings for log display.
-        for member in &self.team_members {
+        for member in &self.session.team_members {
             if let Some(ref sid) = member.session_id {
                 let short_sid = short_session_id(sid);
                 self.sid_to_display_name
@@ -4472,7 +4508,11 @@ impl App {
             }
         }
         for (agent_id, (sent, recv)) in totals {
-            let slot = self.team_message_counts.entry(agent_id).or_insert((0, 0));
+            let slot = self
+                .session
+                .team_message_counts
+                .entry(agent_id)
+                .or_insert((0, 0));
             slot.0 = slot.0.max(sent);
             slot.1 = slot.1.max(recv);
         }
@@ -4489,21 +4529,22 @@ impl App {
         let messages = self.storage.get_messages(session_id)?;
         let msg_count = messages.len();
 
-        self.session_id = Some(session_id.to_string());
+        self.session.session_id = Some(session_id.to_string());
         // Switching or resuming a session drops any queued messages from the
         // previous session (NFR-005: the queue is not persisted and does not
         // cross a session boundary).
         self.clear_input_queue();
         // Cache the resumed session's creation timestamp for the teams panel
         // elapsed-time display (FR-009: avoids per-frame storage reads).
-        self.lead_session_created_at = chrono::DateTime::parse_from_rfc3339(&session.created_at)
-            .ok()
-            .map(|dt| dt.with_timezone(&chrono::Utc));
+        self.session.lead_session_created_at =
+            chrono::DateTime::parse_from_rfc3339(&session.created_at)
+                .ok()
+                .map(|dt| dt.with_timezone(&chrono::Utc));
         // Map the primary session's short_sid to the current agent name
         let short_sid = short_session_id(session_id);
         self.sid_to_display_name
-            .insert(short_sid, self.agent_name.clone());
-        self.messages = messages;
+            .insert(short_sid, self.session.agent_name.clone());
+        self.session.messages = messages;
         // Structural change: restored messages replace the current timeline,
         // so the per-message render cache must be rebuilt from scratch.
         self.reset_message_cache();
@@ -4512,17 +4553,17 @@ impl App {
 
         // Rebuild tool_step_map from restored tool calls and populate log
         // (step count comes from event_bus, not local counter)
-        self.tool_step_map.clear();
-        self.last_step_per_session.clear();
-        self.substep_counter_per_session.clear();
-        self.sid_to_display_name.clear();
+        // Drop only this session's step bookkeeping: the maps are shared by
+        // every open session (MULTISESSION D2), so clearing them would wipe
+        // the background sessions' state.
+        self.forget_session_step_state(session_id);
         // Map the primary session's short_sid to the current agent name
         let short_sid = short_session_id(session_id);
         self.sid_to_display_name
-            .insert(short_sid, self.agent_name.clone());
+            .insert(short_sid, self.session.agent_name.clone());
         let mut restored_logs: Vec<(u32, u32, String, String)> = Vec::new();
         let mut step_counter = 0u32;
-        for msg in &self.messages {
+        for msg in &self.session.messages {
             for part in &msg.parts {
                 if let MessagePart::ToolCall {
                     call_id,
@@ -4534,6 +4575,7 @@ impl App {
                     step_counter += 1;
                     let substep = 1u32;
                     let short_sid = self
+                        .session
                         .session_id
                         .as_deref()
                         .map(short_session_id)
@@ -4551,6 +4593,7 @@ impl App {
         }
         for (step, substep, tool, icon) in restored_logs {
             let _short_sid = self
+                .session
                 .session_id
                 .as_deref()
                 .map(short_session_id)
@@ -4569,6 +4612,7 @@ impl App {
             self.cwd_path = Self::expand_home_path(std::path::Path::new(&session.directory));
             self.cwd = Self::collapse_home_path(&self.cwd_path);
         }
+        self.session.directory = self.cwd_path.clone();
 
         // T-010/FR-013: the conversation history was just replaced; refresh
         // the Context panel snapshot so the History partition and message
@@ -4587,9 +4631,11 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn detect_git_branch() -> Option<String> {
+    /// The git branch checked out in `dir`, if `dir` is in a work tree.
+    pub(crate) fn detect_git_branch(dir: &std::path::Path) -> Option<String> {
         let output = std::process::Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(dir)
             .stderr(std::process::Stdio::null())
             .output()
             .ok()?;
@@ -4606,7 +4652,7 @@ impl App {
     }
 
     pub(crate) fn current_config(&self) -> ragent_agent::Config {
-        ragent_agent::Config::load().unwrap_or_default()
+        ragent_agent::Config::load_for(&self.cwd_path).unwrap_or_default()
     }
 
     /// Compute an [`LlmStatsSummary`] (averages of elapsed time, prompt and
@@ -4615,6 +4661,7 @@ impl App {
     pub(crate) fn llm_stats_summary(&self) -> Option<LlmStatsSummary> {
         let model_ref = self.active_model_ref_string()?;
         let samples: Vec<&LlmRequestStat> = self
+            .session
             .llm_request_stats
             .iter()
             .filter(|sample| sample.model_ref == model_ref)
@@ -4714,10 +4761,10 @@ impl App {
     /// `None` when no model context window is configured.
     pub(crate) fn context_window_display(&self) -> Option<String> {
         let ctx_window = self.selected_model_context_window()?;
-        let pct = (self.last_input_tokens as f32 / ctx_window as f32 * 100.0).min(100.0);
+        let pct = (self.session.last_input_tokens as f32 / ctx_window as f32 * 100.0).min(100.0);
         Some(format!(
             "{pct:.0}% {}K/{}K",
-            self.last_input_tokens / 1000,
+            self.session.last_input_tokens / 1000,
             ctx_window / 1000
         ))
     }
@@ -4730,7 +4777,7 @@ impl App {
             self.file_menu = None;
             return;
         };
-        let query = active.query(&self.input).to_string();
+        let query = active.query(&self.session.input).to_string();
 
         if let Some(dir) = self.file_menu.as_ref().and_then(|m| m.current_dir.clone()) {
             self.populate_directory_menu(&dir, Some(&query));
@@ -4738,7 +4785,7 @@ impl App {
         }
 
         // Lazily populate or refresh the project file cache when cwd changes.
-        let wd = crate::app::helpers::current_working_dir();
+        let wd = self.cwd_path.clone();
         let cache_stale = self
             .project_files_cache_cwd
             .as_ref()
@@ -4808,10 +4855,11 @@ impl App {
                 let path = entry.display.clone();
                 if let Some(active) = self.active_mention_span() {
                     let replacement = format!("@{path}");
-                    self.input
+                    self.session
+                        .input
                         .replace_range(active.at_start..active.token_end, &replacement);
-                    let cursor_chars =
-                        self.input[..active.at_start].chars().count() + replacement.chars().count();
+                    let cursor_chars = self.session.input[..active.at_start].chars().count()
+                        + replacement.chars().count();
                     self.set_cursor_char_index_clamped(cursor_chars);
                 } else {
                     self.file_menu = None;
@@ -4827,7 +4875,7 @@ impl App {
     }
 
     pub(crate) fn mention_spans(&self) -> Vec<MentionSpan> {
-        let bytes = self.input.as_bytes();
+        let bytes = self.session.input.as_bytes();
         let mut spans = Vec::new();
         let mut i = 0usize;
         while i < bytes.len() {
@@ -4991,7 +5039,7 @@ impl App {
                             path.display()
                         ),
                     );
-                    self.pending_attachments.push(path);
+                    self.session.pending_attachments.push(path);
                     return;
                 }
             }
@@ -5005,7 +5053,7 @@ impl App {
                         LogLevel::Info,
                         format!("[attach] Image saved from clipboard: {}", path.display()),
                     );
-                    self.pending_attachments.push(path);
+                    self.session.pending_attachments.push(path);
                 }
                 Err(e) => {
                     self.push_log_no_agent(
@@ -5027,7 +5075,7 @@ impl App {
     /// still attached (the user may intentionally want a screenshot or asset
     /// from elsewhere), but the warning provides a visible security nudge.
     fn warn_if_path_outside_safe_scope(&mut self, path: &std::path::Path) {
-        let cwd = crate::app::helpers::current_working_dir();
+        let cwd = self.cwd_path.clone();
         let home = dirs::home_dir().unwrap_or_default();
         let inside_cwd = path.strip_prefix(&cwd).is_ok();
         let inside_home = path.strip_prefix(&home).is_ok();
@@ -5089,7 +5137,7 @@ impl App {
 
     pub(crate) fn apply_scrollbar_drag(&mut self, mouse_y: u16, pane: ScrollbarDragPane) {
         let (area, max_scroll) = match pane {
-            ScrollbarDragPane::Messages => (self.message_area, self.message_max_scroll),
+            ScrollbarDragPane::Messages => (self.message_area, self.session.message_max_scroll),
             ScrollbarDragPane::Log => (self.log_area, self.log_max_scroll),
             ScrollbarDragPane::Profile => (self.profile_area, self.profile_max_scroll),
             ScrollbarDragPane::Tasks => (self.tasks_area, self.tasks_max_scroll),
@@ -5141,7 +5189,7 @@ impl App {
         };
 
         match pane {
-            ScrollbarDragPane::Messages => self.scroll_offset = offset.min(max_scroll),
+            ScrollbarDragPane::Messages => self.session.scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Log => self.log_scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Profile => self.profile_scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Tasks => self.tasks_scroll_offset = offset.min(max_scroll),
@@ -5156,12 +5204,12 @@ impl App {
     }
 
     pub(crate) fn execute_plan_restore(&mut self, session_id: &str, summary: &str) {
-        if let Some(prev_agent) = self.agent_stack.pop() {
-            let from_name = self.agent_name.clone();
+        if let Some(prev_agent) = self.session.agent_stack.pop() {
+            let from_name = self.session.agent_name.clone();
             let to_name = prev_agent.name.clone();
 
-            self.agent_info = prev_agent;
-            self.agent_name = to_name.clone();
+            self.session.agent_info = prev_agent;
+            self.session.agent_name = to_name.clone();
             self.status = format!("agent: {}", to_name);
             self.push_log_no_agent(LogLevel::Info, format!("plan restore: plan -> {}", to_name));
 
@@ -5181,7 +5229,7 @@ impl App {
                 "\n[idea] **Tip:** You can execute this plan in parallel with `/swarm <goal>`, \
                  or implement it step-by-step.\n",
             );
-            self.force_new_message = true;
+            self.session.force_new_message = true;
         } else {
             self.push_log_no_agent(
                 LogLevel::Error,
@@ -5305,7 +5353,7 @@ impl App {
             timestamp: chrono::Utc::now(),
             level,
             message: message.clone(),
-            session_id: session_id.or_else(|| self.session_id.clone()),
+            session_id: session_id.or_else(|| self.session.session_id.clone()),
             agent_id,
             seq: self.log_seq,
         };
@@ -5395,30 +5443,32 @@ impl App {
     /// (with all `MessagePart`s up to 12 KB each) without bound.
     pub(crate) fn trim_messages_if_needed(&mut self) {
         const MAX_TUI_MESSAGES: usize = 500;
-        if self.messages.len() > MAX_TUI_MESSAGES {
-            let drop_count = self.messages.len() - MAX_TUI_MESSAGES;
-            self.messages.drain(0..drop_count);
+        if self.session.messages.len() > MAX_TUI_MESSAGES {
+            let drop_count = self.session.messages.len() - MAX_TUI_MESSAGES;
+            self.session.messages.drain(0..drop_count);
             // Trim the cache by the same count so cache slots stay aligned
             // with their messages (both vectors drop from the front).
-            let drop_cache = drop_count.min(self.message_line_cache.len());
-            self.message_line_cache.drain(0..drop_cache);
+            let drop_cache = drop_count.min(self.session.message_line_cache.len());
+            self.session.message_line_cache.drain(0..drop_cache);
             // PERF-043: the cache shifted left by `drop_cache`; the watermark
             // addresses the new (post-drain) indices, so subtract as well.
-            self.message_cache_dirty_from =
-                self.message_cache_dirty_from.saturating_sub(drop_cache);
+            self.session.message_cache_dirty_from = self
+                .session
+                .message_cache_dirty_from
+                .saturating_sub(drop_cache);
         }
     }
 
     /// PERF-043: record that the message at `index` was mutated in place.
     ///
-    /// Lowers [`App::message_cache_dirty_from`] to `index` so the next
+    /// Lowers [`crate::app::SessionView::message_cache_dirty_from`] to `index` so the next
     /// `render_messages` re-renders only the cache groups from there on,
     /// instead of scanning the whole transcript for staleness every frame.
     /// Call this immediately after `Message::touch()` on a message that was
     /// mutated through `self.messages`.
     pub fn mark_message_dirty(&mut self, index: usize) {
-        if index < self.message_cache_dirty_from {
-            self.message_cache_dirty_from = index;
+        if index < self.session.message_cache_dirty_from {
+            self.session.message_cache_dirty_from = index;
         }
     }
 
@@ -5442,9 +5492,9 @@ impl App {
     /// cache from index 0 instead of trusting a stale watermark that may point
     /// past the new, shorter cache.
     pub fn reset_message_cache(&mut self) {
-        self.message_line_cache.clear();
-        self.message_cache_dirty_from = 0;
-        self.message_content_lines.clear();
+        self.session.message_line_cache.clear();
+        self.session.message_cache_dirty_from = 0;
+        self.session.message_content_lines.clear();
     }
 
     /// R-11: Trim `log_entries` and `log_line_cache` to `MAX_LOG_ENTRIES`
@@ -5505,7 +5555,7 @@ impl App {
     }
 
     pub(crate) fn open_output_view_session(&mut self, session_id: String, label: String) {
-        self.selected_agent_session_id = Some(session_id.clone());
+        self.session.selected_agent_session_id = Some(session_id.clone());
         // Opening the overlay is a content change: repaint (NFR-005).
         self.needs_redraw = true;
         self.output_view = Some(OutputViewState {
@@ -5524,7 +5574,8 @@ impl App {
 
     /// Number of lines the assistant has produced in this session.
     pub(crate) fn assistant_output_lines(&self) -> usize {
-        self.messages
+        self.session
+            .messages
             .iter()
             .filter(|m| m.role == Role::Assistant)
             .map(|m| m.text_content().lines().count())

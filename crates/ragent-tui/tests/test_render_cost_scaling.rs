@@ -109,9 +109,9 @@ fn test_render_cost_bounded_by_viewport_not_transcript() {
     };
 
     let mut app_short = make_app();
-    app_short.messages = make_messages(5);
+    app_short.session.messages = make_messages(5);
     let mut app_long = make_app();
-    app_long.messages = make_messages(500);
+    app_long.session.messages = make_messages(500);
 
     // Warm both caches so we measure steady-state per-frame cost.
     let _ = render_app_to_string(&mut app_short);
@@ -146,14 +146,16 @@ fn test_render_cost_bounded_by_viewport_not_transcript() {
 fn test_auto_scroll_shows_tail_after_slice_fix() {
     let mut app = make_app();
     for i in 0..500 {
-        app.messages.push(long_message(
+        app.session.messages.push(long_message(
             &format!("m{i}"),
             "s1",
             &format!("filler message {i}"),
         ));
     }
     // Newest message carries a unique marker.
-    app.messages.push(long_message("m-tail", "s1", TAIL_MARKER));
+    app.session
+        .messages
+        .push(long_message("m-tail", "s1", TAIL_MARKER));
 
     let frame = render_app_to_string(&mut app);
     assert!(
@@ -168,7 +170,7 @@ fn test_auto_scroll_shows_tail_after_slice_fix() {
 fn test_scroll_up_shows_older_content_after_slice_fix() {
     let mut app = make_app();
     for i in 0..500 {
-        app.messages.push(long_message(
+        app.session.messages.push(long_message(
             &format!("m{i}"),
             "s1",
             &format!("FILLER-{i:04} unique content"),
@@ -178,7 +180,7 @@ fn test_scroll_up_shows_older_content_after_slice_fix() {
     // Render once to populate caches and max_scroll.
     let _ = render_app_to_string(&mut app);
     // Jump to the very top.
-    app.scroll_offset = app.message_max_scroll;
+    app.session.scroll_offset = app.session.message_max_scroll;
     let frame = render_app_to_string(&mut app);
     assert!(
         frame.contains("FILLER-0000"),

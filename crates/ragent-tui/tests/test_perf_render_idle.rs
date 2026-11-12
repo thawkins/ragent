@@ -85,7 +85,7 @@ async fn test_pending_message_cache_group_forces_safety_paint() {
     // content, so the safety wake must paint it even with no spinner or
     // countdown live.
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     let sid = "s1".to_string();
 
     // Prime: an assistant message rendered into the cache, all state clean.
@@ -96,8 +96,8 @@ async fn test_pending_message_cache_group_forces_safety_paint() {
     .await;
     render(&mut app);
     assert_eq!(
-        app.message_cache_dirty_from,
-        app.messages.len(),
+        app.session.message_cache_dirty_from,
+        app.session.messages.len(),
         "primed frame leaves nothing pending"
     );
 
@@ -126,8 +126,8 @@ async fn test_pending_message_cache_group_forces_safety_paint() {
     std::thread::sleep(ragent_tui::layout::MESSAGE_STREAM_MIN_INTERVAL);
     render(&mut app);
 
-    let tool_msg_idx = app.messages.len() - 1;
-    if app.message_cache_dirty_from > tool_msg_idx {
+    let tool_msg_idx = app.session.messages.len() - 1;
+    if app.session.message_cache_dirty_from > tool_msg_idx {
         render(&mut app);
     }
 
@@ -148,7 +148,7 @@ async fn test_pending_message_cache_group_forces_safety_paint() {
     // The pending message must become visible at the safety interval without
     // any user input (previously it required mouse/keyboard to appear).
     assert!(
-        app.message_cache_dirty_from > tool_msg_idx,
+        app.session.message_cache_dirty_from > tool_msg_idx,
         "the pending tool-call group must be painted by the safety wake"
     );
 }
@@ -160,7 +160,9 @@ fn test_periodic_redraw_only_while_countdown_active() {
     assert!(!ragent_tui::should_render(&app, past_idle_interval()));
 
     // A queued permission request runs a wall-clock countdown in the dialog.
-    app.permission_queue.push_back(permission_request("perm-1"));
+    app.session
+        .permission_queue
+        .push_back(permission_request("perm-1"));
     assert!(
         app.needs_periodic_redraw(),
         "a live permission countdown needs periodic repaints"
@@ -277,11 +279,11 @@ fn test_deadline_schedules_housekeeping_pass() {
 #[test]
 fn test_input_render_cache_reused_when_unchanged() {
     let mut app = support::make_app();
-    app.input = "hello world".to_string();
-    app.input_cursor = 5;
+    app.session.input = "hello world".to_string();
+    app.session.input_cursor = 5;
 
     render(&mut app);
-    let cache = app.input_render_cache.clone();
+    let cache = app.session.input_render_cache.clone();
     assert!(!cache.lines.is_empty(), "rows must be cached");
     assert_eq!(cache.key, "hello world");
     assert!(cache.width > 0, "the cache records the wrapped width");
@@ -289,30 +291,31 @@ fn test_input_render_cache_reused_when_unchanged() {
     // A second frame with identical inputs must not rebuild the rows.
     render(&mut app);
     assert_eq!(
-        app.input_render_cache.lines, cache.lines,
+        app.session.input_render_cache.lines, cache.lines,
         "an unchanged frame must reuse the cached rows"
     );
-    assert_eq!(app.input_render_cache.cursor_pos, cache.cursor_pos);
-    assert_eq!(app.input_render_cache.height, cache.height);
+    assert_eq!(app.session.input_render_cache.cursor_pos, cache.cursor_pos);
+    assert_eq!(app.session.input_render_cache.height, cache.height);
 }
 
 #[test]
 fn test_input_render_cache_updates_on_edit() {
     let mut app = support::make_app();
-    app.input = "hello".to_string();
-    app.input_cursor = 5;
+    app.session.input = "hello".to_string();
+    app.session.input_cursor = 5;
     render(&mut app);
-    let before = app.input_render_cache.lines.clone();
+    let before = app.session.input_render_cache.lines.clone();
 
     app.insert_char_at_cursor('!');
     render(&mut app);
 
-    assert_eq!(app.input_render_cache.key, "hello!");
+    assert_eq!(app.session.input_render_cache.key, "hello!");
     assert_ne!(
-        app.input_render_cache.lines, before,
+        app.session.input_render_cache.lines, before,
         "an edit must invalidate the cached rows"
     );
     let text: String = app
+        .session
         .input_render_cache
         .lines
         .iter()
@@ -334,10 +337,10 @@ fn test_input_render_cache_default_is_empty() {
 fn test_input_height_matches_wrapped_rows() {
     for input in ["a".repeat(300), "line one\nline two".to_string()] {
         let mut app = support::make_app();
-        app.input = input.clone();
-        app.input_cursor = input.chars().count();
+        app.session.input = input.clone();
+        app.session.input_cursor = input.chars().count();
         render(&mut app);
-        let cache = &app.input_render_cache;
+        let cache = &app.session.input_render_cache;
         assert_eq!(
             cache.height as usize,
             cache.lines.len() + 2,

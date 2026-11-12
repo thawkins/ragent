@@ -21,12 +21,12 @@ fn unique_team_name(prefix: &str) -> String {
 #[tokio::test]
 async fn test_team_status_no_active_team() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team status").await;
 
     assert_eq!(app.status, "team: status");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("No active team"),
         "should indicate no active team: {text}"
@@ -40,21 +40,21 @@ async fn test_team_status_no_active_team() {
 #[tokio::test]
 async fn test_team_status_with_active_team() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // Inject an active team into app state (as TeammateSpawned event would).
     let team = TeamConfig::new("code-review", "s1");
-    app.active_team = Some(team);
+    app.session.active_team = Some(team);
 
     let mut m1 = TeamMember::new("security-reviewer", "tm-001", "general");
     m1.status = MemberStatus::Working;
     m1.current_task_id = Some("task-001".to_string());
-    app.team_members.push(m1);
+    app.session.team_members.push(m1);
 
     app.execute_slash_command("/team").await;
 
     assert_eq!(app.status, "team: status");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("code-review"), "should name the team: {text}");
     assert!(
         text.contains("security-reviewer"),
@@ -70,7 +70,7 @@ async fn test_team_status_with_active_team() {
 #[tokio::test]
 async fn test_team_status_no_args_defaults_to_status() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // Without args, `/team` should behave like `/team status`
     app.execute_slash_command("/team").await;
@@ -83,7 +83,7 @@ async fn test_team_status_no_args_defaults_to_status() {
 #[tokio::test]
 async fn test_team_create_no_name_shows_usage() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team create").await;
 
@@ -109,13 +109,13 @@ async fn test_team_show_no_name_lists_all_registered_teams() {
     let _b = TeamStore::create("show-all-b", "lead-b", tmp.path(), true).expect("create b");
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.execute_slash_command("/team show").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
     assert_eq!(app.status, "team: show all");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Registered teams"),
         "should include heading: {text}"
@@ -157,13 +157,13 @@ async fn test_team_show_no_name_empty_registry_message() {
     // only enforces the empty-registry behaviour on machines where the global
     // registry is actually empty.
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.execute_slash_command("/team show").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
     if app.status == "team: show all (0)" {
-        let text = app.messages.last().unwrap().text_content();
+        let text = app.session.messages.last().unwrap().text_content();
         assert!(
             text.contains("No registered teams"),
             "should show empty message: {text}"
@@ -196,13 +196,13 @@ async fn test_team_show_loads_named_team_details() {
     store.add_member(member).expect("add member");
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.execute_slash_command("/team show show-team").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
     assert_eq!(app.status, "team: show show-team");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Team: show-team"),
         "should show team name: {text}"
@@ -229,13 +229,13 @@ async fn test_teams_alias_show_loads_named_team_details() {
         TeamStore::create("alias-team", "lead-session", tmp.path(), true).expect("create alias");
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.execute_slash_command("/teams show alias-team").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
     assert_eq!(app.status, "team: show alias-team");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Team: alias-team"),
         "alias should resolve: {text}"
@@ -254,13 +254,13 @@ async fn test_teams_alias_show_no_name_lists_all_registered_teams() {
     let _a = TeamStore::create("alias-all-a", "lead-session", tmp.path(), true).expect("create");
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.execute_slash_command("/teams show").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
     assert_eq!(app.status, "team: show all");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("alias-all-a"),
         "alias should show all teams: {text}"
@@ -272,12 +272,12 @@ async fn test_teams_alias_show_no_name_lists_all_registered_teams() {
 #[tokio::test]
 async fn test_team_help_shows_command_reference() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team help").await;
 
     assert_eq!(app.status, "team: help");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("/team status"), "should list status: {text}");
     assert!(
         text.contains("/team show [name]"),
@@ -302,12 +302,12 @@ async fn test_team_help_shows_command_reference() {
 #[tokio::test]
 async fn test_teams_alias_help_shows_command_reference() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/teams help").await;
 
     assert_eq!(app.status, "team: help");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("/team cleanup"),
         "alias help should route to team help: {text}"
@@ -317,13 +317,16 @@ async fn test_teams_alias_help_shows_command_reference() {
 #[tokio::test]
 async fn test_team_help_creates_session_when_missing() {
     let mut app = support::make_app();
-    assert!(app.session_id.is_none());
+    assert!(app.session.session_id.is_none());
 
     app.execute_slash_command("/team help").await;
 
-    assert!(app.session_id.is_some(), "help should create a session");
+    assert!(
+        app.session.session_id.is_some(),
+        "help should create a session"
+    );
     assert_eq!(app.status, "team: help");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("/team status"),
         "help text should render: {text}"
@@ -335,7 +338,7 @@ async fn test_team_help_creates_session_when_missing() {
 #[tokio::test]
 async fn test_team_close_no_active_team() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team close").await;
 
@@ -345,16 +348,23 @@ async fn test_team_close_no_active_team() {
 #[tokio::test]
 async fn test_team_close_clears_active_team_state() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new("my-team", "s1"));
-    app.team_members
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new("my-team", "s1"));
+    app.session
+        .team_members
         .push(TeamMember::new("bob", "tm-001", "general"));
     app.show_teams = true;
 
     app.execute_slash_command("/team close").await;
 
-    assert!(app.active_team.is_none(), "active team should be cleared");
-    assert!(app.team_members.is_empty(), "members should be cleared");
+    assert!(
+        app.session.active_team.is_none(),
+        "active team should be cleared"
+    );
+    assert!(
+        app.session.team_members.is_empty(),
+        "members should be cleared"
+    );
     assert!(!app.show_teams, "teams panel should be hidden");
     assert_eq!(app.status, "team closed");
 }
@@ -364,7 +374,7 @@ async fn test_team_close_clears_active_team_state() {
 #[tokio::test]
 async fn test_team_delete_no_name_shows_usage() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team delete").await;
 
@@ -391,7 +401,7 @@ async fn test_team_delete_removes_existing_team() {
     assert!(team_path.exists(), "team dir should exist before delete");
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     // FR-045: the explicit `--force` is the confirmation for every named team,
     // so one confirmed delete removes the directory.
     app.execute_slash_command(&format!("/team delete {team_name} --force"))
@@ -423,8 +433,8 @@ async fn test_team_delete_active_team_clears_session_state() {
     let team_path = tmp.path().join(".ragent/teams").join(&team_name);
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new(&team_name, "s1"));
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new(&team_name, "s1"));
     app.show_teams = true;
 
     // FR-045: the active team is confirmed on the same rule as any other.
@@ -439,8 +449,14 @@ async fn test_team_delete_active_team_clears_session_state() {
         app.status,
         team_path.display()
     );
-    assert!(app.active_team.is_none(), "active team should be cleared");
-    assert!(app.team_members.is_empty(), "members should be cleared");
+    assert!(
+        app.session.active_team.is_none(),
+        "active team should be cleared"
+    );
+    assert!(
+        app.session.team_members.is_empty(),
+        "members should be cleared"
+    );
     assert!(!app.show_teams, "teams panel should be hidden");
     assert_eq!(app.status, "team deleted");
 }
@@ -460,11 +476,11 @@ async fn test_team_delete_active_team_blocked_when_teammates_working() {
     let team_path = tmp.path().join(".ragent/teams").join(&team_name);
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new(&team_name, "s1"));
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new(&team_name, "s1"));
     let mut m = TeamMember::new("worker", "tm-001", "general");
     m.status = MemberStatus::Working;
-    app.team_members.push(m);
+    app.session.team_members.push(m);
     app.show_teams = true;
 
     app.execute_slash_command(&format!("/team delete {team_name}"))
@@ -478,7 +494,10 @@ async fn test_team_delete_active_team_blocked_when_teammates_working() {
         app.status
     );
     assert!(team_path.exists(), "team dir should remain");
-    assert!(app.active_team.is_some(), "active team should remain");
+    assert!(
+        app.session.active_team.is_some(),
+        "active team should remain"
+    );
 }
 
 #[tokio::test]
@@ -493,7 +512,7 @@ async fn test_team_create_sets_active_team() {
     std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team create bp1 my-test-team")
         .await;
@@ -501,12 +520,15 @@ async fn test_team_create_sets_active_team() {
     std::env::set_current_dir(original_dir).unwrap();
 
     assert!(
-        app.active_team.is_some(),
+        app.session.active_team.is_some(),
         "active_team should be set after create"
     );
-    assert_eq!(app.active_team.as_ref().unwrap().name, "my-test-team");
+    assert_eq!(
+        app.session.active_team.as_ref().unwrap().name,
+        "my-test-team"
+    );
     assert!(app.show_teams, "show_teams should be enabled");
-    assert!(app.team_members.is_empty(), "no teammates yet");
+    assert!(app.session.team_members.is_empty(), "no teammates yet");
     assert!(
         app.session_processor.team_manager.get().is_some(),
         "TeamManager should be initialised after /team create"
@@ -530,12 +552,12 @@ async fn test_team_create_sets_active_team() {
 #[tokio::test]
 async fn test_team_tasks_no_active_team() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team tasks").await;
 
     assert_eq!(app.status, "no active team");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("No active team"),
         "should indicate no team: {text}"
@@ -565,14 +587,14 @@ async fn test_team_tasks_renders_table_with_status() {
     task_store.add_task(t2).await.expect("add task 2");
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new(&team_name, "s1"));
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new(&team_name, "s1"));
 
     app.execute_slash_command("/team tasks").await;
 
     let _ = std::env::set_current_dir(original_dir);
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("ID"), "should include table header: {text}");
     assert!(
         text.contains("Status"),
@@ -599,12 +621,12 @@ async fn test_team_tasks_renders_table_with_status() {
 #[tokio::test]
 async fn test_team_clear_no_active_team() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team clear").await;
 
     assert_eq!(app.status, "no active team");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("No active team"),
         "should indicate no team: {text}"
@@ -631,8 +653,8 @@ async fn test_team_clear_removes_tasks_for_active_team() {
     assert!(tasks_path.exists(), "tasks.json should exist before clear");
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new(&team_name, "s1"));
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new(&team_name, "s1"));
 
     app.execute_slash_command("/team clear").await;
 
@@ -650,7 +672,7 @@ async fn test_team_clear_removes_tasks_for_active_team() {
 #[tokio::test]
 async fn test_team_message_no_active_team() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team message alice hello").await;
 
@@ -660,8 +682,8 @@ async fn test_team_message_no_active_team() {
 #[tokio::test]
 async fn test_team_message_unknown_teammate() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new("my-team", "s1"));
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new("my-team", "s1"));
 
     app.execute_slash_command("/team message ghost hello").await;
 
@@ -675,7 +697,7 @@ async fn test_team_message_unknown_teammate() {
 #[tokio::test]
 async fn test_team_message_missing_text_shows_usage() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team message").await;
 
@@ -691,7 +713,7 @@ async fn test_team_message_missing_text_shows_usage() {
 #[tokio::test]
 async fn test_team_cleanup_no_active_team() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team cleanup").await;
 
@@ -705,16 +727,19 @@ async fn test_team_cleanup_no_active_team() {
 #[tokio::test]
 async fn test_team_cleanup_clears_state() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new("my-team", "s1"));
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new("my-team", "s1"));
     app.show_teams = true;
 
     // Team dir does not exist on disk - cleanup should still clear in-memory state.
     app.execute_slash_command("/team cleanup").await;
 
-    assert!(app.active_team.is_none(), "active_team should be cleared");
     assert!(
-        app.team_members.is_empty(),
+        app.session.active_team.is_none(),
+        "active_team should be cleared"
+    );
+    assert!(
+        app.session.team_members.is_empty(),
         "team_members should be cleared"
     );
     assert!(!app.show_teams, "show_teams should be disabled");
@@ -724,12 +749,12 @@ async fn test_team_cleanup_clears_state() {
 #[tokio::test]
 async fn test_team_cleanup_blocked_when_teammates_active() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new("busy-team", "s1"));
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new("busy-team", "s1"));
 
     let mut m = TeamMember::new("worker", "tm-001", "general");
     m.status = MemberStatus::Working;
-    app.team_members.push(m);
+    app.session.team_members.push(m);
     app.show_teams = true;
 
     app.execute_slash_command("/team cleanup").await;
@@ -740,7 +765,10 @@ async fn test_team_cleanup_blocked_when_teammates_active() {
         "should block cleanup when teammates active: {}",
         app.status
     );
-    assert!(app.active_team.is_some(), "team should not be removed");
+    assert!(
+        app.session.active_team.is_some(),
+        "team should not be removed"
+    );
 }
 
 // -- /team unknown subcommand --------------------------------------------------
@@ -748,7 +776,7 @@ async fn test_team_cleanup_blocked_when_teammates_active() {
 #[tokio::test]
 async fn test_team_unknown_subcommand_shows_error() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team frobnicate").await;
 
@@ -773,9 +801,10 @@ async fn test_team_members_drives_t_badge_set() {
     let mut app = support::make_app();
     let mut m = TeamMember::new("security-reviewer", "tm-001", "general");
     m.session_id = Some("sess-tm-001".to_string());
-    app.team_members.push(m);
+    app.session.team_members.push(m);
 
     let teammate_ids: std::collections::HashSet<String> = app
+        .session
         .team_members
         .iter()
         .filter_map(|m| m.session_id.clone())
@@ -793,7 +822,7 @@ async fn test_team_members_drives_t_badge_set() {
 async fn test_event_teammate_spawned_adds_member_and_shows_panel() {
     let mut app = support::make_app();
     let sid = "sess-lead".to_string();
-    app.session_id = Some(sid.clone());
+    app.session.session_id = Some(sid.clone());
 
     let event = Event::TeammateSpawned {
         session_id: sid,
@@ -804,9 +833,9 @@ async fn test_event_teammate_spawned_adds_member_and_shows_panel() {
     app.handle_event(event).await;
 
     assert!(app.show_teams, "show_teams should be enabled");
-    assert_eq!(app.team_members.len(), 1);
-    assert_eq!(app.team_members[0].name, "writer");
-    assert_eq!(app.team_members[0].agent_id, "tm-001");
+    assert_eq!(app.session.team_members.len(), 1);
+    assert_eq!(app.session.team_members[0].name, "writer");
+    assert_eq!(app.session.team_members[0].agent_id, "tm-001");
 
     // Log should mention the spawn.
     assert!(
@@ -819,7 +848,7 @@ async fn test_event_teammate_spawned_adds_member_and_shows_panel() {
 async fn test_event_teammate_spawned_deduplicates() {
     let mut app = support::make_app();
     let sid = "sess-lead".to_string();
-    app.session_id = Some(sid.clone());
+    app.session.session_id = Some(sid.clone());
 
     let event = Event::TeammateSpawned {
         session_id: sid,
@@ -831,7 +860,7 @@ async fn test_event_teammate_spawned_deduplicates() {
     app.handle_event(event).await;
 
     assert_eq!(
-        app.team_members.len(),
+        app.session.team_members.len(),
         1,
         "duplicate TeammateSpawned should not add member twice"
     );
@@ -855,8 +884,8 @@ async fn test_event_teammate_spawned_hydrates_session_id_from_store() {
     store.add_member(member).expect("add member");
 
     let mut app = support::make_app();
-    app.session_id = Some("sess-lead".to_string());
-    app.active_team = Some(TeamConfig::new(&team_name, "sess-lead"));
+    app.session.session_id = Some("sess-lead".to_string());
+    app.session.active_team = Some(TeamConfig::new(&team_name, "sess-lead"));
 
     app.handle_event(Event::TeammateSpawned {
         session_id: "sess-lead".to_string(),
@@ -868,9 +897,12 @@ async fn test_event_teammate_spawned_hydrates_session_id_from_store() {
 
     let _ = std::env::set_current_dir(original_dir);
 
-    assert_eq!(app.team_members.len(), 1);
-    assert_eq!(app.team_members[0].agent_id, "tm-001");
-    assert_eq!(app.team_members[0].session_id.as_deref(), Some("tm-s1"));
+    assert_eq!(app.session.team_members.len(), 1);
+    assert_eq!(app.session.team_members[0].agent_id, "tm-001");
+    assert_eq!(
+        app.session.team_members[0].session_id.as_deref(),
+        Some("tm-s1")
+    );
 }
 
 #[tokio::test]
@@ -886,7 +918,7 @@ async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
     let _store = TeamStore::create(&team_name, "s1", tmp.path(), true).expect("create team");
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::ToolResult {
         session_id: "s1".to_string(),
@@ -907,7 +939,7 @@ async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
     let _ = std::env::set_current_dir(original_dir);
 
     assert!(
-        app.active_team.is_some(),
+        app.session.active_team.is_some(),
         "tool result should activate team"
     );
     assert!(app.show_teams, "teams panel should be visible");
@@ -919,11 +951,11 @@ async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
 async fn test_event_teammate_idle_updates_status() {
     let mut app = support::make_app();
     let sid = "sess-lead".to_string();
-    app.session_id = Some(sid.clone());
+    app.session.session_id = Some(sid.clone());
 
     let mut m = TeamMember::new("tester", "tm-002", "general");
     m.status = MemberStatus::Working;
-    app.team_members.push(m);
+    app.session.team_members.push(m);
 
     let event = Event::TeammateIdle {
         session_id: sid,
@@ -932,7 +964,7 @@ async fn test_event_teammate_idle_updates_status() {
     };
     app.handle_event(event).await;
 
-    assert_eq!(app.team_members[0].status, MemberStatus::Idle);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Idle);
     assert!(
         app.log_entries.iter().any(|e| e.message.contains("idle")),
         "log should record idle event"
@@ -945,8 +977,9 @@ async fn test_event_teammate_idle_updates_status() {
 async fn test_event_team_task_claimed_sets_current_task() {
     let mut app = support::make_app();
     let sid = "s1".to_string();
-    app.session_id = Some(sid.clone());
-    app.team_members
+    app.session.session_id = Some(sid.clone());
+    app.session
+        .team_members
         .push(TeamMember::new("tm-a", "tm-001", "general"));
 
     app.handle_event(Event::TeamTaskClaimed {
@@ -957,9 +990,9 @@ async fn test_event_team_task_claimed_sets_current_task() {
     })
     .await;
 
-    assert_eq!(app.team_members[0].status, MemberStatus::Working);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Working);
     assert_eq!(
-        app.team_members[0].current_task_id.as_deref(),
+        app.session.team_members[0].current_task_id.as_deref(),
         Some("task-007")
     );
 }
@@ -968,11 +1001,11 @@ async fn test_event_team_task_claimed_sets_current_task() {
 async fn test_event_team_task_completed_clears_current_task() {
     let mut app = support::make_app();
     let sid = "s1".to_string();
-    app.session_id = Some(sid.clone());
+    app.session.session_id = Some(sid.clone());
     let mut m = TeamMember::new("tm-a", "tm-001", "general");
     m.current_task_id = Some("task-007".to_string());
     m.status = MemberStatus::Working;
-    app.team_members.push(m);
+    app.session.team_members.push(m);
 
     app.handle_event(Event::TeamTaskCompleted {
         session_id: sid,
@@ -983,7 +1016,7 @@ async fn test_event_team_task_completed_clears_current_task() {
     .await;
 
     assert!(
-        app.team_members[0].current_task_id.is_none(),
+        app.session.team_members[0].current_task_id.is_none(),
         "current_task_id should be cleared after completion"
     );
 }
@@ -994,9 +1027,10 @@ async fn test_event_team_task_completed_clears_current_task() {
 async fn test_event_team_cleaned_up_resets_state() {
     let mut app = support::make_app();
     let sid = "s1".to_string();
-    app.session_id = Some(sid.clone());
-    app.active_team = Some(TeamConfig::new("gone-team", "s1"));
-    app.team_members
+    app.session.session_id = Some(sid.clone());
+    app.session.active_team = Some(TeamConfig::new("gone-team", "s1"));
+    app.session
+        .team_members
         .push(TeamMember::new("a", "tm-001", "general"));
     app.show_teams = true;
 
@@ -1006,8 +1040,8 @@ async fn test_event_team_cleaned_up_resets_state() {
     })
     .await;
 
-    assert!(app.active_team.is_none());
-    assert!(app.team_members.is_empty());
+    assert!(app.session.active_team.is_none());
+    assert!(app.session.team_members.is_empty());
     assert!(!app.show_teams);
 }
 
@@ -1016,8 +1050,8 @@ fn test_teams_panel_renders_table_with_elapsed_and_steps_columns() {
     let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
-    app.session_id = Some("lead-session-1".to_string());
-    app.active_team = Some(TeamConfig::new("alpha", "lead-session-1"));
+    app.session.session_id = Some("lead-session-1".to_string());
+    app.session.active_team = Some(TeamConfig::new("alpha", "lead-session-1"));
 
     app.storage
         .create_session("lead-session-1", "/tmp")
@@ -1042,8 +1076,10 @@ fn test_teams_panel_renders_table_with_elapsed_and_steps_columns() {
     member.session_id = Some("tm-session-1".to_string());
     member.status = MemberStatus::Working;
     member.current_task_id = Some("task-001".to_string());
-    app.team_members.push(member);
-    app.team_message_counts.insert("tm-001".to_string(), (2, 1));
+    app.session.team_members.push(member);
+    app.session
+        .team_message_counts
+        .insert("tm-001".to_string(), (2, 1));
     app.show_teams = true;
     app.show_teams_window = true;
 
@@ -1092,8 +1128,8 @@ fn test_teams_panel_shows_tool_call_count_not_loop_steps() {
     let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
-    app.session_id = Some("lead-session-1".to_string());
-    app.active_team = Some(TeamConfig::new("alpha", "lead-session-1"));
+    app.session.session_id = Some("lead-session-1".to_string());
+    app.session.active_team = Some(TeamConfig::new("alpha", "lead-session-1"));
 
     app.storage
         .create_session("tm-session-1", "/tmp")
@@ -1107,7 +1143,7 @@ fn test_teams_panel_shows_tool_call_count_not_loop_steps() {
     let mut member = TeamMember::new("reviewer", "tm-001", "general");
     member.session_id = Some("tm-session-1".to_string());
     member.status = MemberStatus::Working;
-    app.team_members.push(member);
+    app.session.team_members.push(member);
     app.show_teams = true;
     app.show_teams_window = true;
 
@@ -1148,7 +1184,7 @@ fn test_buttons_render_dimmed_when_unavailable() {
     let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
-    app.session_id = Some("lead-session-1".to_string());
+    app.session.session_id = Some("lead-session-1".to_string());
 
     let backend = TestBackend::new(160, 44);
     let mut terminal = Terminal::new(backend).expect("terminal");
@@ -1180,8 +1216,8 @@ fn test_buttons_render_with_active_blue_state() {
     let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
-    app.session_id = Some("lead-session-1".to_string());
-    app.active_team = Some(TeamConfig::new("alpha", "lead-session-1"));
+    app.session.session_id = Some("lead-session-1".to_string());
+    app.session.active_team = Some(TeamConfig::new("alpha", "lead-session-1"));
     app.active_tasks.push(ragent_agent::task::TaskEntry {
         id: "task-1".to_string(),
         parent_session_id: "lead-session-1".to_string(),
@@ -1238,7 +1274,7 @@ async fn test_agents_popup_renders_tidy_table_columns() {
     let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
-    app.session_id = Some("lead-session-1".to_string());
+    app.session.session_id = Some("lead-session-1".to_string());
     app.show_agents_window = true;
     app.active_tasks.push(ragent_agent::task::TaskEntry {
         id: "task-a1".to_string(),
@@ -1294,7 +1330,7 @@ async fn test_agents_popup_renders_tidy_table_columns() {
 async fn test_event_teammate_message_logs_preview() {
     let mut app = support::make_app();
     let sid = "s1".to_string();
-    app.session_id = Some(sid.clone());
+    app.session.session_id = Some(sid.clone());
 
     app.handle_event(Event::TeammateMessage {
         session_id: sid,
@@ -1313,7 +1349,7 @@ async fn test_event_teammate_message_logs_preview() {
         "log should contain message preview"
     );
     assert_eq!(
-        app.team_message_counts.get("tm-001").copied(),
+        app.session.team_message_counts.get("tm-001").copied(),
         Some((1, 0)),
         "sender teammate should increment sent counter"
     );
@@ -1323,7 +1359,7 @@ async fn test_event_teammate_message_logs_preview() {
 async fn test_event_teammate_message_increments_receiver_counter() {
     let mut app = support::make_app();
     let sid = "s1".to_string();
-    app.session_id = Some(sid.clone());
+    app.session.session_id = Some(sid.clone());
 
     app.handle_event(Event::TeammateMessage {
         session_id: sid,
@@ -1336,7 +1372,7 @@ async fn test_event_teammate_message_increments_receiver_counter() {
     .await;
 
     assert_eq!(
-        app.team_message_counts.get("tm-002").copied(),
+        app.session.team_message_counts.get("tm-002").copied(),
         Some((0, 1)),
         "receiver teammate should increment received counter"
     );
@@ -1365,8 +1401,11 @@ async fn test_event_teammate_spawned_without_tool_result_activates_team_and_stri
     store.add_member(member).expect("add member");
 
     let mut app = support::make_app();
-    app.session_id = Some("lead-1".to_string());
-    assert!(app.active_team.is_none(), "precondition: no active team");
+    app.session.session_id = Some("lead-1".to_string());
+    assert!(
+        app.session.active_team.is_none(),
+        "precondition: no active team"
+    );
 
     app.handle_event(Event::TeammateSpawned {
         session_id: "lead-1".to_string(),
@@ -1379,7 +1418,7 @@ async fn test_event_teammate_spawned_without_tool_result_activates_team_and_stri
     let _ = std::env::set_current_dir(original_dir);
 
     assert!(
-        app.active_team.is_some(),
+        app.session.active_team.is_some(),
         "the spawned teammate's team must become the active team (FR-050)"
     );
     assert!(
@@ -1387,7 +1426,7 @@ async fn test_event_teammate_spawned_without_tool_result_activates_team_and_stri
         "the team strip must be visible after a spawn (FR-050)"
     );
     assert_eq!(
-        app.team_members[0].session_id.as_deref(),
+        app.session.team_members[0].session_id.as_deref(),
         Some("tm-sess-1"),
         "the member must be hydrated from the store (FR-050)"
     );
@@ -1409,7 +1448,7 @@ async fn test_event_teammate_spawned_binds_team_manager() {
     let store = TeamStore::create(&team_name, "lead-1", tmp.path(), true).expect("create team");
 
     let mut app = support::make_app();
-    app.session_id = Some("lead-1".to_string());
+    app.session.session_id = Some("lead-1".to_string());
 
     app.handle_event(Event::TeammateSpawned {
         session_id: "lead-1".to_string(),
@@ -1443,7 +1482,7 @@ async fn test_event_teammate_spawned_binds_team_manager() {
 #[tokio::test]
 async fn test_event_teammate_suspend_resume_update_member_status() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     // Bind a real manager so the progress-recording code path runs against
     // one instead of a silent no-op.
     let mgr = std::sync::Arc::new(ragent_agent::team::TeamManager::new(
@@ -1459,7 +1498,7 @@ async fn test_event_teammate_suspend_resume_update_member_status() {
     }
     let mut m = TeamMember::new("writer", "tm-001", "general");
     m.status = MemberStatus::Working;
-    app.team_members.push(m);
+    app.session.team_members.push(m);
 
     app.handle_event(Event::TeammateSuspended {
         session_id: "s1".to_string(),
@@ -1468,7 +1507,7 @@ async fn test_event_teammate_suspend_resume_update_member_status() {
     })
     .await;
     assert_eq!(
-        app.team_members[0].status,
+        app.session.team_members[0].status,
         MemberStatus::Suspended,
         "the suspended event must mark the row suspended (FR-051 plumbing)"
     );
@@ -1486,7 +1525,7 @@ async fn test_event_teammate_suspend_resume_update_member_status() {
     })
     .await;
     assert_eq!(
-        app.team_members[0].status,
+        app.session.team_members[0].status,
         MemberStatus::Idle,
         "the resumed event must return the row to idle (FR-051 plumbing)"
     );
@@ -1505,7 +1544,7 @@ async fn test_event_teammate_suspend_resume_update_member_status() {
 #[tokio::test]
 async fn test_event_teammate_stopped_marks_row_stopped() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     let mgr = std::sync::Arc::new(ragent_agent::team::TeamManager::new(
         "alpha",
         "s1",
@@ -1517,7 +1556,7 @@ async fn test_event_teammate_stopped_marks_row_stopped() {
     let mut m = TeamMember::new("writer", "tm-001", "general");
     m.status = MemberStatus::Working;
     m.current_task_id = Some("task-001".to_string());
-    app.team_members.push(m);
+    app.session.team_members.push(m);
 
     app.handle_event(Event::TeammateStopped {
         session_id: "s1".to_string(),
@@ -1528,12 +1567,12 @@ async fn test_event_teammate_stopped_marks_row_stopped() {
     .await;
 
     assert_eq!(
-        app.team_members[0].status,
+        app.session.team_members[0].status,
         MemberStatus::Stopped,
         "the stop event must move the row to the terminal status"
     );
     assert_eq!(
-        app.team_members[0].current_task_id, None,
+        app.session.team_members[0].current_task_id, None,
         "a stopped teammate holds no task"
     );
     assert!(
@@ -1550,7 +1589,7 @@ async fn test_event_teammate_stopped_marks_row_stopped() {
 #[tokio::test]
 async fn test_event_teammate_status_events_record_watchdog_progress() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     let mgr = std::sync::Arc::new(ragent_agent::team::TeamManager::new(
         "alpha",
         "s1",
@@ -1559,7 +1598,8 @@ async fn test_event_teammate_status_events_record_watchdog_progress() {
         app.event_bus.clone(),
     ));
     let _ = app.session_processor.team_manager.set(mgr);
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
 
     app.handle_event(Event::TeamTaskClaimed {
@@ -1591,12 +1631,12 @@ async fn test_event_teammate_status_events_record_watchdog_progress() {
     .await;
 
     assert_eq!(
-        app.team_members[0].status,
+        app.session.team_members[0].status,
         MemberStatus::Failed,
         "the failed event is the last writer and must land"
     );
     assert!(
-        app.team_members[0].current_task_id.is_none(),
+        app.session.team_members[0].current_task_id.is_none(),
         "the completed task must clear the member's current task"
     );
 }
@@ -1606,9 +1646,10 @@ async fn test_event_teammate_status_events_record_watchdog_progress() {
 #[tokio::test]
 async fn test_event_team_cleaned_up_hides_strip() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new("alpha", "s1"));
-    app.team_members
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new("alpha", "s1"));
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
     assert!(ragent_tui::teammate_strip::is_visible(&app));
 
@@ -1629,17 +1670,19 @@ async fn test_event_team_cleaned_up_hides_strip() {
 #[tokio::test]
 async fn test_team_focus_cycle_down_from_unfocused_opens_first_member() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.team_members
+    app.session.session_id = Some("s1".to_string());
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("tester", "tm-002", "general"));
-    app.focused_teammate = None;
+    app.session.focused_teammate = None;
 
     app.cycle_focused_teammate(true);
 
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "cycling forward from no focus must land on the first member (FR-046)"
     );
@@ -1659,21 +1702,23 @@ async fn test_team_focus_cycle_down_from_unfocused_opens_first_member() {
 #[tokio::test]
 async fn test_team_focus_cycle_moves_through_members_in_order() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.team_members
+    app.session.session_id = Some("s1".to_string());
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("tester", "tm-002", "general"));
 
     app.cycle_focused_teammate(true);
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-001"));
     app.cycle_focused_teammate(true);
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-002"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-002"));
     assert_eq!(app.status, "team: focused -> tester");
 
     app.cycle_focused_teammate(false);
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "cycling backward must move to the previous member (FR-046)"
     );
@@ -1682,21 +1727,23 @@ async fn test_team_focus_cycle_moves_through_members_in_order() {
 #[tokio::test]
 async fn test_team_focus_cycle_past_ends_clears_focus_and_output_view() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.team_members
+    app.session.session_id = Some("s1".to_string());
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("tester", "tm-002", "general"));
 
     // Down, down again (now on the last member), down once more goes past
     // the end: focus and the output view clear together (FR-046).
     app.cycle_focused_teammate(true);
     app.cycle_focused_teammate(true);
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-002"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-002"));
     assert!(app.output_view.is_some());
     app.cycle_focused_teammate(true);
     assert!(
-        app.focused_teammate.is_none(),
+        app.session.focused_teammate.is_none(),
         "cycling past the last member must clear focus (FR-046)"
     );
     assert!(
@@ -1708,16 +1755,16 @@ async fn test_team_focus_cycle_past_ends_clears_focus_and_output_view() {
     // Up with no focus lands on the last member...
     app.cycle_focused_teammate(false);
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-002"),
         "cycling backward from no focus must land on the last member (FR-046)"
     );
     // ...the next up moves to the previous member...
     app.cycle_focused_teammate(false);
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-001"));
     // ...and the third up goes past the start, clearing the pair again.
     app.cycle_focused_teammate(false);
-    assert!(app.focused_teammate.is_none());
+    assert!(app.session.focused_teammate.is_none());
     assert!(app.output_view.is_none());
     assert_eq!(app.status, "team: focus cleared");
 }
@@ -1725,12 +1772,12 @@ async fn test_team_focus_cycle_past_ends_clears_focus_and_output_view() {
 #[tokio::test]
 async fn test_team_focus_cycle_with_no_members_clears_stale_focus() {
     let mut app = support::make_app();
-    app.focused_teammate = Some("ghost".to_string());
+    app.session.focused_teammate = Some("ghost".to_string());
 
     app.cycle_focused_teammate(true);
 
     assert!(
-        app.focused_teammate.is_none(),
+        app.session.focused_teammate.is_none(),
         "cycling with no members must not keep a stale focus (FR-046, FR-069)"
     );
 }
@@ -1749,17 +1796,18 @@ async fn test_team_focus_does_not_retitle_or_route_the_input() {
     std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     let team_name = unique_team_name("focus-route");
     let store = TeamStore::create(&team_name, "s1", tmp.path(), true).expect("create team");
-    app.active_team = Some(store.config.clone());
+    app.session.active_team = Some(store.config.clone());
     drop(store);
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
 
     app.focus_teammate_by_id("tm-001");
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "focusing must register before the border can be checked (FR-058)"
     );
@@ -1797,18 +1845,19 @@ async fn test_team_focus_does_not_retitle_or_route_the_input() {
     ))
     .await;
     assert!(
-        app.focused_teammate.is_none(),
+        app.session.focused_teammate.is_none(),
         "Alt+Down with a single member must clear focus past the end (FR-046)"
     );
     assert!(app.output_view.is_none());
     // Re-land on the only member for the delivery half of the test.
     app.cycle_focused_teammate(true);
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-001"));
 
     // FR-058 (amended): delivery to a teammate is `/team message`'s job, not the
     // input box's - `send_teammate_message` is the arm behind that command.
     app.send_teammate_message(
-        &app.active_team
+        &app.session
+            .active_team
             .as_ref()
             .map(|t| t.name.clone())
             .unwrap_or_default(),
@@ -1843,7 +1892,7 @@ async fn test_team_create_slash_rejects_traversal_names() {
 
     for name in ["../../evil", "/tmp/evil", "..", "a/b"] {
         let mut app = support::make_app();
-        app.session_id = Some("s1".to_string());
+        app.session.session_id = Some("s1".to_string());
 
         app.execute_slash_command(&format!("/team create bp1 {name}"))
             .await;
@@ -1854,7 +1903,7 @@ async fn test_team_create_slash_rejects_traversal_names() {
             app.status
         );
         assert!(
-            app.active_team.is_none(),
+            app.session.active_team.is_none(),
             "no team may be created for an invalid name"
         );
     }
@@ -1886,7 +1935,7 @@ async fn test_team_delete_slash_rejects_traversal_names() {
 
     for name in ["../victim", "/etc", ".."] {
         let mut app = support::make_app();
-        app.session_id = Some("s1".to_string());
+        app.session.session_id = Some("s1".to_string());
 
         app.execute_slash_command(&format!("/team delete {name}"))
             .await;
@@ -1998,7 +2047,7 @@ async fn test_team_delete_refuses_persisted_live_member_without_force() {
     let path = team_dir(&tmp, &team_name);
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     // No active team: the in-memory roster is empty on purpose.
     app.execute_slash_command(&format!("/team delete {team_name}"))
         .await;
@@ -2035,7 +2084,7 @@ async fn test_team_delete_force_removes_a_live_roster_and_says_so() {
     let path = team_dir(&tmp, &team_name);
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.execute_slash_command(&format!("/team delete {team_name} --force"))
         .await;
 
@@ -2048,7 +2097,7 @@ async fn test_team_delete_force_removes_a_live_roster_and_says_so() {
     );
     assert_eq!(app.status, "team deleted");
     // FR-032: the confirmation says what it overrode.
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("1 live teammate(s) forced"), "{text}");
 }
 
@@ -2069,7 +2118,7 @@ async fn test_team_delete_accepts_the_force_flag_before_the_name() {
     let path = team_dir(&tmp, &team_name);
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.execute_slash_command(&format!("/team delete --force {team_name}"))
         .await;
 
@@ -2112,7 +2161,7 @@ async fn test_team_delete_of_a_parked_roster_needs_the_explicit_force() {
     let path = team_dir(&tmp, &team_name);
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     // No active team: the in-memory roster is empty and the persisted one is
     // read instead. A parked roster is not refused, and the explicit `--force`
     // confirms and removes it in one step (T-043/FR-045).
@@ -2126,7 +2175,7 @@ async fn test_team_delete_of_a_parked_roster_needs_the_explicit_force() {
         "the confirmed delete must remove the parked team"
     );
     assert_eq!(app.status, "team deleted");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         !text.contains("teammate(s) forced"),
         "nothing was forced, so the message must not claim otherwise: {text}"
@@ -2154,7 +2203,7 @@ async fn test_team_delete_removes_a_parked_team_without_a_second_step() {
     let path = team_dir(&tmp, &team_name);
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.execute_slash_command(&format!("/team delete {team_name} --force"))
         .await;
 
@@ -2197,7 +2246,7 @@ async fn test_team_delete_confirmation_does_not_carry_to_another_team() {
     let second_path = team_dir(&tmp, &second);
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.execute_slash_command(&format!("/team delete {first} --force"))
         .await;
 
@@ -2237,11 +2286,11 @@ async fn test_team_delete_active_team_live_member_needs_force_and_confirmation()
     let path = team_dir(&tmp, &team_name);
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new(&team_name, "s1"));
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new(&team_name, "s1"));
     let mut member = TeamMember::new("worker", "tm-001", "general");
     member.status = MemberStatus::Spawning;
-    app.team_members.push(member);
+    app.session.team_members.push(member);
     app.show_teams = true;
 
     // Without --force the FR-022 refusal fires.
@@ -2263,7 +2312,13 @@ async fn test_team_delete_active_team_live_member_needs_force_and_confirmation()
         !path.exists(),
         "the explicit --force must delete the active team"
     );
-    assert!(app.active_team.is_none(), "active team should be cleared");
-    assert!(app.team_members.is_empty(), "members should be cleared");
+    assert!(
+        app.session.active_team.is_none(),
+        "active team should be cleared"
+    );
+    assert!(
+        app.session.team_members.is_empty(),
+        "members should be cleared"
+    );
     assert_eq!(app.status, "team deleted");
 }

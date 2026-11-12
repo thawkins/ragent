@@ -18,13 +18,14 @@ mod support;
 
 fn app_with_session(session: &str) -> App {
     let mut app = support::make_app();
-    app.session_id = Some(session.to_string());
+    app.session.session_id = Some(session.to_string());
     app.needs_redraw = false;
     app
 }
 
 fn joined_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .flat_map(|m| m.parts.iter())
         .filter_map(|p| match p {
@@ -132,7 +133,7 @@ async fn research_cluster_without_a_selected_model_is_refused() {
 
     let mut app = app_with_session("s1");
     app.cwd_path = dir;
-    app.selected_model = None;
+    app.session.selected_model = None;
     app.execute_slash_command("/research cluster kilo").await;
     assert_eq!(
         app.status, "research: cluster 'kilo' no model selected",

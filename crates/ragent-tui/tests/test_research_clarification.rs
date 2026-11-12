@@ -47,6 +47,8 @@ fn make_app(event_bus: Arc<EventBus>) -> App {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
@@ -103,7 +105,7 @@ async fn test_research_clarification_dialog_round_trip_publishes_answer() {
     let event_bus = Arc::new(EventBus::default());
     let mut rx = event_bus.subscribe();
     let mut app = make_app(event_bus.clone());
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // Mirrors ask_user_clarification: publish a request and wait for the
     // matching QuestionAnswered reply.
@@ -117,10 +119,14 @@ async fn test_research_clarification_dialog_round_trip_publishes_answer() {
         secret: false,
     })
     .await;
-    assert_eq!(app.question_queue.len(), 1, "dialog should be queued");
+    assert_eq!(
+        app.session.question_queue.len(),
+        1,
+        "dialog should be queued"
+    );
 
     // Type the answer and submit it with Enter (the free-text dialog path).
-    app.pending_question_input = "  async runtimes  ".to_string();
+    app.session.pending_question_input = "  async runtimes  ".to_string();
     let _ = ragent_tui::input::handle_key(
         &mut app,
         crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Enter),
@@ -128,7 +134,7 @@ async fn test_research_clarification_dialog_round_trip_publishes_answer() {
     .await;
 
     assert!(
-        app.question_queue.is_empty(),
+        app.session.question_queue.is_empty(),
         "dialog should be consumed after Enter"
     );
 
@@ -157,7 +163,7 @@ async fn test_research_clarification_dismissed_marker_rejected() {
     let event_bus = Arc::new(EventBus::default());
     let mut rx = event_bus.subscribe();
     let mut app = make_app(event_bus.clone());
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::QuestionRequested {
         session_id: "s1".to_string(),
@@ -176,7 +182,10 @@ async fn test_research_clarification_dismissed_marker_rejected() {
     )
     .await;
 
-    assert!(app.question_queue.is_empty(), "dialog should be consumed");
+    assert!(
+        app.session.question_queue.is_empty(),
+        "dialog should be consumed"
+    );
     let answer = rx
         .try_recv()
         .expect("QuestionAnswered should be published on Esc");

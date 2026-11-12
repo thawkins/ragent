@@ -17,7 +17,7 @@ mod support;
 #[tokio::test]
 async fn test_consecutive_agent_notices_get_separate_messages() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::AgentNotice {
         session_id: "s1".to_string(),
@@ -31,6 +31,7 @@ async fn test_consecutive_agent_notices_get_separate_messages() {
     .await;
 
     let notices: Vec<&str> = app
+        .session
         .messages
         .iter()
         .filter(|m| m.role == Role::Assistant)
@@ -62,7 +63,7 @@ async fn test_consecutive_agent_notices_get_separate_messages() {
 #[tokio::test]
 async fn test_agent_notice_does_not_absorb_subsequent_streamed_text() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::AgentNotice {
         session_id: "s1".to_string(),
@@ -76,6 +77,7 @@ async fn test_agent_notice_does_not_absorb_subsequent_streamed_text() {
     .await;
 
     let assistant_texts: Vec<&str> = app
+        .session
         .messages
         .iter()
         .filter(|m| m.role == Role::Assistant)
@@ -100,7 +102,7 @@ async fn test_agent_notice_does_not_absorb_subsequent_streamed_text() {
 #[tokio::test]
 async fn test_agent_notice_splits_streamed_message() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::TextDelta {
         session_id: "s1".to_string(),
@@ -119,6 +121,7 @@ async fn test_agent_notice_splits_streamed_message() {
     .await;
 
     let assistant_texts: Vec<&str> = app
+        .session
         .messages
         .iter()
         .filter(|m| m.role == Role::Assistant)

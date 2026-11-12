@@ -50,18 +50,18 @@ fn bench_cursor_byte_pos(c: &mut Criterion) {
         let mid = len / 2;
 
         let mut app = support::make_app();
-        app.input = mixed.clone();
+        app.session.input = mixed.clone();
         group.bench_with_input(BenchmarkId::new("mixed_mid", len), &mid, |b, &idx| {
             b.iter(|| app.cursor_byte_pos_at_char_index(idx));
         });
 
-        app.input = ascii.clone();
+        app.session.input = ascii.clone();
         group.bench_with_input(BenchmarkId::new("ascii_mid", len), &mid, |b, &idx| {
             b.iter(|| app.cursor_byte_pos_at_char_index(idx));
         });
 
         // Benchmark: look up position at the end (worst case for linear scan)
-        app.input = mixed;
+        app.session.input = mixed;
         group.bench_with_input(BenchmarkId::new("mixed_end", len), &len, |b, &idx| {
             b.iter(|| app.cursor_byte_pos_at_char_index(idx));
         });
@@ -82,8 +82,8 @@ fn bench_insert_char(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("mid", len), &base, |b, input| {
             let mut app = support::make_app();
             b.iter(|| {
-                app.input.clone_from(input);
-                app.input_cursor = len / 2;
+                app.session.input.clone_from(input);
+                app.session.input_cursor = len / 2;
                 app.insert_char_at_cursor('Z');
             });
         });
@@ -91,8 +91,8 @@ fn bench_insert_char(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("end", len), &base, |b, input| {
             let mut app = support::make_app();
             b.iter(|| {
-                app.input.clone_from(input);
-                app.input_cursor = len;
+                app.session.input.clone_from(input);
+                app.session.input_cursor = len;
                 app.insert_char_at_cursor('Z');
             });
         });
@@ -110,8 +110,8 @@ fn bench_insert_text(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("mid", len), &base, |b, input| {
             let mut app = support::make_app();
             b.iter(|| {
-                app.input.clone_from(input);
-                app.input_cursor = len / 2;
+                app.session.input.clone_from(input);
+                app.session.input_cursor = len / 2;
                 app.insert_text_at_cursor(paste);
             });
         });
@@ -128,8 +128,8 @@ fn bench_delete_prev_char(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("mid", len), &base, |b, input| {
             let mut app = support::make_app();
             b.iter(|| {
-                app.input.clone_from(input);
-                app.input_cursor = len / 2;
+                app.session.input.clone_from(input);
+                app.session.input_cursor = len / 2;
                 app.delete_prev_char();
             });
         });
@@ -146,8 +146,8 @@ fn bench_delete_next_char(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("mid", len), &base, |b, input| {
             let mut app = support::make_app();
             b.iter(|| {
-                app.input.clone_from(input);
-                app.input_cursor = len / 2;
+                app.session.input.clone_from(input);
+                app.session.input_cursor = len / 2;
                 app.delete_next_char();
             });
         });

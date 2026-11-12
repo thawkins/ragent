@@ -112,6 +112,15 @@ pub enum HookTrigger {
     ///   the tool result is not suppressed but the flag appears in the session log
     /// - `>= 3` - treat as a hook failure (error diagnostic only)
     PostToolUse,
+    /// Fired by the TUI when a session that is not focused needs the user:
+    /// it is waiting on a permission or question, its run finished, or its
+    /// run failed (spec MULTISESSION FR-06). Claude's `Notification` maps
+    /// here.
+    ///
+    /// Hooks receive `RAGENT_NOTIFICATION_KIND` (`waiting`, `finished` or
+    /// `failed`), `RAGENT_NOTIFICATION_MESSAGE` (a one-line summary) and
+    /// `RAGENT_SESSION_ID`.
+    OnNotification,
 }
 
 impl std::fmt::Display for HookTrigger {
@@ -126,6 +135,7 @@ impl std::fmt::Display for HookTrigger {
             Self::OnCompaction => write!(f, "on_compaction"),
             Self::PreToolUse => write!(f, "pre_tool_use"),
             Self::PostToolUse => write!(f, "post_tool_use"),
+            Self::OnNotification => write!(f, "on_notification"),
         }
     }
 }
@@ -158,6 +168,7 @@ impl HookTrigger {
             "oncompaction" | "compaction" | "precompact" => Some(Self::OnCompaction),
             "pretooluse" => Some(Self::PreToolUse),
             "posttooluse" => Some(Self::PostToolUse),
+            "onnotification" | "notification" => Some(Self::OnNotification),
             _ => None,
         }
     }
@@ -521,6 +532,7 @@ fn claude_event_name(trigger: &HookTrigger) -> Option<&'static str> {
         HookTrigger::PreToolUse => Some("PreToolUse"),
         HookTrigger::PostToolUse => Some("PostToolUse"),
         HookTrigger::OnCompaction => Some("PreCompact"),
+        HookTrigger::OnNotification => Some("Notification"),
         HookTrigger::OnError | HookTrigger::OnPermissionDenied | HookTrigger::OnTurnEnd => None,
     }
 }
@@ -1502,6 +1514,43 @@ pub fn fire_turn_end_hooks(hooks: &[HookConfig], working_dir: &Path, turn_number
         HookTrigger::OnTurnEnd,
         working_dir,
         &[("RAGENT_TURN_NUMBER", &turn_number.to_string())],
+    );
+}
+
+/// Fire `on_notification` hooks for a session that needs the user
+/// (spec MULTISESSION FR-06).
+///
+/// Builds the same hook list a turn uses - the session's configured hooks,
+/// then hooks contributed by enabled plugins - and fires the matching ones
+/// without blocking.
+///
+/// # Arguments
+///
+/// * `config` - the session's resolved configuration.
+/// * `working_dir` - the session's working directory (hooks run there).
+/// * `session_id` - the session that needs attention.
+/// * `kind` - `waiting`, `finished` or `failed`.
+/// * `message` - a one-line summary for the notification.
+pub fn fire_notification_hooks(
+    config: &ragent_config::Config,
+    working_dir: &Path,
+    session_id: &str,
+    kind: &str,
+    message: &str,
+) {
+    let configured = parse_hook_configs(&config.hooks);
+    let plugin_hooks =
+        ragent_plugins::scanned_plugin_hooks(&crate::skill::plugin_store_dirs(working_dir));
+    let merged = merge_hook_configs(&configured, &plugin_hooks);
+    fire_hooks(
+        &merged,
+        HookTrigger::OnNotification,
+        working_dir,
+        &[
+            ("RAGENT_NOTIFICATION_KIND", kind),
+            ("RAGENT_NOTIFICATION_MESSAGE", message),
+            ("RAGENT_SESSION_ID", session_id),
+        ],
     );
 }
 

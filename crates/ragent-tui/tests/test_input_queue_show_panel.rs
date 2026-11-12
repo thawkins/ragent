@@ -42,7 +42,7 @@ fn entry(text: &str) -> QueuedInput {
 fn panel_with(entries: &[&str]) -> App {
     let mut app = support::make_app();
     for text in entries {
-        app.input_queue.push_back(entry(text));
+        app.session.input_queue.push_back(entry(text));
     }
     app.queue_show_open_panel();
     assert!(app.queue_show_open, "precondition: the panel opened");
@@ -91,7 +91,11 @@ fn first_glyph_bg(terminal: &Terminal<TestBackend>, app: &App, y: u16) -> Color 
 
 /// The queue texts, oldest first, as a plain vector.
 fn queue_texts(app: &App) -> Vec<String> {
-    app.input_queue.iter().map(|e| e.text.clone()).collect()
+    app.session
+        .input_queue
+        .iter()
+        .map(|e| e.text.clone())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +105,7 @@ fn queue_texts(app: &App) -> Vec<String> {
 #[tokio::test]
 async fn test_show_row_opens_the_panel_and_closes_the_menu() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("a"));
     app.queue_menu_open = true;
     app.queue_menu_selected = ragent_tui::app::QUEUE_MENU_ROW_SHOW;
 
@@ -114,8 +118,8 @@ async fn test_show_row_opens_the_panel_and_closes_the_menu() {
 #[test]
 fn test_opening_the_panel_resets_the_highlight_to_the_oldest_entry() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
-    app.input_queue.push_back(entry("b"));
+    app.session.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("b"));
     app.queue_show_selected = 5;
 
     app.queue_show_open_panel();
@@ -129,7 +133,7 @@ fn test_opening_the_panel_resets_the_highlight_to_the_oldest_entry() {
 #[test]
 fn test_opening_the_panel_sets_the_redraw_flag() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("a"));
     app.needs_redraw = false;
 
     app.queue_show_open_panel();
@@ -492,8 +496,8 @@ async fn test_change_keys_keep_the_panel_open() {
 #[tokio::test]
 async fn test_plain_character_is_swallowed_without_closing_the_panel() {
     let mut app = panel_with(&["a", "b"]);
-    app.input = "PROBE".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = "PROBE".to_string();
+    app.session.input_cursor = app.input_len_chars();
 
     app.handle_key_event(key(KeyCode::Char('z'))).await;
 
@@ -502,7 +506,7 @@ async fn test_plain_character_is_swallowed_without_closing_the_panel() {
         "a printable character must not dismiss the panel"
     );
     assert_eq!(
-        app.input, "PROBE",
+        app.session.input, "PROBE",
         "the character must not reach the input buffer"
     );
 }
@@ -514,9 +518,10 @@ async fn test_plain_character_is_swallowed_without_closing_the_panel() {
 #[tokio::test]
 async fn test_panel_never_mutates_the_draft_or_attachments() {
     let mut app = panel_with(&["a", "b"]);
-    app.input = "KEEP".to_string();
-    app.input_cursor = app.input_len_chars();
-    app.pending_attachments
+    app.session.input = "KEEP".to_string();
+    app.session.input_cursor = app.input_len_chars();
+    app.session
+        .pending_attachments
         .push(std::path::PathBuf::from("/tmp/keep.png"));
 
     app.handle_key_event(key(KeyCode::Down)).await;
@@ -524,10 +529,10 @@ async fn test_panel_never_mutates_the_draft_or_attachments() {
     app.handle_key_event(key(KeyCode::Delete)).await;
     app.handle_key_event(key(KeyCode::Up)).await;
 
-    assert_eq!(app.input, "KEEP", "the draft must be preserved");
-    assert_eq!(app.input_cursor, app.input_len_chars());
+    assert_eq!(app.session.input, "KEEP", "the draft must be preserved");
+    assert_eq!(app.session.input_cursor, app.input_len_chars());
     assert_eq!(
-        app.pending_attachments,
+        app.session.pending_attachments,
         vec![std::path::PathBuf::from("/tmp/keep.png")],
         "staged attachments must be preserved"
     );
@@ -536,14 +541,14 @@ async fn test_panel_never_mutates_the_draft_or_attachments() {
 #[tokio::test]
 async fn test_panel_leaves_the_running_turn_untouched() {
     let mut app = panel_with(&["a", "b"]);
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
+    app.session.cancel_flag = Some(flag.clone());
 
     app.handle_key_event(key(KeyCode::Down)).await;
     app.handle_key_event(key(KeyCode::Enter)).await;
 
-    assert!(app.is_processing, "the running turn must not stop");
+    assert!(app.session.is_processing, "the running turn must not stop");
     assert!(
         !flag.load(Ordering::Relaxed),
         "the panel must not cancel the running turn"
@@ -553,7 +558,7 @@ async fn test_panel_leaves_the_running_turn_untouched() {
 #[tokio::test]
 async fn test_menu_esc_does_not_open_the_panel() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("a"));
     app.handle_key_event(alt(KeyCode::Char('q'))).await;
     assert!(app.queue_menu_open, "precondition: the menu is open");
 

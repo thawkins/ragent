@@ -29,7 +29,8 @@ fn enter_temp_dir() -> (CwdGuard, tempfile::TempDir) {
 
 /// The rendered text of the most recent assistant message.
 fn last_text(app: &ragent_tui::App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .expect("an assistant message must have been appended")
         .text_content()
@@ -80,7 +81,7 @@ fn connectors_suggestions_list_all_subcommands() {
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
 
-    app.input = "/connectors".to_string();
+    app.session.input = "/connectors".to_string();
     app.update_slash_menu();
     let menu = app
         .slash_menu
@@ -134,7 +135,7 @@ async fn help_bare_and_unknown_all_render_the_usage_block() {
     let _lock = crate::global_env_lock();
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     for invocation in ["/connectors help", "/connectors", "/connectors bogus"] {
         app.execute_slash_command(invocation).await;
@@ -172,7 +173,7 @@ async fn help_creates_no_files() {
     let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     for invocation in ["/connectors help", "/connectors", "/connectors bogus"] {
         app.execute_slash_command(invocation).await;
@@ -192,7 +193,7 @@ async fn stores_report_is_attributed_ascii_and_offline() {
     let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.execute_slash_command("/connectors stores").await;
 
     let raw = last_text(&app);
@@ -223,7 +224,7 @@ async fn master_switch_disables_the_subsystem() {
     .expect("config writable");
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/connectors list").await;
     let listed = last_text(&app);
@@ -285,7 +286,7 @@ async fn list_reports_a_bridged_server_connected_from_the_live_client() {
     ledger.save(&store).expect("ledger save");
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     // Publish the live client with the bridged server connected and two tools,
     // exactly as the startup connect loop leaves it.

@@ -23,8 +23,8 @@ mod support;
 #[tokio::test]
 async fn test_enter_submits_plain_message_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
-    app.input = "hello".to_string();
+    app.session.is_processing = true;
+    app.session.input = "hello".to_string();
 
     let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).await;
 
@@ -41,7 +41,7 @@ async fn test_enter_submits_plain_message_while_processing() {
 #[tokio::test]
 async fn test_enter_still_submits_when_idle() {
     let mut app = support::make_app();
-    app.input = "hello".to_string();
+    app.session.input = "hello".to_string();
 
     let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).await;
 
@@ -54,8 +54,8 @@ async fn test_enter_still_submits_when_idle() {
 #[tokio::test]
 async fn test_plain_char_is_accepted_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
-    app.input = "draft".to_string();
+    app.session.is_processing = true;
+    app.session.input = "draft".to_string();
 
     let action = handle_key(
         &mut app,
@@ -65,7 +65,7 @@ async fn test_plain_char_is_accepted_while_processing() {
 
     assert!(action.is_none(), "typing a character emits no action");
     assert_eq!(
-        app.input, "sdraft",
+        app.session.input, "sdraft",
         "the input field stays editable while the agent executes"
     );
     assert_ne!(
@@ -77,8 +77,8 @@ async fn test_plain_char_is_accepted_while_processing() {
 #[tokio::test]
 async fn test_slash_command_is_accepted_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
-    app.input = "/status".to_string();
+    app.session.is_processing = true;
+    app.session.input = "/status".to_string();
 
     let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).await;
 
@@ -95,8 +95,8 @@ async fn test_slash_command_is_accepted_while_processing() {
 #[tokio::test]
 async fn test_bang_command_is_refused_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
-    app.input = "! ls -la".to_string();
+    app.session.is_processing = true;
+    app.session.input = "! ls -la".to_string();
 
     let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).await;
 
@@ -107,9 +107,9 @@ async fn test_bang_command_is_refused_while_processing() {
 #[tokio::test]
 async fn test_focused_teammate_does_not_gate_a_send_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
-    app.focused_teammate = Some("teammate-1".to_string());
-    app.input = "hello teammate".to_string();
+    app.session.is_processing = true;
+    app.session.focused_teammate = Some("teammate-1".to_string());
+    app.session.input = "hello teammate".to_string();
 
     let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).await;
 
@@ -126,7 +126,7 @@ async fn test_focused_teammate_does_not_gate_a_send_while_processing() {
 #[tokio::test]
 async fn test_key_release_events_are_ignored() {
     let mut app = support::make_app();
-    app.input = "draft".to_string();
+    app.session.input = "draft".to_string();
 
     let action = handle_key(
         &mut app,
@@ -140,15 +140,15 @@ async fn test_key_release_events_are_ignored() {
     .await;
 
     assert!(action.is_none(), "release events should be ignored");
-    assert_eq!(app.input, "draft");
+    assert_eq!(app.session.input, "draft");
 }
 
 #[tokio::test]
 async fn test_agent_error_clears_processing_so_input_unblocks() {
     let mut app = support::make_app();
-    app.session_id = Some("session-1".to_string());
-    app.is_processing = true;
-    app.cancel_flag = Some(Arc::new(std::sync::atomic::AtomicBool::new(false)));
+    app.session.session_id = Some("session-1".to_string());
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(Arc::new(std::sync::atomic::AtomicBool::new(false)));
 
     app.handle_event(Event::AgentError {
         session_id: "session-1".to_string(),
@@ -157,15 +157,15 @@ async fn test_agent_error_clears_processing_so_input_unblocks() {
     .await;
 
     assert!(
-        !app.is_processing,
+        !app.session.is_processing,
         "agent error should end busy input gating"
     );
     assert!(
-        app.cancel_flag.is_none(),
+        app.session.cancel_flag.is_none(),
         "cancel flag should be cleared on error"
     );
 
-    app.input = "hello".to_string();
+    app.session.input = "hello".to_string();
     let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).await;
     match action {
         Some(InputAction::SendMessage(text)) => assert_eq!(text, "hello"),
@@ -197,7 +197,7 @@ fn test_input_border_is_white_when_idle() {
 #[test]
 fn test_input_border_stays_white_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     let color = render_and_get_input_border_color(&mut app);
 
@@ -211,9 +211,9 @@ fn test_input_border_stays_white_while_processing() {
 #[test]
 fn test_input_border_is_red_when_a_modal_is_open() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
     // An overlay that swallows keystrokes genuinely locks the input field.
-    app.pending_stop_confirm = true;
+    app.session.pending_stop_confirm = true;
 
     let color = render_and_get_input_border_color(&mut app);
 

@@ -101,7 +101,7 @@ async fn doctor_runs_diagnostics_and_publishes_report() {
 async fn doctor_with_index_and_model_reports_them() {
     let (_g, _e, temp, mut app) = project_app();
     attach_graph_index(&mut app, temp.path());
-    app.selected_model = Some("ollama/qwen2.5".to_string());
+    app.session.selected_model = Some("ollama/qwen2.5".to_string());
     let mut rx = app.event_bus.subscribe();
 
     app.execute_slash_command("/doctor").await;

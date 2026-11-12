@@ -1546,9 +1546,16 @@ impl ToolRegistry {
     /// ```
     #[must_use]
     pub fn new() -> Self {
+        // Each registry counts versions in its own range (registry number in
+        // the high 32 bits), so two registries never report the same version
+        // and every version-keyed cache tells them apart. A session in a
+        // project with its own MCP servers has its own registry
+        // (spec MULTISESSION M8).
+        static NEXT_REGISTRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let base = NEXT_REGISTRY.fetch_add(1, std::sync::atomic::Ordering::Relaxed) << 32;
         Self {
             tools: RwLock::new(HashMap::new()),
-            version: std::sync::atomic::AtomicU64::new(0),
+            version: std::sync::atomic::AtomicU64::new(base),
             definitions_cache: RwLock::new(None),
             // T-008: `Arc` wrapper is created lazily in `definitions()`.
         }

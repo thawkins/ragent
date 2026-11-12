@@ -69,8 +69,8 @@ fn isolated_app() -> (
 
 /// The `/tools` menu entry the autocomplete produces for the typed `/tools`.
 fn tools_entry(app: &mut App) -> ragent_tui::app::SlashMenuEntry {
-    app.input = "/tools".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "/tools".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.update_slash_menu();
     app.slash_menu
         .as_ref()
@@ -173,8 +173,8 @@ fn test_the_slash_menu_offers_no_retired_tool_spelling() {
     // allowlist and is not the retired `bash` tool).
     for trigger in &triggers {
         let entry = {
-            app.input = format!("/{trigger}");
-            app.input_cursor = app.input.chars().count();
+            app.session.input = format!("/{trigger}");
+            app.session.input_cursor = app.session.input.chars().count();
             app.update_slash_menu();
             app.slash_menu
                 .as_ref()
@@ -221,8 +221,8 @@ fn test_the_slash_menu_offers_no_retired_tool_spelling() {
             continue;
         }
         let prefix: String = before.chars().take(2).collect();
-        app.input = format!("/{prefix}");
-        app.input_cursor = app.input.chars().count();
+        app.session.input = format!("/{prefix}");
+        app.session.input_cursor = app.session.input.chars().count();
         app.update_slash_menu();
         if let Some(menu) = app.slash_menu.as_ref() {
             for entry in &menu.matches {
@@ -249,8 +249,8 @@ fn test_the_prompt_field_offers_no_tool_names() {
     // TC-030 step 2: a bare `ba` in the prompt field opens nothing. The prompt
     // field's only completion surface is the `@` file picker, opened by `@`; a tool
     // name typed with no sigil is ordinary message text.
-    app.input = "ba".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "ba".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.update_file_menu();
     assert!(
         app.file_menu.is_none(),
@@ -266,8 +266,8 @@ fn test_the_prompt_field_offers_no_tool_names() {
     // The `@` picker is the one surface in the field, and it completes project
     // paths. Drive it and assert every row is a path - never a registered tool name,
     // and never a bare word that would read like one.
-    app.input = "@zeta".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "@zeta".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.update_file_menu();
 
     let tool_names: BTreeSet<String> = app

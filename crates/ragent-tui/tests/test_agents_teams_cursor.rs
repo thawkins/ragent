@@ -94,8 +94,8 @@ fn render_teams(app: &mut App, width: u16, height: u16) {
 #[test]
 fn agents_cursor_starts_clamps_and_pages() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     for i in 0..6 {
         app.active_tasks
             .push(task(&format!("task-{i}"), "explore", TaskStatus::Running));
@@ -117,8 +117,8 @@ fn agents_cursor_starts_clamps_and_pages() {
     assert_eq!(app.agents_cursor_subagent, Some(0));
     // Up from None starts at the last row.
     let mut app2 = make_app();
-    app2.session_id = Some(LEAD_SESSION.to_string());
-    app2.agent_name = "general".to_string();
+    app2.session.session_id = Some(LEAD_SESSION.to_string());
+    app2.session.agent_name = "general".to_string();
     for i in 0..6 {
         app2.active_tasks
             .push(task(&format!("task-{i}"), "explore", TaskStatus::Running));
@@ -133,11 +133,11 @@ fn agents_cursor_starts_clamps_and_pages() {
 #[test]
 fn teams_cursor_pages_and_clamps() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
     for i in 0..10 {
-        app.team_members.push(member(
+        app.session.team_members.push(member(
             &format!("tm-{i:03}"),
             &format!("member-{i}"),
             MemberStatus::Idle,
@@ -171,8 +171,8 @@ fn teams_cursor_pages_and_clamps() {
 #[test]
 fn agents_cursor_moves_report_the_landed_row() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("abcd1234", "explore", TaskStatus::Running));
     render_agents(&mut app, 160, 44);
@@ -196,8 +196,8 @@ fn agents_cursor_moves_report_the_landed_row() {
 #[tokio::test]
 async fn agents_space_suspends_and_resumes() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("run-0001", "explore", TaskStatus::Running));
     render_agents(&mut app, 160, 44);
@@ -219,8 +219,8 @@ async fn agents_space_suspends_and_resumes() {
 
     // Now the suspended direction toggles to resume.
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("susp0002", "explore", TaskStatus::Suspended));
     render_agents(&mut app, 160, 44);
@@ -240,8 +240,8 @@ async fn agents_space_suspends_and_resumes() {
 #[tokio::test]
 async fn agents_del_arms_the_kill_dialog() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("kill0001", "rust-coder", TaskStatus::Running));
     render_agents(&mut app, 160, 44);
@@ -276,8 +276,8 @@ async fn agents_del_arms_the_kill_dialog() {
 #[test]
 fn agents_enter_opens_the_output_overlay() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("open0001", "explore", TaskStatus::Running));
     render_agents(&mut app, 160, 44);
@@ -305,8 +305,8 @@ fn agents_enter_opens_the_output_overlay() {
 #[tokio::test]
 async fn agents_stale_cursor_actions_are_consumed_no_ops() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("gone0001", "explore", TaskStatus::Running));
     render_agents(&mut app, 160, 44);
@@ -349,10 +349,11 @@ async fn agents_stale_cursor_actions_are_consumed_no_ops() {
 #[tokio::test]
 async fn teams_space_splits_by_member_status() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     render_teams(&mut app, 170, 44);
 
@@ -374,10 +375,11 @@ async fn teams_space_splits_by_member_status() {
 
     // The suspended direction resumes directly.
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Suspended));
     render_teams(&mut app, 170, 44);
     app.move_teams_cursor(1);
@@ -402,10 +404,11 @@ async fn teams_space_splits_by_member_status() {
 #[tokio::test]
 async fn teams_del_arms_the_shutdown_dialog() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     render_teams(&mut app, 170, 44);
 
@@ -427,10 +430,11 @@ async fn teams_del_arms_the_shutdown_dialog() {
 #[test]
 fn teams_enter_focuses_and_opens_the_overlay() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     render_teams(&mut app, 170, 44);
 
@@ -439,7 +443,7 @@ fn teams_enter_focuses_and_opens_the_overlay() {
     app.teams_cursor_focus();
 
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "Enter focuses the teammate (FR-038)"
     );
@@ -467,15 +471,16 @@ fn teams_enter_focuses_and_opens_the_overlay() {
 #[tokio::test]
 async fn teams_stale_cursor_actions_are_consumed_no_ops() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     render_teams(&mut app, 170, 44);
 
     app.teams_cursor_teammate = Some(0);
-    app.team_members.clear();
+    app.session.team_members.clear();
     app.needs_redraw = false;
 
     app.teams_cursor_toggle_stop_resume();
@@ -491,7 +496,10 @@ async fn teams_stale_cursor_actions_are_consumed_no_ops() {
     app.needs_redraw = false;
     app.status = "sentinel".to_string();
     app.teams_cursor_focus();
-    assert!(app.focused_teammate.is_none(), "Enter focuses nothing");
+    assert!(
+        app.session.focused_teammate.is_none(),
+        "Enter focuses nothing"
+    );
     assert!(app.output_view.is_none(), "Enter opens nothing");
     assert_eq!(
         app.status, "sentinel",
@@ -504,10 +512,11 @@ async fn teams_stale_cursor_actions_are_consumed_no_ops() {
 #[tokio::test]
 async fn teams_out_of_range_cursor_reports_the_no_op() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     render_teams(&mut app, 170, 44);
 
@@ -530,11 +539,11 @@ async fn teams_out_of_range_cursor_reports_the_no_op() {
 #[test]
 fn teams_cursor_moves_scroll_the_row_into_view() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("cursor-team", LEAD_SESSION));
     for i in 0..12 {
-        app.team_members.push(member(
+        app.session.team_members.push(member(
             &format!("tm-{i:03}"),
             &format!("member-{i}"),
             MemberStatus::Idle,
@@ -579,8 +588,8 @@ fn teams_cursor_moves_scroll_the_row_into_view() {
 #[test]
 fn agents_cursor_moves_scroll_the_row_into_view() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     for i in 0..12 {
         app.active_tasks.push(task(
             &format!("task-{i:02}"),
@@ -620,8 +629,8 @@ fn agents_cursor_moves_scroll_the_row_into_view() {
 #[tokio::test]
 async fn agents_click_selects_then_space_toggles() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("clck0001", "explore", TaskStatus::Running));
     render_agents(&mut app, 160, 44);
@@ -653,8 +662,8 @@ async fn agents_click_selects_then_space_toggles() {
 #[tokio::test]
 async fn agents_click_on_non_subagent_rows_never_selects() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("clck0002", "explore", TaskStatus::Running));
     render_agents(&mut app, 160, 44);
@@ -675,12 +684,12 @@ async fn agents_click_on_non_subagent_rows_never_selects() {
 #[tokio::test]
 async fn teams_click_selects_the_clicked_member_row() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.active_team = Some(ragent_agent::team::TeamConfig::new(
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.active_team = Some(ragent_agent::team::TeamConfig::new(
         "agentui-click-team",
         LEAD_SESSION,
     ));
-    app.team_members.push(member(
+    app.session.team_members.push(member(
         "tm-001",
         "reviewer",
         ragent_agent::team::MemberStatus::Working,

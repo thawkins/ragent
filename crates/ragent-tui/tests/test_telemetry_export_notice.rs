@@ -22,9 +22,9 @@ mod support;
 /// Run `poll_telemetry_export_health` and return the notice bubbles it added
 /// (every assistant message whose first text part starts with "Agent Notice").
 fn poll_and_collect_notices(app: &mut ragent_tui::App) -> Vec<String> {
-    let before = app.messages.len();
+    let before = app.session.messages.len();
     app.poll_telemetry_export_health();
-    app.messages[before..]
+    app.session.messages[before..]
         .iter()
         .filter(|message| message.role == Role::Assistant)
         .filter_map(|message| match message.parts.first() {
@@ -50,7 +50,7 @@ fn test_export_failure_emits_agent_notice() {
     );
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     let notices = poll_and_collect_notices(&mut app);
 
     assert_eq!(
@@ -90,7 +90,7 @@ fn test_export_timeout_notice_names_timeout() {
     );
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     let notices = poll_and_collect_notices(&mut app);
 
     assert_eq!(notices.len(), 1, "expected one notice: {notices:?}");
@@ -122,7 +122,7 @@ fn test_fifth_consecutive_failure_disables_telemetry() {
     );
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     let notices = poll_and_collect_notices(&mut app);
 
     // Every queued failure is reported, and the last one announces the disable.
@@ -163,11 +163,11 @@ fn test_no_failures_emits_no_notice() {
     health.clear();
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    let before = app.messages.len();
+    app.session.session_id = Some("s1".to_string());
+    let before = app.session.messages.len();
     app.poll_telemetry_export_health();
     assert_eq!(
-        app.messages.len(),
+        app.session.messages.len(),
         before,
         "a clean monitor must not post a notice"
     );

@@ -60,7 +60,7 @@ impl App {
             KeyCode::Enter => {
                 let chosen = picker.entries[picker.selected].clone();
                 self.history_picker = None;
-                self.input = chosen;
+                self.session.input = chosen;
                 self.set_cursor_char_index_clamped(self.input_len_chars());
             }
             KeyCode::Char('c') => {
@@ -116,7 +116,7 @@ impl App {
                         // status bar would keep showing YOLO on after restoring a
                         // `yolo: false` backup).
                         ragent_config::Config::invalidate_load_cache();
-                        if let Ok(reloaded) = ragent_config::Config::load() {
+                        if let Ok(reloaded) = ragent_config::Config::load_for(&self.cwd_path) {
                             ragent_config::sync_runtime_flags(&reloaded);
                         }
                         self.session_processor.invalidate_config_cache();
@@ -439,8 +439,8 @@ impl App {
     /// buffer / cursor / scroll / context menu as needed. Asserts UI
     /// invariants and logs the transition for diagnostics.
     pub fn handle_mouse_event(&mut self, event: MouseEvent) {
-        let before_input = self.input.clone();
-        let before_cursor = self.input_cursor;
+        let before_input = self.session.input.clone();
+        let before_cursor = self.session.input_cursor;
         // While the destructive row-action confirmation dialog is open it owns
         // the mouse as the topmost modal (spec `agentui` T-009): a click inside
         // the painted dialog picks the option whose half of the dialog row the
@@ -512,6 +512,14 @@ impl App {
             }
             self.assert_ui_invariants();
             self.debug_log_input_transition("mouse-context", &before_input, before_cursor);
+            return;
+        }
+        // Session sidebar (spec MULTISESSION M5): clicks, wheel and border
+        // drags inside it are its own; a click elsewhere drops its focus and
+        // falls through to the normal routing.
+        if crate::sessions_sidebar::handle_mouse(self, event) {
+            self.assert_ui_invariants();
+            self.debug_log_input_transition("mouse-sidebar", &before_input, before_cursor);
             return;
         }
 
@@ -590,7 +598,8 @@ impl App {
                 } else {
                     match self.pane_at(event.column, event.row) {
                         Some(SelectionPane::Messages) => {
-                            self.scroll_offset = self.scroll_offset.saturating_add(SCROLL_STEP_LINES);
+                            self.session.scroll_offset =
+                                self.session.scroll_offset.saturating_add(SCROLL_STEP_LINES);
                         }
                         Some(SelectionPane::Log) => {
                             self.log_scroll_offset =
@@ -630,7 +639,8 @@ impl App {
                 } else {
                     match self.pane_at(event.column, event.row) {
                         Some(SelectionPane::Messages) => {
-                            self.scroll_offset = self.scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                            self.session.scroll_offset =
+                                self.session.scroll_offset.saturating_sub(SCROLL_STEP_LINES);
                         }
                         Some(SelectionPane::Log) => {
                             self.log_scroll_offset =
@@ -746,7 +756,7 @@ impl App {
                                                     if self.message_area.height > 0
                                                         && event.column == self.message_area.right().saturating_sub(1)
                                                         && self.message_area.contains(pos.into())
-                                                        && self.message_max_scroll > 0
+                                                        && self.session.message_max_scroll > 0
                                                     {                    self.scrollbar_drag = Some(ScrollbarDragPane::Messages);
                     self.text_selection = None;
                     self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Messages);
@@ -991,7 +1001,10 @@ impl App {
         // offset, not at content line 0. Without this adjustment, selecting
         // text after scrolling copies from the wrong part of the buffer.
         let scroll_top = match sel.pane {
-            SelectionPane::Messages => self.message_max_scroll.saturating_sub(self.scroll_offset),
+            SelectionPane::Messages => self
+                .session
+                .message_max_scroll
+                .saturating_sub(self.session.scroll_offset),
             SelectionPane::Log => self.log_max_scroll.saturating_sub(self.log_scroll_offset),
             SelectionPane::Profile => self
                 .profile_max_scroll
@@ -1021,7 +1034,7 @@ impl App {
         }
 
         let lines: &[String] = match sel.pane {
-            SelectionPane::Messages => &self.message_content_lines,
+            SelectionPane::Messages => &self.session.message_content_lines,
             SelectionPane::Log => &self.log_content_lines,
             SelectionPane::Profile => &self.profile_content_lines,
             SelectionPane::Tasks => &self.tasks_content_lines,
@@ -1035,7 +1048,7 @@ impl App {
                 // replaced by spaces in the geometry copy so a copy can never
                 // include them as message content (FR-020, NFR-002).
                 let prefix = crate::layout::input_prompt_selection_prefix(self.input_queue_len());
-                let input_text = format!("{prefix}{}", self.input);
+                let input_text = format!("{prefix}{}", self.session.input);
                 let area = self.input_area;
                 let inner_x = area.x + 1; // inside border
                 let inner_y = area.y + 1;
@@ -1131,12 +1144,12 @@ impl App {
     /// turn cancel flag and raise the goal-driven loop interrupt (FR-016).
     /// A no-op when no turn is running (`cancel_flag` unset).
     pub(crate) fn halt_running_agent(&mut self) {
-        if let Some(ref flag) = self.cancel_flag {
+        if let Some(ref flag) = self.session.cancel_flag {
             flag.store(true, Ordering::Relaxed);
             // T-011 (FR-016): an active goal-driven loop stops at
             // the next inter-stage safe point with status
             // `interrupted` instead of dying silently.
-            if let Some(ref sid) = self.session_id
+            if let Some(ref sid) = self.session.session_id
                 && self.session_processor.request_loop_interrupt(sid)
             {
                 self.status =
@@ -1155,8 +1168,8 @@ impl App {
     /// teams dialog, slash menu, context menu, or the main input editor).
     /// Asserts UI invariants and logs the transition for diagnostics.
     pub async fn handle_key_event(&mut self, key: KeyEvent) {
-        let before_input = self.input.clone();
-        let before_cursor = self.input_cursor;
+        let before_input = self.session.input.clone();
+        let before_cursor = self.session.input_cursor;
         // Self-heal any selection/menu anchored on a panel that a recent
         // toggle dismissed (the render pass may have zeroed its area since
         // the last input cycle).
@@ -1167,8 +1180,8 @@ impl App {
         // however, is the user starting to type their next message - we clear
         // the banner but let the character fall through to normal input
         // processing so the first keystroke is not lost.
-        if self.run_cost_banner.take().is_some() {
-            self.run_cost_banner_at = None;
+        if self.session.run_cost_banner.take().is_some() {
+            self.session.run_cost_banner_at = None;
             self.needs_redraw = true;
             let is_plain_char = matches!(key.code, KeyCode::Char(_))
                 && !key.modifiers.contains(KeyModifiers::CONTROL)
@@ -1178,7 +1191,7 @@ impl App {
             // through to normal processing instead of being consumed by the
             // banner - a confirmation dialog must never appear dead mid-run,
             // or its `Enter`/`Esc` answer swallowed by the banner's dismissal.
-            let is_stop_confirm = self.pending_stop_confirm
+            let is_stop_confirm = self.session.pending_stop_confirm
                 || self.row_action_confirm_open()
                 || (matches!(key.code, KeyCode::Char('x'))
                     && key.modifiers.contains(KeyModifiers::ALT));
@@ -1336,16 +1349,16 @@ impl App {
             match action {
                 InputAction::BangCommand(text) => {
                     // Create session if needed, then run the command.
-                    if self.session_id.is_none() {
-                        let dir = std::env::current_dir().unwrap_or_default();
+                    if self.session.session_id.is_none() {
+                        let dir = self.cwd_path.clone();
                         match self.session_processor.session_manager.create_session(dir) {
                             Ok(session) => {
-                                self.session_id = Some(session.id.clone());
+                                self.session.session_id = Some(session.id.clone());
                                 // A fresh session starts with an empty queue (NFR-005).
                                 self.clear_input_queue();
                                 let short_sid = short_session_id(&session.id);
                                 self.sid_to_display_name
-                                    .insert(short_sid, self.agent_name.clone());
+                                    .insert(short_sid, self.session.agent_name.clone());
                             }
                             Err(e) => {
                                 self.status = format!("error: {e}");
@@ -1367,7 +1380,7 @@ impl App {
                             "[!] No provider configured - use /provider to set up".to_string();
                         return;
                     }
-                    if self.selected_model.is_none() {
+                    if self.session.selected_model.is_none() {
                         self.status = "[!] No model selected - use /model to choose".to_string();
                         return;
                     }
@@ -1378,29 +1391,29 @@ impl App {
                     // a running turn.
                     if self.is_input_blocked() {
                         let image_paths: Vec<std::path::PathBuf> =
-                            std::mem::take(&mut self.pending_attachments);
+                            std::mem::take(&mut self.session.pending_attachments);
                         if let Err(rejected) = self.enqueue_input(text, image_paths) {
                             // FR-004: the queue is at capacity. The submission
                             // is rejected, but the typed text and staged
                             // attachments must not be lost.
-                            self.input = rejected.text;
-                            self.input_cursor = self.input_len_chars();
-                            self.pending_attachments = rejected.image_paths;
+                            self.session.input = rejected.text;
+                            self.session.input_cursor = self.input_len_chars();
+                            self.session.pending_attachments = rejected.image_paths;
                         }
                         return;
                     }
                     // Create session if needed
-                    if self.session_id.is_none() {
-                        let dir = std::env::current_dir().unwrap_or_default();
+                    if self.session.session_id.is_none() {
+                        let dir = self.cwd_path.clone();
                         match self.session_processor.session_manager.create_session(dir) {
                             Ok(session) => {
-                                self.session_id = Some(session.id.clone());
+                                self.session.session_id = Some(session.id.clone());
                                 // A fresh session starts with an empty queue (NFR-005).
                                 self.clear_input_queue();
                                 // Map the primary session's short_sid to the current agent name
                                 let short_sid = short_session_id(&session.id);
                                 self.sid_to_display_name
-                                    .insert(short_sid, self.agent_name.clone());
+                                    .insert(short_sid, self.session.agent_name.clone());
                             }
                             Err(e) => {
                                 self.status = format!("error: {}", e);
@@ -1412,13 +1425,13 @@ impl App {
                     // Take image attachments once; either queue for auto-compaction
                     // or send immediately.
                     let image_paths: Vec<std::path::PathBuf> =
-                        std::mem::take(&mut self.pending_attachments);
+                        std::mem::take(&mut self.session.pending_attachments);
                     if self.should_auto_compact_before_send() {
-                        self.pending_send_after_compact = Some((text, image_paths));
+                        self.session.pending_send_after_compact = Some((text, image_paths));
                         if !self.start_compaction(true) {
                             // If compaction could not start, fall back to direct send.
                             if let Some((queued_text, queued_images)) =
-                                self.pending_send_after_compact.take()
+                                self.session.pending_send_after_compact.take()
                             {
                                 self.dispatch_user_message(queued_text, queued_images);
                             }
@@ -1439,10 +1452,12 @@ impl App {
                     }
                 }
                 InputAction::ScrollUp => {
-                    self.scroll_offset = self.scroll_offset.saturating_add(SCROLL_STEP_LINES);
+                    self.session.scroll_offset =
+                        self.session.scroll_offset.saturating_add(SCROLL_STEP_LINES);
                 }
                 InputAction::ScrollDown => {
-                    self.scroll_offset = self.scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                    self.session.scroll_offset =
+                        self.session.scroll_offset.saturating_sub(SCROLL_STEP_LINES);
                 }
                 InputAction::LogScrollUp => {
                     if self.show_log {
@@ -1588,7 +1603,7 @@ impl App {
                         // mutual-exclusion policy). Force a cache refresh on the
                         // next render so the panel is always up-to-date when
                         // first shown.
-                        self.tasks_cache_dirty = true;
+                        self.session.tasks_cache_dirty = true;
                         self.show_log = false;
                         self.show_profile = false;
                         self.show_memory = false;
@@ -1703,7 +1718,7 @@ impl App {
                     // `/autopilot on|off`. Enabling applies a default time limit so
                     // the run cannot spin forever; `/autopilot on` (no flags) leaves
                     // the limit disabled for a fully unbounded run.
-                    if self.autopilot_enabled {
+                    if self.session.autopilot_enabled {
                         self.stop_autopilot();
                         self.append_assistant_text(
                             "From: Alt+O\n **Autopilot OFF** - returning to interactive mode.",
@@ -1881,48 +1896,49 @@ impl App {
                 InputAction::HistoryUp => {
                     // Within a multiline input, Up moves to the previous logical line.
                     // Only navigate history when already on the first logical line.
-                    if self.history_index.is_none() && !self.cursor_on_first_logical_line() {
+                    if self.session.history_index.is_none() && !self.cursor_on_first_logical_line()
+                    {
                         self.cursor_move_up_logical_line();
                         return;
                     }
                     if self.input_history.is_empty() {
                         return;
                     }
-                    match self.history_index {
+                    match self.session.history_index {
                         None => {
-                            self.history_draft = self.input.clone();
+                            self.session.history_draft = self.session.input.clone();
                             let idx = self.input_history.len() - 1;
-                            self.history_index = Some(idx);
-                            self.input = self.input_history[idx].clone();
+                            self.session.history_index = Some(idx);
+                            self.session.input = self.input_history[idx].clone();
                         }
                         Some(idx) if idx > 0 => {
                             let idx = idx - 1;
-                            self.history_index = Some(idx);
-                            self.input = self.input_history[idx].clone();
+                            self.session.history_index = Some(idx);
+                            self.session.input = self.input_history[idx].clone();
                         }
                         _ => {}
                     }
-                    self.input_cursor = self.input_len_chars();
+                    self.session.input_cursor = self.input_len_chars();
                 }
                 InputAction::HistoryDown => {
                     // Within a multiline input (while not browsing history), Down moves
                     // to the next logical line before navigating history.
-                    if self.history_index.is_none() && !self.cursor_on_last_logical_line() {
+                    if self.session.history_index.is_none() && !self.cursor_on_last_logical_line() {
                         self.cursor_move_down_logical_line();
                         return;
                     }
-                    match self.history_index {
+                    match self.session.history_index {
                         Some(idx) if idx + 1 < self.input_history.len() => {
                             let idx = idx + 1;
-                            self.history_index = Some(idx);
-                            self.input = self.input_history[idx].clone();
-                            self.input_cursor = self.input_len_chars();
+                            self.session.history_index = Some(idx);
+                            self.session.input = self.input_history[idx].clone();
+                            self.session.input_cursor = self.input_len_chars();
                         }
                         Some(_) => {
-                            self.history_index = None;
-                            self.input = self.history_draft.clone();
-                            self.history_draft.clear();
-                            self.input_cursor = self.input_len_chars();
+                            self.session.history_index = None;
+                            self.session.input = self.session.history_draft.clone();
+                            self.session.history_draft.clear();
+                            self.session.input_cursor = self.input_len_chars();
                         }
                         None => {}
                     }
@@ -1930,7 +1946,7 @@ impl App {
                 InputAction::MoveCursorLeft => {
                     // Standard: if selection active, jump to left boundary and clear.
                     if let Some((start, _)) = self.kb_selection_char_range() {
-                        self.kb_select_anchor = None;
+                        self.session.kb_select_anchor = None;
                         self.set_cursor_char_index_clamped(start);
                     } else {
                         self.cursor_move_left();
@@ -1939,7 +1955,7 @@ impl App {
                 InputAction::MoveCursorRight => {
                     // Standard: if selection active, jump to right boundary and clear.
                     if let Some((_, end)) = self.kb_selection_char_range() {
-                        self.kb_select_anchor = None;
+                        self.session.kb_select_anchor = None;
                         self.set_cursor_char_index_clamped(end);
                     } else {
                         self.cursor_move_right();
@@ -1964,7 +1980,7 @@ impl App {
                 InputAction::Delete => {
                     if let Some((start, end)) = self.kb_selection_char_range() {
                         self.remove_input_char_range(start, end);
-                        self.kb_select_anchor = None;
+                        self.session.kb_select_anchor = None;
                     } else {
                         self.delete_next_char();
                     }
@@ -1978,30 +1994,30 @@ impl App {
                     self.delete_to_end_of_line();
                 }
                 InputAction::SelectAll => {
-                    self.kb_select_anchor = Some(0);
+                    self.session.kb_select_anchor = Some(0);
                     self.cursor_move_end();
                 }
                 InputAction::SelectCharLeft => {
-                    if self.kb_select_anchor.is_none() {
-                        self.kb_select_anchor = Some(self.input_cursor);
+                    if self.session.kb_select_anchor.is_none() {
+                        self.session.kb_select_anchor = Some(self.session.input_cursor);
                     }
                     self.cursor_move_left();
                 }
                 InputAction::SelectCharRight => {
-                    if self.kb_select_anchor.is_none() {
-                        self.kb_select_anchor = Some(self.input_cursor);
+                    if self.session.kb_select_anchor.is_none() {
+                        self.session.kb_select_anchor = Some(self.session.input_cursor);
                     }
                     self.cursor_move_right();
                 }
                 InputAction::SelectWordLeft => {
-                    if self.kb_select_anchor.is_none() {
-                        self.kb_select_anchor = Some(self.input_cursor);
+                    if self.session.kb_select_anchor.is_none() {
+                        self.session.kb_select_anchor = Some(self.session.input_cursor);
                     }
                     self.cursor_move_word_left();
                 }
                 InputAction::SelectWordRight => {
-                    if self.kb_select_anchor.is_none() {
-                        self.kb_select_anchor = Some(self.input_cursor);
+                    if self.session.kb_select_anchor.is_none() {
+                        self.session.kb_select_anchor = Some(self.session.input_cursor);
                     }
                     self.cursor_move_word_right();
                 }
@@ -2016,25 +2032,26 @@ impl App {
                 }
                 InputAction::SwitchAgent => {
                     if self.cycleable_agents.len() > 1 {
-                        let prev = self.agent_name.clone();
-                        self.current_agent_index =
-                            (self.current_agent_index + 1) % self.cycleable_agents.len();
-                        self.agent_info = self.cycleable_agents[self.current_agent_index].clone();
-                        self.agent_name = self.agent_info.name.clone();
-                        self.status = format!("agent: {}", self.agent_name);
+                        let prev = self.session.agent_name.clone();
+                        self.session.current_agent_index =
+                            (self.session.current_agent_index + 1) % self.cycleable_agents.len();
+                        self.session.agent_info =
+                            self.cycleable_agents[self.session.current_agent_index].clone();
+                        self.session.agent_name = self.session.agent_info.name.clone();
+                        self.status = format!("agent: {}", self.session.agent_name);
                         self.push_log_no_agent(
                             LogLevel::Info,
                             format!(
                                 "Switched to: {} ({})",
-                                self.agent_name, self.agent_info.description
+                                self.session.agent_name, self.session.agent_info.description
                             ),
                         );
 
-                        if let Some(ref sid) = self.session_id {
+                        if let Some(ref sid) = self.session.session_id {
                             self.event_bus.publish(Event::AgentSwitched {
                                 session_id: sid.clone(),
                                 from: prev,
-                                to: self.agent_name.clone(),
+                                to: self.session.agent_name.clone(),
                             });
                         }
                     }
@@ -2048,8 +2065,8 @@ impl App {
                         if let Err(rejected) = self.enqueue_input(cmd, Vec::new()) {
                             // FR-004: the queue is at capacity. The submission is
                             // rejected, but the typed command must not be lost.
-                            self.input = rejected.text;
-                            self.input_cursor = self.input_len_chars();
+                            self.session.input = rejected.text;
+                            self.session.input_cursor = self.input_len_chars();
                         }
                     } else {
                         self.execute_slash_command(&cmd).await;
@@ -2065,16 +2082,16 @@ impl App {
                     self.halt_running_agent();
                 }
                 InputAction::ConfirmForceCleanup => {
-                    if self.pending_forcecleanup.is_some() {
+                    if self.session.pending_forcecleanup.is_some() {
                         // Clear pending modal state and invoke forcecleanup with confirm arg.
-                        self.pending_forcecleanup = None;
+                        self.session.pending_forcecleanup = None;
                         self.execute_slash_command("/team forcecleanup confirm")
                             .await;
                     }
                 }
                 InputAction::CancelForceCleanup => {
-                    if self.pending_forcecleanup.is_some() {
-                        self.pending_forcecleanup = None;
+                    if self.session.pending_forcecleanup.is_some() {
+                        self.session.pending_forcecleanup = None;
                         self.append_assistant_text(
                             "From: /team forcecleanup\nForce-cleanup cancelled.",
                         );
@@ -2086,14 +2103,14 @@ impl App {
                     }
                 }
                 InputAction::ConfirmRollback => {
-                    if let Some(offer) = self.pending_rollback.take() {
+                    if let Some(offer) = self.session.pending_rollback.take() {
                         // FR-020 / T-013: restore the workspace from the
                         // pre-loop capture. The processor drops the capture
                         // on success and keeps it on restore failure so a
                         // retry is possible.
                         let sid = offer.session_id.clone();
                         let processor = self.session_processor.clone();
-                        let results = self.rollback_result.clone();
+                        let results = self.session.rollback_result.clone();
                         self.status = "rolling back to pre-loop snapshot...".to_string();
                         self.push_log_no_agent(
                             LogLevel::Info,
@@ -2134,7 +2151,7 @@ impl App {
                     }
                 }
                 InputAction::CancelRollback => {
-                    if self.pending_rollback.take().is_some() {
+                    if self.session.pending_rollback.take().is_some() {
                         // FR-020 / T-013: declining keeps every change the
                         // loop made; the pending capture is dropped so no
                         // later rollback can resurrect it.
@@ -2154,14 +2171,14 @@ impl App {
                     }
                 }
                 InputAction::ConfirmStopAgent => {
-                    if self.pending_stop_confirm {
-                        self.pending_stop_confirm = false;
+                    if self.session.pending_stop_confirm {
+                        self.session.pending_stop_confirm = false;
                         self.halt_running_agent();
                     }
                 }
                 InputAction::CancelStopAgent => {
-                    if self.pending_stop_confirm {
-                        self.pending_stop_confirm = false;
+                    if self.session.pending_stop_confirm {
+                        self.session.pending_stop_confirm = false;
                         self.status = "stop cancelled - agent still running".to_string();
                     }
                 }
@@ -2256,16 +2273,16 @@ impl App {
                     }
                 }
                 InputAction::ApprovePlan => {
-                    if let Some(state) = self.plan_approval_pending.take() {
-                        if let Some(ref session_id) = self.session_id.clone() {
+                    if let Some(state) = self.session.plan_approval_pending.take() {
+                        if let Some(ref session_id) = self.session.session_id.clone() {
                             self.push_log_no_agent(LogLevel::Info, "plan approved".to_string());
                             self.execute_plan_restore(session_id, &state.plan_text);
                         }
                     }
                 }
                 InputAction::RejectPlan => {
-                    if let Some(state) = self.plan_approval_pending.take() {
-                        if let Some(ref session_id) = self.session_id.clone() {
+                    if let Some(state) = self.session.plan_approval_pending.take() {
+                        if let Some(ref session_id) = self.session.session_id.clone() {
                             self.push_log_no_agent(
                                 LogLevel::Info,
                                 "plan rejected - re-delegating".to_string(),
@@ -2282,7 +2299,7 @@ impl App {
                     }
                 }
                 InputAction::TogglePlanCursor => {
-                    if let Some(ref mut state) = self.plan_approval_pending {
+                    if let Some(ref mut state) = self.session.plan_approval_pending {
                         state.cursor_approve = !state.cursor_approve;
                     }
                 }
@@ -2296,9 +2313,9 @@ impl App {
                     self.insert_char_at_cursor('\n');
                 }
                 InputAction::ClearLine => {
-                    self.input.clear();
-                    self.input_cursor = 0;
-                    self.kb_select_anchor = None;
+                    self.session.input.clear();
+                    self.session.input_cursor = 0;
+                    self.session.kb_select_anchor = None;
                 }
             }
         }

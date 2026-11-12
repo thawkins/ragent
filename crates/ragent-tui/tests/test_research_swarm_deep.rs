@@ -825,7 +825,7 @@ fn decode_rejects_unknown_status_and_bad_json() {
 
 fn app_with_session(session: &str) -> ragent_tui::App {
     let mut app = support::make_app();
-    app.session_id = Some(session.to_string());
+    app.session.session_id = Some(session.to_string());
     app.needs_redraw = false;
     // Point the research store at a fresh tempdir so no run touches the repo.
     let dir = temp_dir("research-deep");
@@ -834,7 +834,8 @@ fn app_with_session(session: &str) -> ragent_tui::App {
 }
 
 fn joined_text(app: &ragent_tui::App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .flat_map(|m| m.parts.iter())
         .filter_map(|p| match p {
@@ -1062,7 +1063,7 @@ async fn swarm_status_reads_task_store_rows() {
 
     let mut app = app_with_session("s-lead");
     app.cwd_path = dir;
-    app.swarm_state = Some(swarm_state(
+    app.session.swarm_state = Some(swarm_state(
         team,
         vec![
             swarm_subtask("s1", &[]),
@@ -1074,7 +1075,7 @@ async fn swarm_status_reads_task_store_rows() {
     ));
     let mut member = TeamMember::new("swarm-s1", "tm-001", "general");
     member.status = MemberStatus::Working;
-    app.team_members.push(member);
+    app.session.team_members.push(member);
 
     app.execute_slash_command("/swarm status").await;
     let text = joined_text(&app);
@@ -1102,7 +1103,7 @@ async fn swarm_status_all_completed_prints_cleanup_hint() {
 
     let mut app = app_with_session("s-lead");
     app.cwd_path = dir;
-    app.swarm_state = Some(swarm_state(team, vec![swarm_subtask("s1", &[])], true));
+    app.session.swarm_state = Some(swarm_state(team, vec![swarm_subtask("s1", &[])], true));
 
     app.execute_slash_command("/swarm status").await;
     let text = joined_text(&app);
@@ -1116,7 +1117,7 @@ async fn swarm_status_empty_decomposition_has_zero_total() {
     let dir = temp_dir("swarm-empty");
     let mut app = app_with_session("s-lead");
     app.cwd_path = dir;
-    app.swarm_state = Some(swarm_state("swarm-empty-team", vec![], true));
+    app.session.swarm_state = Some(swarm_state("swarm-empty-team", vec![], true));
     app.execute_slash_command("/swarm status").await;
     let text = joined_text(&app);
     assert!(text.contains("0/0"), "got: {text}");
@@ -1126,14 +1127,18 @@ async fn swarm_status_empty_decomposition_has_zero_total() {
 #[tokio::test]
 async fn swarm_prompt_with_model_starts_decomposing() {
     let mut app = app_with_session("s-lead");
-    app.selected_model = Some("provider/model-x".to_string());
+    app.session.selected_model = Some("provider/model-x".to_string());
     app.execute_slash_command("/swarm build a thing").await;
     assert!(
         app.status.contains("decomposing goal"),
         "got: {}",
         app.status
     );
-    let state = app.swarm_state.as_ref().expect("swarm state recorded");
+    let state = app
+        .session
+        .swarm_state
+        .as_ref()
+        .expect("swarm state recorded");
     assert_eq!(state.prompt, "build a thing");
     assert!(!state.spawned);
     let text = joined_text(&app);
@@ -1143,10 +1148,14 @@ async fn swarm_prompt_with_model_starts_decomposing() {
 #[tokio::test]
 async fn swarm_prompt_with_agent_flag_records_default_agent() {
     let mut app = app_with_session("s-lead");
-    app.selected_model = Some("provider/model-x".to_string());
+    app.session.selected_model = Some("provider/model-x".to_string());
     app.execute_slash_command("/swarm --agent coder build a thing")
         .await;
-    let state = app.swarm_state.as_ref().expect("swarm state recorded");
+    let state = app
+        .session
+        .swarm_state
+        .as_ref()
+        .expect("swarm state recorded");
     assert_eq!(state.default_agent_type.as_deref(), Some("coder"));
     assert_eq!(state.prompt, "build a thing");
 }
@@ -1173,7 +1182,9 @@ fn deadline_default_is_bounded_by_idle_redraw() {
 #[test]
 fn deadline_permission_queue_wakes_within_a_second() {
     let mut app = support::make_app();
-    app.permission_queue.push_back(permission_request("perm-1"));
+    app.session
+        .permission_queue
+        .push_back(permission_request("perm-1"));
     let now = Instant::now();
     let deadline = ragent_tui::compute_next_deadline_test(&app, now);
     assert!(
@@ -1185,7 +1196,8 @@ fn deadline_permission_queue_wakes_within_a_second() {
 #[test]
 fn deadline_timed_question_wakes_within_a_second() {
     let mut app = support::make_app();
-    app.question_queue
+    app.session
+        .question_queue
         .push_back(ragent_tui::app::QuestionRequest {
             id: "q1".to_string(),
             session_id: "s1".to_string(),
@@ -1221,7 +1233,7 @@ fn deadline_active_web_phase_wakes_within_a_second() {
 fn deadline_status_and_banner_expiry_are_scheduled() {
     let mut app = support::make_app();
     app.status_set_at = Some(Instant::now());
-    app.run_cost_banner_at = Some(Instant::now());
+    app.session.run_cost_banner_at = Some(Instant::now());
     app.history_save_deadline = Some(Instant::now() + Duration::from_millis(500));
     let now = Instant::now();
     let deadline = ragent_tui::compute_next_deadline_test(&app, now);
@@ -1235,7 +1247,7 @@ fn deadline_status_and_banner_expiry_are_scheduled() {
 #[test]
 fn deadline_swarm_state_wakes_within_two_seconds() {
     let mut app = support::make_app();
-    app.swarm_state = Some(swarm_state("swarm-x", vec![], false));
+    app.session.swarm_state = Some(swarm_state("swarm-x", vec![], false));
     let now = Instant::now();
     let deadline = ragent_tui::compute_next_deadline_test(&app, now);
     assert!(
@@ -1250,9 +1262,10 @@ fn deadline_pending_stream_group_is_throttle_bounded() {
     // A *pending* message group is `message_cache_dirty_from < messages.len()`
     // (0 < 1), so the throttle-tail deadline must fire promptly rather than
     // waiting the full idle interval.
-    app.messages
+    app.session
+        .messages
         .push(ragent_agent::message::Message::user_text("s", "hi"));
-    app.message_cache_dirty_from = 0;
+    app.session.message_cache_dirty_from = 0;
     let now = Instant::now();
     let deadline = ragent_tui::compute_next_deadline_test(&app, now);
     assert!(
@@ -1277,7 +1290,9 @@ fn should_render_safety_wake_repaints_only_for_live_display() {
     let mut app = support::make_app();
     app.needs_redraw = false;
     // A live permission countdown makes the periodic safety wake paint.
-    app.permission_queue.push_back(permission_request("perm-2"));
+    app.session
+        .permission_queue
+        .push_back(permission_request("perm-2"));
     assert!(ragent_tui::should_render(&app, past_idle()));
 }
 
@@ -1287,9 +1302,10 @@ fn should_render_paints_a_pending_stream_group() {
     app.needs_redraw = false;
     // A pending cache group is `message_cache_dirty_from < messages.len()`
     // (0 < 1) and counts as visible content at the safety interval.
-    app.messages
+    app.session
+        .messages
         .push(ragent_agent::message::Message::user_text("s", "hi"));
-    app.message_cache_dirty_from = 0;
+    app.session.message_cache_dirty_from = 0;
     assert!(ragent_tui::should_render(&app, past_idle()));
 }
 

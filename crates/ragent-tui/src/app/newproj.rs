@@ -124,7 +124,7 @@ impl App {
     /// `From: /new` message when the worker finishes. No sub-agent and no
     /// LLM turn is involved.
     fn run_scaffold(&mut self, request: &ScaffoldRequest) {
-        let cwd = crate::app::helpers::current_working_dir();
+        let cwd = self.cwd_path.clone();
 
         // FR-002: refuse non-empty targets before any filesystem writes.
         if let Err(err) = enforce_empty_directory_guard(&cwd) {
@@ -284,13 +284,13 @@ impl App {
                 text.push_str(&stack_note);
                 // Start a fresh message: the progress panel message must
                 // not absorb the summary as a trailing text part.
-                self.force_new_message = true;
+                self.session.force_new_message = true;
                 self.append_assistant_text(&text);
                 self.status = "new: scaffolded".to_string();
                 self.push_log_no_agent(LogLevel::Info, "new: scaffold complete".to_owned());
             }
             Err(err) => {
-                self.force_new_message = true;
+                self.session.force_new_message = true;
                 self.append_assistant_text(&format!("From: /new\n\n[err] **{err}**"));
                 self.status = "new: emission failed".to_string();
                 self.push_log_no_agent(LogLevel::Warn, "new: scaffold failed".to_owned());
@@ -314,7 +314,7 @@ impl App {
         let Some(header_line) = self.newproj_progress_slug.clone() else {
             return;
         };
-        for (i, msg) in self.messages.iter_mut().enumerate() {
+        for (i, msg) in self.session.messages.iter_mut().enumerate() {
             if msg.role != ragent_agent::message::Role::Assistant {
                 continue;
             }
@@ -329,13 +329,15 @@ impl App {
         }
         // No panel message yet: create one (first drained batch). The raw
         // header is stored verbatim so the first-line lookup keeps matching.
-        if let Some(ref sid) = self.session_id {
-            self.force_new_message = false;
-            self.messages.push(ragent_agent::message::Message::new(
-                sid.clone(),
-                ragent_agent::message::Role::Assistant,
-                vec![ragent_agent::message::MessagePart::Text { text: rendered }],
-            ));
+        if let Some(ref sid) = self.session.session_id {
+            self.session.force_new_message = false;
+            self.session
+                .messages
+                .push(ragent_agent::message::Message::new(
+                    sid.clone(),
+                    ragent_agent::message::Role::Assistant,
+                    vec![ragent_agent::message::MessagePart::Text { text: rendered }],
+                ));
             self.trim_messages_if_needed();
         }
     }

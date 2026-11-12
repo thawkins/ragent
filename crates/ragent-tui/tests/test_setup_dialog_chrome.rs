@@ -238,7 +238,10 @@ async fn test_thinking_selector_selection_still_persists_a_level() {
     });
     ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.selected_thinking_level, Some(ThinkingLevel::Low));
+    assert_eq!(
+        app.session.selected_thinking_level,
+        Some(ThinkingLevel::Low)
+    );
     assert!(matches!(
         app.provider_setup,
         Some(ProviderSetupStep::Done { .. })
@@ -361,7 +364,7 @@ fn test_enter_key_dialog_names_the_provider_in_the_frame_title() {
 #[test]
 fn test_select_agent_and_azure_list_keep_their_markers() {
     let mut app = support::make_app();
-    app.current_agent_index = 1;
+    app.session.current_agent_index = 1;
     app.provider_setup = Some(ProviderSetupStep::SelectAgent {
         agents: vec![
             ("general".to_string(), "General helper".to_string(), false),

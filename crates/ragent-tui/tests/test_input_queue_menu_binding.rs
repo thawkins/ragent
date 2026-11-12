@@ -35,24 +35,24 @@ async fn test_alt_q_returns_open_queue_menu() {
 #[tokio::test]
 async fn test_alt_q_opens_menu_without_mutating_input() {
     let mut app = support::make_app();
-    app.input = "MENU-OPEN-PROBE".to_string();
-    app.input_cursor = app.input_len_chars();
-    app.pending_attachments = vec![std::path::PathBuf::from("/tmp/probe.png")];
+    app.session.input = "MENU-OPEN-PROBE".to_string();
+    app.session.input_cursor = app.input_len_chars();
+    app.session.pending_attachments = vec![std::path::PathBuf::from("/tmp/probe.png")];
 
     app.handle_key_event(alt(KeyCode::Char('q'))).await;
 
     assert!(app.queue_menu_open, "FR-021: the menu must be marked open");
     assert_eq!(
-        app.input, "MENU-OPEN-PROBE",
+        app.session.input, "MENU-OPEN-PROBE",
         "FR-022/FR-031: opening the menu must not touch the input buffer"
     );
     assert_eq!(
-        app.input_cursor,
+        app.session.input_cursor,
         app.input_len_chars(),
         "FR-022: the cursor must not move"
     );
     assert_eq!(
-        app.pending_attachments,
+        app.session.pending_attachments,
         vec![std::path::PathBuf::from("/tmp/probe.png")],
         "FR-022: staged attachments must be preserved"
     );
@@ -66,7 +66,7 @@ async fn test_alt_q_opens_menu_without_mutating_input() {
 #[tokio::test]
 async fn test_alt_q_opens_menu_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     app.handle_key_event(alt(KeyCode::Char('q'))).await;
 
@@ -75,10 +75,13 @@ async fn test_alt_q_opens_menu_while_processing() {
         "FR-021: ALT-Q opens the menu while a turn is executing"
     );
     assert!(
-        !app.pending_stop_confirm,
+        !app.session.pending_stop_confirm,
         "FR-022: opening the menu must not arm the stop-confirmation dialog"
     );
-    assert!(app.is_processing, "FR-022: the running turn is untouched");
+    assert!(
+        app.session.is_processing,
+        "FR-022: the running turn is untouched"
+    );
 }
 
 #[tokio::test]
@@ -88,7 +91,7 @@ async fn test_alt_q_does_not_insert_q_into_input() {
     app.handle_key_event(alt(KeyCode::Char('q'))).await;
 
     assert!(
-        app.input.is_empty(),
+        app.session.input.is_empty(),
         "FR-022: ALT-Q must not leak the 'q' into the input buffer"
     );
 }
@@ -122,9 +125,9 @@ async fn test_alt_q_sets_redraw_flag() {
 #[tokio::test]
 async fn test_alt_q_does_not_dispatch_or_enqueue_a_message() {
     let mut app = support::make_app();
-    app.is_processing = true;
-    app.input = "typed but not sent".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.is_processing = true;
+    app.session.input = "typed but not sent".to_string();
+    app.session.input_cursor = app.input_len_chars();
 
     app.handle_key_event(alt(KeyCode::Char('q'))).await;
 
@@ -134,7 +137,7 @@ async fn test_alt_q_does_not_dispatch_or_enqueue_a_message() {
         "FR-022: ALT-Q must not enqueue the in-progress message"
     );
     assert!(
-        app.messages.is_empty(),
+        app.session.messages.is_empty(),
         "FR-022: ALT-Q must not dispatch a turn"
     );
 }
@@ -146,7 +149,7 @@ async fn test_plain_q_still_types_into_input() {
     app.handle_key_event(key(KeyCode::Char('q'))).await;
 
     assert_eq!(
-        app.input, "q",
+        app.session.input, "q",
         "NFR-009: without ALT, 'q' must still type a normal character"
     );
     assert!(

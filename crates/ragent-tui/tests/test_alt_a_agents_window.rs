@@ -62,8 +62,8 @@ fn running_task(id: &str) -> TaskEntry {
 /// An app with an explicit redraw baseline of "clean".
 fn app() -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.needs_redraw = false;
     app
 }
@@ -189,7 +189,7 @@ async fn alt_a_closes_an_open_window_even_when_its_subject_vanished() {
 #[tokio::test]
 async fn alt_a_opening_the_agents_window_closes_the_teams_window() {
     let mut app = app_with_task();
-    app.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
+    app.session.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
     render(&mut app);
     app.show_teams_window = true;
 
@@ -208,17 +208,17 @@ async fn alt_a_opening_the_agents_window_closes_the_teams_window() {
 #[tokio::test]
 async fn alt_a_does_not_insert_a_into_the_input() {
     let mut app = app_with_task();
-    app.input = "PROBE".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = "PROBE".to_string();
+    app.session.input_cursor = app.input_len_chars();
 
     app.handle_key_event(alt_a()).await;
 
     assert_eq!(
-        app.input, "PROBE",
+        app.session.input, "PROBE",
         "NFR-002: Alt+A must not leak the 'a' into the input buffer"
     );
     assert_eq!(
-        app.input_cursor,
+        app.session.input_cursor,
         app.input_len_chars(),
         "the cursor must not move"
     );
@@ -227,7 +227,7 @@ async fn alt_a_does_not_insert_a_into_the_input() {
 #[tokio::test]
 async fn alt_a_leaves_a_running_turn_untouched() {
     let mut app = app_with_task();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     app.handle_key_event(alt_a()).await;
 
@@ -236,10 +236,10 @@ async fn alt_a_leaves_a_running_turn_untouched() {
         "FR-022: the panel is reachable while a turn executes"
     );
     assert!(
-        !app.pending_stop_confirm,
+        !app.session.pending_stop_confirm,
         "Alt+A must not arm the stop-confirmation dialog"
     );
-    assert!(app.is_processing, "the running turn is untouched");
+    assert!(app.session.is_processing, "the running turn is untouched");
 }
 
 #[tokio::test]
@@ -249,7 +249,7 @@ async fn plain_a_still_types_a_character() {
     app.handle_key_event(plain_a()).await;
 
     assert_eq!(
-        app.input, "a",
+        app.session.input, "a",
         "NFR-009: without ALT the 'a' must still type a normal character"
     );
     assert!(

@@ -92,7 +92,7 @@ fn enter_empty_project() -> (MutexGuard<'static, ()>, LaunchEnv, tempfile::TempD
 /// compiled defaults, so no launch can reach the live network (FR-037, NFR-003).
 fn app_with_fixture_seam() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.set_plugin_store_fetcher(Arc::new(
         FixtureStoreFetcher::new().with_default_endpoints(),
     ));
@@ -101,12 +101,13 @@ fn app_with_fixture_seam() -> App {
 
 /// The number of assistant messages on `app`.
 fn assistant_count(app: &App) -> usize {
-    app.messages.len()
+    app.session.messages.len()
 }
 
 /// The rendered text of the most recent assistant message.
 fn last_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .expect("an assistant message must have been appended")
         .text_content()

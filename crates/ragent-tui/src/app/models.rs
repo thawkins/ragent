@@ -292,8 +292,8 @@ impl App {
             self.history_save_deadline =
                 Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
         }
-        self.history_index = None;
-        self.history_draft.clear();
+        self.session.history_index = None;
+        self.session.history_draft.clear();
     }
 
     /// Trim `input_history` to [`crate::app::state::INPUT_HISTORY_MAX`] entries,
@@ -310,7 +310,7 @@ impl App {
     }
 
     pub(crate) fn selected_model_context_window(&self) -> Option<usize> {
-        let model = self.selected_model.as_deref()?;
+        let model = self.session.selected_model.as_deref()?;
         let (provider_id, model_id) = model.split_once('/')?;
         // Try the static registry first (works for providers with hardcoded default_models).
         self.provider_registry
@@ -319,7 +319,7 @@ impl App {
             .filter(|w| *w > 0)
             // Fall back to the cached context window stored during model selection
             // (required for dynamically discovered models like ollama/ollama_cloud).
-            .or(self.selected_model_ctx_window.filter(|w| *w > 0))
+            .or(self.session.selected_model_ctx_window.filter(|w| *w > 0))
     }
 
     pub(crate) fn parse_thinking_level_setting(value: &str) -> Option<ThinkingLevel> {
@@ -428,7 +428,8 @@ impl App {
     }
 
     pub(crate) fn explicit_selected_thinking_config(&self) -> Option<ThinkingConfig> {
-        self.selected_thinking_level
+        self.session
+            .selected_thinking_level
             .map(Self::thinking_config_for_level)
     }
 
@@ -468,10 +469,10 @@ impl App {
     }
 
     pub(crate) fn persist_selected_thinking_level(&mut self, level: ThinkingLevel) {
-        self.selected_thinking_level = Some(level);
+        self.session.selected_thinking_level = Some(level);
         // C-006: the status-bar label includes the thinking level, so the
         // cached label is stale once the level changes.
-        self.cached_provider_model_label = None;
+        self.session.cached_provider_model_label = None;
         let _ = self // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
             .storage
             .set_setting("thinking_level", Self::thinking_level_setting_value(level));
@@ -480,7 +481,7 @@ impl App {
 
     pub(crate) fn apply_selected_model_and_thinking(&self, agent: &mut AgentInfo) {
         if (!agent.model_pinned || agent.model.is_none())
-            && let Some(ref model_str) = self.selected_model
+            && let Some(ref model_str) = self.session.selected_model
             && let Some((provider, model)) = model_str.split_once('/')
         {
             agent.model = Some(ModelRef {
@@ -504,7 +505,7 @@ impl App {
     }
 
     pub(crate) fn active_model_entry(&self) -> Option<ModelPickerEntry> {
-        let model_ref = self.selected_model.as_deref()?;
+        let model_ref = self.session.selected_model.as_deref()?;
         let (provider_id, model_id) = model_ref.split_once('/')?;
         self.resolved_model_entries_for_provider(provider_id)
             .into_iter()
@@ -553,8 +554,8 @@ impl App {
         );
         // Persist the chosen model per-provider so it can be restored later (FR-003).
         persist(&format!("provider_{}_last_model", provider_id), &entry.id);
-        self.selected_model = Some(model_value);
-        self.selected_model_ctx_window = Some(entry.context_window);
+        self.session.selected_model = Some(model_value);
+        self.session.selected_model_ctx_window = Some(entry.context_window);
         self.persist_selected_thinking_level(thinking_level);
         self.configured_provider = Some(ConfiguredProvider {
             id: provider_id,
@@ -562,7 +563,7 @@ impl App {
             source: ProviderSource::Database,
         });
         // C-006: invalidate the cached status-bar model label.
-        self.cached_provider_model_label = None;
+        self.session.cached_provider_model_label = None;
         entry.name.clone()
     }
 
@@ -600,8 +601,8 @@ impl App {
             );
             // Re-persist with the correct casing from the current model list.
             let _ = self.storage.set_setting(&last_model_key, &entry.id); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
-            self.selected_model = Some(model_value);
-            self.selected_model_ctx_window = Some(entry.context_window);
+            self.session.selected_model = Some(model_value);
+            self.session.selected_model_ctx_window = Some(entry.context_window);
             let default_level = Self::default_thinking_level_for_entry(entry);
             self.persist_selected_thinking_level(default_level);
             self.configured_provider = Some(ConfiguredProvider {
@@ -610,7 +611,7 @@ impl App {
                 source: ProviderSource::Database,
             });
             // C-006: invalidate the cached status-bar model label.
-            self.cached_provider_model_label = None;
+            self.session.cached_provider_model_label = None;
             return Some(entry.clone());
         }
 
@@ -630,14 +631,14 @@ impl App {
     /// is refreshed later when the user opens the model picker or sends a
     /// message and the async discovery path populates the cache.
     pub fn backfill_model_ctx_window(&mut self) {
-        let model = match self.selected_model.as_deref() {
+        let model = match self.session.selected_model.as_deref() {
             Some(m) => m.to_string(),
             None => return,
         };
         let Some((provider_id, model_id)) = model.split_once('/') else {
             return;
         };
-        let previous_context_window = self.selected_model_ctx_window;
+        let previous_context_window = self.session.selected_model_ctx_window;
 
         // Use only cached/default metadata - never block on network discovery.
         let cached = self.cached_model_entries(provider_id);
@@ -652,7 +653,7 @@ impl App {
         };
         if let Some(entry) = models.iter().find(|e| e.id == model_id) {
             if entry.context_window > 0 && previous_context_window != Some(entry.context_window) {
-                self.selected_model_ctx_window = Some(entry.context_window);
+                self.session.selected_model_ctx_window = Some(entry.context_window);
                 let _ = self.storage.set_setting(
                     // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
                     "selected_model_ctx_window",
@@ -910,7 +911,7 @@ impl App {
         self.configured_provider = Self::detect_provider(&self.storage);
         // C-006: the cached status-bar model label is stale once the provider
         // or model changes; clear it so the next render recomputes it.
-        self.cached_provider_model_label = None;
+        self.session.cached_provider_model_label = None;
     }
 
     /// Make the Model Router the active provider/model selection.
@@ -923,16 +924,16 @@ impl App {
         let _ = self.storage.set_setting("preferred_provider", "router"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
         let _ = self.storage.delete_setting("selected_thinking_level"); // INTENTIONAL: best-effort persistence; the in-memory state is authoritative
 
-        self.selected_model = Some(model_value);
-        self.selected_model_ctx_window = None;
-        self.selected_thinking_level = None;
+        self.session.selected_model = Some(model_value);
+        self.session.selected_model_ctx_window = None;
+        self.session.selected_thinking_level = None;
         self.configured_provider = Some(ConfiguredProvider {
             id: "router".to_string(),
             name: "Model Router".to_string(),
             source: ProviderSource::Database,
         });
         // C-006: invalidate the cached status-bar model label.
-        self.cached_provider_model_label = None;
+        self.session.cached_provider_model_label = None;
     }
 
     /// Restore router state when the persisted active model is the router.
@@ -943,6 +944,7 @@ impl App {
     /// state from the saved `provider.router` configuration (FR-049).
     pub fn restore_router_state(&mut self) {
         let is_router = self
+            .session
             .selected_model
             .as_deref()
             .map(|s| s == "router/router")
@@ -1083,14 +1085,14 @@ impl App {
         {
             return;
         }
-        let Some(lead_session_id) = self.session_id.clone() else {
+        let Some(lead_session_id) = self.session.session_id.clone() else {
             return;
         };
 
         let team_dir = if let Some(dir) = known_team_dir {
             dir
         } else {
-            let working_dir = std::env::current_dir().unwrap_or_default();
+            let working_dir = self.cwd_path.clone();
             match TeamStore::load_by_name(team_name, &working_dir) {
                 Ok(store) => store.dir,
                 Err(e) => {
@@ -1105,7 +1107,7 @@ impl App {
 
         // Parse the currently selected model so teammates inherit it in the reconcile loop.
         let active_model: Option<ragent_agent::agent::ModelRef> =
-            self.selected_model.as_deref().and_then(|s| {
+            self.session.selected_model.as_deref().and_then(|s| {
                 s.split_once('/')
                     .map(|(pid, mid)| ragent_agent::agent::ModelRef {
                         provider_id: pid.to_string(),
@@ -1290,7 +1292,7 @@ impl App {
         &self,
         provider_id: &str,
     ) -> Vec<ModelPickerEntry> {
-        let Some(model_ref) = self.selected_model.as_deref() else {
+        let Some(model_ref) = self.session.selected_model.as_deref() else {
             return Vec::new();
         };
         let Some((selected_provider, model_id)) = model_ref.split_once('/') else {
@@ -1303,7 +1305,7 @@ impl App {
             provider_id: provider_id.to_string(),
             id: model_id.to_string(),
             name: model_id.to_string(),
-            context_window: self.selected_model_ctx_window.unwrap_or(0),
+            context_window: self.session.selected_model_ctx_window.unwrap_or(0),
             max_output: None,
             cost_input: 0.0,
             cost_output: 0.0,
@@ -1447,7 +1449,8 @@ impl App {
     /// label falls back to that provider so the displayed name matches the
     /// provider actually handling the request.
     pub fn provider_model_label(&self) -> Option<String> {
-        self.cached_provider_model_label
+        self.session
+            .cached_provider_model_label
             .clone()
             .or_else(|| self.compute_provider_model_label())
     }
@@ -1455,7 +1458,7 @@ impl App {
     /// Populate the cached status-bar model label (C-006). Called from the
     /// render path where `&mut self` is available.
     pub(crate) fn update_cached_provider_model_label(&mut self, label: Option<String>) {
-        self.cached_provider_model_label = label;
+        self.session.cached_provider_model_label = label;
     }
 
     pub(crate) fn compute_provider_model_label(&self) -> Option<String> {
@@ -1465,7 +1468,10 @@ impl App {
             .unwrap_or((&model_ref, &model_ref));
 
         if provider_id == "router" {
-            let label = match (&self.router_current_model, &self.router_current_tier) {
+            let label = match (
+                &self.session.router_current_model,
+                &self.session.router_current_tier,
+            ) {
                 (Some(model), Some(tier)) => {
                     format!("Model Router ({}) / {}", model, tier)
                 }
@@ -1489,8 +1495,9 @@ impl App {
     }
 
     pub(crate) fn active_model_ref_string(&self) -> Option<String> {
-        self.selected_model.clone().or_else(|| {
-            self.agent_info
+        self.session.selected_model.clone().or_else(|| {
+            self.session
+                .agent_info
                 .model
                 .as_ref()
                 .map(|model| format!("{}/{}", model.provider_id, model.model_id))
@@ -1540,7 +1547,7 @@ impl App {
             ));
             report.push_str(&format!(
                 "\n## Thinking\n\n- **Current level:** {}\n- **Supported levels:** {}\n",
-                self.effective_thinking_level_for_agent(&self.agent_info)
+                self.effective_thinking_level_for_agent(&self.session.agent_info)
                     .map(Self::thinking_level_display)
                     .unwrap_or("unknown"),
                 Self::format_thinking_levels(&entry.thinking_levels),
@@ -1714,12 +1721,11 @@ impl App {
     ) -> Result<(), String> {
         use std::collections::HashMap;
 
-        let config_path = self.config_paths.first().cloned().unwrap_or_else(|| {
-            std::env::current_dir()
-                .unwrap_or_default()
-                .join(".ragent")
-                .join("ragent.json")
-        });
+        let config_path = self
+            .config_paths
+            .first()
+            .cloned()
+            .unwrap_or_else(|| self.cwd_path.clone().join(".ragent").join("ragent.json"));
 
         // Seed the saved config from any existing router block so we preserve
         // weights, boundaries, and other manually-edited fields.
@@ -1900,7 +1906,7 @@ impl App {
     /// and estimated USD cost) grouped by provider. Returns `None` when no
     /// requests have been recorded.
     pub(crate) fn cost_summary(&self) -> Option<String> {
-        if self.llm_request_stats.is_empty() {
+        if self.session.llm_request_stats.is_empty() {
             return None;
         }
 
@@ -1918,7 +1924,7 @@ impl App {
         let mut by_provider: std::collections::HashMap<String, ProviderCost> =
             std::collections::HashMap::new();
 
-        for sample in &self.llm_request_stats {
+        for sample in &self.session.llm_request_stats {
             let (provider_id, model_id) = sample
                 .model_ref
                 .split_once('/')
@@ -1943,6 +1949,7 @@ impl App {
         }
 
         let session_duration = self
+            .session
             .session_id
             .as_deref()
             .and_then(|sid| {
@@ -1960,7 +1967,10 @@ impl App {
         providers.sort_by(|a, b| a.0.cmp(&b.0));
 
         let mut out = String::from("From: /cost\n");
-        out.push_str(&format!("Samples: {}\n", self.llm_request_stats.len()));
+        out.push_str(&format!(
+            "Samples: {}\n",
+            self.session.llm_request_stats.len()
+        ));
         out.push_str(&format!("Session duration: {}\n", session_duration));
         out.push_str(&format!(
             "Total tokens: {} input / {} output\n",
@@ -1995,12 +2005,12 @@ impl App {
         let provider = match &self.configured_provider {
             Some(p) => p.clone(),
             None => {
-                self.provider_health.store(0, Ordering::Relaxed);
+                self.session.provider_health.store(0, Ordering::Relaxed);
                 return;
             }
         };
-        self.provider_health.store(0, Ordering::Relaxed);
-        let health = self.provider_health.clone();
+        self.session.provider_health.store(0, Ordering::Relaxed);
+        let health = self.session.provider_health.clone();
         let storage = self.storage.clone();
 
         tokio::spawn(async move {
@@ -2060,7 +2070,7 @@ impl App {
     /// Return the last known provider health state, or `None` if no check
     /// has completed yet.
     pub(crate) fn provider_health_status(&self) -> Option<bool> {
-        match self.provider_health.load(Ordering::Relaxed) {
+        match self.session.provider_health.load(Ordering::Relaxed) {
             1 => Some(true),
             2 => Some(false),
             _ => None,
@@ -2165,7 +2175,7 @@ impl App {
         dir_rel: &std::path::Path,
         filter: Option<&str>,
     ) {
-        let wd = std::env::current_dir().unwrap_or_default();
+        let wd = self.cwd_path.clone();
         let abs = wd.join(dir_rel);
         let mut entries: Vec<FileMenuEntry> = Vec::new();
         let filter_lower = filter
@@ -2255,21 +2265,21 @@ impl App {
     /// Shared by `/autopilot on` and the `Alt+O` toggle so both paths start the
     /// same state machine. Passing `None` for a limit leaves that limit disabled.
     pub(crate) fn start_autopilot(&mut self, token_budget: Option<u64>, time_secs: Option<u64>) {
-        self.autopilot_enabled = true;
-        self.autopilot_token_budget = token_budget;
-        self.autopilot_time_limit_secs = time_secs;
-        self.autopilot_started_at = Some(std::time::Instant::now());
+        self.session.autopilot_enabled = true;
+        self.session.autopilot_token_budget = token_budget;
+        self.session.autopilot_time_limit_secs = time_secs;
+        self.session.autopilot_started_at = Some(std::time::Instant::now());
     }
 
     /// Disable autopilot mode and clear every limit and any pending continuation.
     ///
     /// Shared by `/autopilot off` and the `Alt+O` toggle.
     pub(crate) fn stop_autopilot(&mut self) {
-        self.autopilot_enabled = false;
-        self.autopilot_token_budget = None;
-        self.autopilot_time_limit_secs = None;
-        self.autopilot_started_at = None;
-        self.autopilot_pending_continue = None;
+        self.session.autopilot_enabled = false;
+        self.session.autopilot_token_budget = None;
+        self.session.autopilot_time_limit_secs = None;
+        self.session.autopilot_started_at = None;
+        self.session.autopilot_pending_continue = None;
     }
 
     pub(crate) fn set_profile_panel_enabled(&mut self, enabled: bool) {

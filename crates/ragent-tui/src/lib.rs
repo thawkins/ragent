@@ -20,6 +20,7 @@ pub mod logo;
 pub mod panels;
 pub mod research_adapter;
 pub mod research_progress;
+pub mod sessions_sidebar;
 pub mod teammate_strip;
 pub mod theme;
 pub mod tips;
@@ -205,6 +206,18 @@ pub fn should_teardown_terminal(
     !contained && panicking == ui_thread
 }
 
+/// Which session the TUI focuses at startup (spec MULTISESSION FR-13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupSession {
+    /// Reopen the sessions that were open at the last exit; start a fresh
+    /// session when none can be reopened. The default for `ragent`.
+    Restore,
+    /// Always start a fresh session (`ragent --new`).
+    New,
+    /// Resume this stored session (`ragent session resume <id>`).
+    Resume(String),
+}
+
 /// Run the TUI application.
 ///
 /// Enters the alternate screen, creates an [`App`], and runs the main event
@@ -214,8 +227,10 @@ pub fn should_teardown_terminal(
 /// and routes them into the on-screen log panel so they never corrupt the
 /// alternate-screen rendering.
 ///
-/// If `resume_session_id` is provided, the TUI loads the existing session
-/// and its message history before entering the event loop.
+/// `startup_session` picks the first focused session: an existing session to
+/// resume, a fresh one, or (the default) the sessions that were open when the
+/// TUI last exited, falling back to a fresh session when none can be reopened
+/// (spec MULTISESSION FR-13).
 ///
 /// # Errors
 ///
@@ -240,7 +255,8 @@ pub fn should_teardown_terminal(
 /// let agent = AgentInfo::new("general", "General-purpose agent");
 /// let (tx, rx) = ragent_tui::tracing_layer::tui_log_channel(512);
 /// ragent_tui::run_tui(
-///     bus, storage, registry, processor, agent, false, None, rx,
+///     bus, storage, registry, processor, agent, false,
+///     ragent_tui::StartupSession::Restore, rx,
 ///     std::path::PathBuf::new(),
 ///     vec![],
 ///     StartupTimings::new(),
@@ -256,7 +272,7 @@ pub async fn run_tui(
     session_processor: Arc<SessionProcessor>,
     agent: AgentInfo,
     show_log: bool,
-    resume_session_id: Option<String>,
+    startup_session: StartupSession,
     log_rx: TuiLogReceiver,
     db_path: std::path::PathBuf,
     config_paths: Vec<std::path::PathBuf>,
@@ -381,7 +397,7 @@ pub async fn run_tui(
 
     // -- Render the very first frame so the user sees the TUI immediately --
     app.status = "starting up...".to_string();
-    app.force_new_message = true;
+    app.session.force_new_message = true;
     app.append_assistant_text("[spin] **Starting up...**");
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
@@ -449,16 +465,23 @@ pub async fn run_tui(
     // re-runs this adoption until the client appears.
     app.adopt_mcp_client_state(&session_processor).await;
 
-    // -- Auto-initialize a session at startup if not resuming --
+    // -- Pick the first focused session (MULTISESSION FR-13) --
     let t0 = Instant::now();
-    if resume_session_id.is_none() {
+    let resume_session_id = match &startup_session {
+        StartupSession::Resume(id) => Some(id.clone()),
+        StartupSession::Restore | StartupSession::New => None,
+    };
+    let restored =
+        matches!(startup_session, StartupSession::Restore) && app.restore_open_sessions() > 0;
+    // -- Auto-initialize a session at startup if not resuming or restoring --
+    if resume_session_id.is_none() && !restored {
         let dir = std::env::current_dir().unwrap_or_default();
         let t_db = Instant::now();
         match app.session_processor.session_manager.create_session(dir) {
             Ok(session) => {
                 startup.record("Session create (DB)", t_db.elapsed());
                 let session_id = session.id.clone();
-                app.session_id = Some(session_id.clone());
+                app.session.session_id = Some(session_id.clone());
                 app.register_primary_session_mapping();
 
                 let t_render = Instant::now();
@@ -722,6 +745,8 @@ pub async fn run_tui(
             tracing::error!(error = %e, session_id = %sid, "Failed to resume session");
         }
     }
+    // Record the startup session set so the next launch can restore it.
+    app.persist_open_sessions();
 
     // -- Backfill context window cache for models selected before this feature --
     app.backfill_model_ctx_window();
@@ -733,7 +758,7 @@ pub async fn run_tui(
     app.append_assistant_text("\n[ok] **Ready**\n");
     app.status = "ready".to_string();
     app.status_set_at = None; // Ensure the first response starts a new message bubble
-    app.force_new_message = true;
+    app.session.force_new_message = true;
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
     // Record code-index background startup time when it arrives (stored for
@@ -816,7 +841,7 @@ pub async fn run_tui(
     while app.is_running {
         // Only one autopilot continuation may be dispatched per event-loop
         // wake. Reset the guard at the top of each iteration.
-        app.autopilot_continued_this_wake = false;
+        app.session.autopilot_continued_this_wake = false;
 
         // Drain ALL pending events before rendering so the screen
         // always reflects the latest state.
@@ -1004,6 +1029,10 @@ pub async fn run_tui(
             // Fire any pending autopilot continuation.
             app.poll_autopilot_continue();
 
+            // Run the same session-scoped polls for background sessions so
+            // their results land while they are not focused (MULTISESSION M3).
+            app.poll_background_sessions().await;
+
             // Refresh cached stats on their throttled intervals.
             app.refresh_code_index_stats();
             app.refresh_memory_stats();
@@ -1146,7 +1175,7 @@ pub async fn run_tui(
     }
 
     // -- Signal cancellation to abort any active LLM streams --
-    if let Some(ref flag) = app.cancel_flag {
+    if let Some(ref flag) = app.session.cancel_flag {
         flag.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
@@ -1179,6 +1208,8 @@ pub async fn run_tui(
     if let Some(session) = app.code_index_watch_session.take() {
         drop(session);
     }
+    // ...and the parked indexes of other open projects (MULTISESSION M8).
+    app.stop_project_services();
 
     // Detach the fallback reindex thread instead of joining it: the thread
     // now observes the cancel flag (set above via index.request_stop()), and
@@ -1198,13 +1229,14 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
     let mut deadline = now + Duration::from_mins(1);
 
     // Permission countdown updates every second.
-    if !app.permission_queue.is_empty() {
+    if !app.session.permission_queue.is_empty() {
         deadline = deadline.min(now + Duration::from_secs(1));
     }
 
     // A timed question dialog counts down and auto-answers on expiry, so wake
     // every second until it is answered.
     if app
+        .session
         .question_queue
         .front()
         .is_some_and(|q| q.expire_at_ms.is_some())
@@ -1214,7 +1246,7 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
 
     // Autopilot countdown on the status bar ticks every second while a
     // wall-clock limit is armed.
-    if app.autopilot_enabled && app.autopilot_time_limit_secs.is_some() {
+    if app.session.autopilot_enabled && app.session.autopilot_time_limit_secs.is_some() {
         deadline = deadline.min(now + Duration::from_secs(1));
     }
 
@@ -1245,7 +1277,7 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
     }
 
     // Run-cost banner auto-dismiss.
-    if let Some(shown_at) = app.run_cost_banner_at {
+    if let Some(shown_at) = app.session.run_cost_banner_at {
         deadline =
             deadline.min(shown_at + Duration::from_secs(crate::app::RUN_COST_BANNER_EXPIRY_SECS));
     }
@@ -1260,7 +1292,7 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
     if app.code_index.is_some() && !app.code_index_busy {
         deadline = deadline.min(now + Duration::from_secs(5));
     }
-    if app.swarm_state.is_some() {
+    if app.session.swarm_state.is_some() {
         deadline = deadline.min(now + Duration::from_secs(2));
     }
 
@@ -1278,8 +1310,9 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
     // PERF-042: a streamed message group waiting out its throttle window must
     // be re-rendered at the end of that window, otherwise its tail could stay
     // stale until the next unrelated wake.
-    if app.message_cache_dirty_from < app.messages.len() {
+    if app.session.message_cache_dirty_from < app.session.messages.len() {
         let ready_at = app
+            .session
             .message_stream_throttle_at
             .map(|t| t + crate::layout::MESSAGE_STREAM_MIN_INTERVAL)
             .unwrap_or(now);
@@ -1321,5 +1354,6 @@ pub fn compute_next_deadline_test(app: &App, last_draw: std::time::Instant) -> s
 pub fn should_render(app: &App, last_draw: std::time::Instant) -> bool {
     app.needs_redraw
         || (last_draw.elapsed() >= Duration::from_millis(IDLE_REDRAW_INTERVAL_MS)
-            && (app.needs_periodic_redraw() || app.message_cache_dirty_from < app.messages.len()))
+            && (app.needs_periodic_redraw()
+                || app.session.message_cache_dirty_from < app.session.messages.len()))
 }

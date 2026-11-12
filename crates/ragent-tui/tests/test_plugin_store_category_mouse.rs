@@ -295,7 +295,7 @@ async fn wheel_over_the_result_column_moves_the_result_cursor_not_the_navigator(
 #[tokio::test]
 async fn mouse_paths_never_install_or_start_a_text_selection() {
     let mut app = open();
-    app.input = "draft".to_string();
+    app.session.input = "draft".to_string();
     render(&mut app, 100, 30);
     let nav = app.plugin_store_nav_area;
     let result = app.plugin_store_result_area;
@@ -312,7 +312,7 @@ async fn mouse_paths_never_install_or_start_a_text_selection() {
         app.text_selection.is_none(),
         "the panel swallows the click instead of starting a selection"
     );
-    assert_eq!(app.input, "draft", "the message draft is untouched");
+    assert_eq!(app.session.input, "draft", "the message draft is untouched");
 }
 
 #[tokio::test]

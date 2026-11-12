@@ -32,9 +32,9 @@ fn send(team_dir: &std::path::Path, from: &str, to: &str, body: &str) {
 /// name, so the store has to live where the refresh looks for it).
 fn app_for_team(store: &TeamStore, lead_agent_name: &str) -> App {
     let mut app = support::make_app();
-    app.session_id = Some("sess-1".to_string());
-    app.active_team = Some(store.config.clone());
-    app.agent_name = lead_agent_name.to_string();
+    app.session.session_id = Some("sess-1".to_string());
+    app.session.active_team = Some(store.config.clone());
+    app.session.agent_name = lead_agent_name.to_string();
     app
 }
 
@@ -83,14 +83,20 @@ fn mailbox_traffic_is_counted_for_sender_and_recipient() {
 
     // tm-001 sent two messages to the lead and received one from tm-002.
     assert_eq!(
-        app.team_message_counts.get("tm-001").copied(),
+        app.session.team_message_counts.get("tm-001").copied(),
         Some((2, 1)),
         "tm-001 must show its two sends and one receive"
     );
     // tm-002 sent one message.
-    assert_eq!(app.team_message_counts.get("tm-002").copied(), Some((1, 0)));
+    assert_eq!(
+        app.session.team_message_counts.get("tm-002").copied(),
+        Some((1, 0))
+    );
     // The lead received both of tm-001's messages and sent none.
-    assert_eq!(app.team_message_counts.get("lead").copied(), Some((0, 2)));
+    assert_eq!(
+        app.session.team_message_counts.get("lead").copied(),
+        Some((0, 2))
+    );
 }
 
 #[test]
@@ -119,9 +125,9 @@ fn control_messages_do_not_move_the_counters() {
     app.refresh_team_member_session_ids();
 
     assert!(
-        app.team_message_counts.is_empty(),
+        app.session.team_message_counts.is_empty(),
         "control traffic is not a message the panel counts: {:?}",
-        app.team_message_counts
+        app.session.team_message_counts
     );
 }
 
@@ -134,9 +140,9 @@ fn empty_mailboxes_leave_the_counters_at_zero() {
     app.refresh_team_member_session_ids();
 
     assert!(
-        app.team_message_counts.is_empty(),
+        app.session.team_message_counts.is_empty(),
         "no traffic means no counter rows: {:?}",
-        app.team_message_counts
+        app.session.team_message_counts
     );
 }
 
@@ -150,11 +156,13 @@ fn recount_never_lowers_a_counter_an_event_already_raised() {
     send(&team.store.dir, "tm-001", "lead", "one");
 
     let mut app = app_for_team(&team.store, "lead");
-    app.team_message_counts.insert("tm-001".to_string(), (5, 0));
+    app.session
+        .team_message_counts
+        .insert("tm-001".to_string(), (5, 0));
     app.refresh_team_member_session_ids();
 
     assert_eq!(
-        app.team_message_counts.get("tm-001").copied(),
+        app.session.team_message_counts.get("tm-001").copied(),
         Some((5, 0)),
         "an already-raised counter must not be lowered by the recount"
     );

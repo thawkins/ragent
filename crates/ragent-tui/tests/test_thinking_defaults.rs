@@ -155,7 +155,7 @@ fn test_provider_label_prefers_agent_default_over_config_thinking() {
 
     let mut app = support::make_app();
     seed_anthropic_models(&app);
-    app.agent_info = Arc::unwrap_or_clone(
+    app.session.agent_info = Arc::unwrap_or_clone(
         agent::resolve_agent("ask", &Default::default()).expect("resolve ask agent"),
     );
     // detect_provider() relies on ambient env vars / auto-discovery (e.g. gh
@@ -166,7 +166,7 @@ fn test_provider_label_prefers_agent_default_over_config_thinking() {
         name: "Anthropic".to_string(),
         source: ProviderSource::Database,
     });
-    app.selected_model = Some("anthropic/claude-sonnet-4-20250514".to_string());
+    app.session.selected_model = Some("anthropic/claude-sonnet-4-20250514".to_string());
 
     let label = app
         .provider_model_label()

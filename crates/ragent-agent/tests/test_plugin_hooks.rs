@@ -245,3 +245,19 @@ async fn stop_hook_additional_context_is_collected() {
     let guidance = ragent_agent::hooks::run_stop_hooks(&configs, dir.path(), "sess-stop").await;
     assert_eq!(guidance, vec!["review finding".to_string()]);
 }
+
+#[test]
+fn hook_trigger_notification_parses_and_displays() {
+    // MULTISESSION FR-06: ragent's spelling and Claude's `Notification`.
+    assert_eq!(
+        HookTrigger::parse("on_notification"),
+        Some(HookTrigger::OnNotification)
+    );
+    assert_eq!(
+        HookTrigger::parse("Notification"),
+        Some(HookTrigger::OnNotification)
+    );
+    assert_eq!(HookTrigger::OnNotification.to_string(), "on_notification");
+    let parsed: HookTrigger = serde_json::from_str("\"on_notification\"").expect("serde spelling");
+    assert_eq!(parsed, HookTrigger::OnNotification);
+}

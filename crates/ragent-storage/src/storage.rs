@@ -46,7 +46,7 @@ use ragent_types::message::{Message, MessagePart, Role};
 ///
 /// Public so tests can assert the persisted `schema_version` setting against
 /// the compiler-enforced value instead of a hard-coded literal.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 // PERF-071: static SQL bodies hoisted to `const &str` so the session read
 // paths build no `String` and the prepared-statement cache sees a stable
@@ -1229,6 +1229,37 @@ impl Storage {
             }
         }
 
+        // MULTISESSION T4.1: pinned sessions and per-project grouping. The
+        // `pinned` flag is additive with a zero default; the partial index
+        // serves the sidebar's per-project, most-recent-first listing.
+        let has_pinned: bool = tx
+            .prepare_cached(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='pinned'",
+            )?
+            .query_row([], |r| r.get::<_, i64>(0))
+            .unwrap_or(0)
+            > 0;
+        if !has_pinned {
+            tx.execute_batch("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;")?;
+        }
+        tx.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_project_updated
+             ON sessions(project_id, updated_at DESC) WHERE archived_at IS NULL;",
+        )?;
+        // Sessions created before project ids were recorded carry ''. Derive
+        // the project from the stored directory once, here, so listing never
+        // touches the filesystem.
+        let unassigned: Vec<(String, String)> = tx
+            .prepare("SELECT id, directory FROM sessions WHERE project_id = ''")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        for (id, directory) in unassigned {
+            tx.execute(
+                "UPDATE sessions SET project_id = ?1 WHERE id = ?2",
+                params![crate::project::project_root(&directory), id],
+            )?;
+        }
+
         // Record the schema version so the next `Storage::open` (including
         // the background FTS warmup connection) hits the fast path. Written via
         // the transaction (not `conn`) so it commits atomically with the DDL
@@ -1301,8 +1332,15 @@ impl Storage {
         let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO sessions (id, directory, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-            params![id, directory, now, now],
+            "INSERT INTO sessions (id, project_id, directory, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                id,
+                crate::project::project_root(directory),
+                directory,
+                now,
+                now
+            ],
         )?;
         Ok(())
     }
@@ -1494,6 +1532,164 @@ impl Storage {
             params![now, id],
         )?;
         Ok(())
+    }
+
+    /// Clears a session's archive mark so it is listed again (MULTISESSION
+    /// FR-08).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.archive_session("sess-1").unwrap();
+    /// storage.unarchive_session("sess-1").unwrap();
+    /// assert_eq!(storage.list_sessions().unwrap().len(), 1);
+    /// ```
+    pub fn unarchive_session(&self, id: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE sessions SET archived_at = NULL, updated_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Lists archived top-level and child sessions, most recently archived
+    /// first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.archive_session("sess-1").unwrap();
+    /// assert_eq!(storage.list_archived_sessions().unwrap().len(), 1);
+    /// ```
+    pub fn list_archived_sessions(&self) -> Result<Vec<SessionRow>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, title, project_id, directory, parent_id, version, format_version, \
+             created_at, updated_at, archived_at, summary \
+             FROM sessions WHERE archived_at IS NOT NULL ORDER BY archived_at DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(SessionRow {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    project_id: row.get(2)?,
+                    directory: row.get(3)?,
+                    parent_id: row.get(4)?,
+                    version: row.get(5)?,
+                    format_version: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                    archived_at: row.get(9)?,
+                    summary: row.get(10)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Pins or unpins a session (MULTISESSION FR-08). Pinning does not touch
+    /// `updated_at`, so it never reorders the session list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.set_session_pinned("sess-1", true).unwrap();
+    /// assert!(storage.pinned_session_ids().unwrap().contains("sess-1"));
+    /// ```
+    pub fn set_session_pinned(&self, id: &str, pinned: bool) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "UPDATE sessions SET pinned = ?1 WHERE id = ?2",
+            params![i64::from(pinned), id],
+        )?;
+        Ok(())
+    }
+
+    /// Ids of the pinned, non-archived sessions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn pinned_session_ids(&self) -> Result<std::collections::HashSet<String>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn
+            .prepare_cached("SELECT id FROM sessions WHERE pinned = 1 AND archived_at IS NULL")?;
+        let ids = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    /// Lists non-archived top-level sessions grouped by project
+    /// (MULTISESSION FR-02).
+    ///
+    /// Sub-agent and teammate sessions (`parent_id` set) are left out. Groups
+    /// are ordered by their most recently updated session, and sessions within
+    /// a group by `updated_at`, newest first. A session with an empty
+    /// `project_id` groups under its directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("a", "/nonexistent/one").unwrap();
+    /// storage.create_session("b", "/nonexistent/two").unwrap();
+    /// let groups = storage.list_sessions_grouped().unwrap();
+    /// assert_eq!(groups.len(), 2);
+    /// ```
+    pub fn list_sessions_grouped(&self) -> Result<Vec<ProjectSessions>> {
+        let mut groups: Vec<ProjectSessions> = Vec::new();
+        for row in self.list_sessions()? {
+            if row.parent_id.is_some() {
+                continue;
+            }
+            let project = if row.project_id.is_empty() {
+                row.directory.clone()
+            } else {
+                row.project_id.clone()
+            };
+            match groups.iter_mut().find(|g| g.project_id == project) {
+                Some(group) => group.sessions.push(row),
+                None => groups.push(ProjectSessions {
+                    project_id: project,
+                    sessions: vec![row],
+                }),
+            }
+        }
+        Ok(groups)
     }
 
     // -- Message CRUD ----------------------------------------------
@@ -4772,6 +4968,16 @@ pub struct SessionRow {
     pub archived_at: Option<String>,
     /// JSON-encoded session summary, if available.
     pub summary: Option<String>,
+}
+
+/// The sessions of one project, as returned by
+/// [`Storage::list_sessions_grouped`].
+#[derive(Debug, Clone)]
+pub struct ProjectSessions {
+    /// Project root (see [`crate::project::project_root`]).
+    pub project_id: String,
+    /// The project's sessions, most recently updated first.
+    pub sessions: Vec<SessionRow>,
 }
 
 // -- Initiatives (jcodeport spec M8) --------------------------------------

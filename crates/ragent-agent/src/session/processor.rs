@@ -311,6 +311,7 @@ pub(crate) async fn dispatch_tool_with_permissions(
                 checkpoint_timeout_secs,
                 security_approved,
                 subagent_yolo,
+                &tool_ctx.working_dir,
             )
             .await;
             match permission_action {
@@ -358,6 +359,7 @@ pub(crate) async fn dispatch_tool_with_permissions(
         checkpoint_timeout_secs,
         security_approved,
         subagent_yolo,
+        &tool_ctx.working_dir,
     )
     .await;
     // SEC-ragent-agent-001 (SECTASKS T-007): a hook approval may satisfy the
@@ -438,6 +440,51 @@ fn policy_has_explicit_verdict(
 /// of the key and a config change takes effect on the next call.
 type ToolDefinitionCacheKey = (u64, bool, AliasTable);
 
+/// A project's own MCP client and the tool registry its sessions use
+/// (spec MULTISESSION M8).
+///
+/// The registry is the processor's base registry without the launch
+/// project's MCP tools, plus the tools of this project's servers. It is
+/// rebuilt whenever the base registry changes (a plugin, skill or connector
+/// registered a tool at runtime).
+pub struct ProjectToolRegistry {
+    /// The project's MCP client (its configured servers only).
+    pub client: Arc<tokio::sync::RwLock<crate::mcp::McpClient>>,
+    /// The bridged tools of the project's connected servers.
+    pub wrappers: Vec<Arc<dyn crate::tool::Tool>>,
+    /// The registry the project's turns read.
+    pub registry: Arc<ToolRegistry>,
+    /// The base registry version `registry` was built from.
+    pub base_version: u64,
+}
+
+impl std::fmt::Debug for ProjectToolRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProjectToolRegistry")
+            .field("wrappers", &self.wrappers.len())
+            .field("base_version", &self.base_version)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Builds a project registry: every base tool that is not an MCP wrapper,
+/// plus `wrappers`.
+fn build_project_registry(
+    base: &ToolRegistry,
+    wrappers: &[Arc<dyn crate::tool::Tool>],
+) -> Arc<ToolRegistry> {
+    let registry = ToolRegistry::new();
+    for tool in base.all_tools() {
+        if tool.mcp_wrapper_info().is_none() {
+            registry.register(tool);
+        }
+    }
+    for wrapper in wrappers {
+        registry.register(Arc::clone(wrapper));
+    }
+    Arc::new(registry)
+}
+
 /// Drives the agentic conversation loop for a single session.
 ///
 /// Holds shared references to the session manager, LLM provider registry,
@@ -497,7 +544,18 @@ pub struct SessionProcessor {
     pub connector_statuses: tokio::sync::RwLock<Option<Arc<dyn std::any::Any + Send + Sync>>>,
     /// Optional code index for codebase search and symbol lookup.
     /// Uses `OnceLock` so it can be set after the processor is constructed.
+    /// This is the launch project's index; see [`Self::code_index_for`].
     pub code_index: std::sync::OnceLock<Arc<ragent_codeindex::CodeIndex>>,
+    /// Code indexes of other open projects, keyed by project root
+    /// (`ragent_storage::project_root`). Registered and released by the
+    /// surface that owns the sessions (spec MULTISESSION M8).
+    pub project_code_indexes:
+        parking_lot::Mutex<std::collections::HashMap<PathBuf, Arc<ragent_codeindex::CodeIndex>>>,
+    /// MCP clients and tool registries of other open projects that have
+    /// their own MCP configuration, keyed by project root
+    /// (spec MULTISESSION M8).
+    pub project_tool_registries:
+        parking_lot::Mutex<std::collections::HashMap<PathBuf, ProjectToolRegistry>>,
     /// Optional background task service for the `bg` tool (M3).
     /// Uses `OnceLock` so it can be set after storage is created.
     pub bg_service: std::sync::OnceLock<Arc<crate::background::BackgroundTaskService>>,
@@ -1581,6 +1639,16 @@ impl SessionProcessor {
     /// exits. A no-op when no MCP client was ever published. Idempotent and
     /// best-effort: teardown must never fail on a wedged server.
     pub async fn shutdown_mcp(&self) {
+        // Other projects' servers (spec MULTISESSION M8) first.
+        let projects: Vec<ProjectToolRegistry> = self
+            .project_tool_registries
+            .lock()
+            .drain()
+            .map(|(_, project)| project)
+            .collect();
+        for project in projects {
+            project.client.write().await.shutdown().await;
+        }
         let Some(client) = self.mcp_client.get() else {
             return;
         };
@@ -1620,19 +1688,23 @@ impl SessionProcessor {
     /// [`estimate_tool_definition_bytes`]) so the per-step request-size
     /// estimate can reuse the sum instead of re-serialising ~111 tool
     /// schemas on every step.
-    fn get_cached_tool_definitions(&self, alias_table: &AliasTable) -> Arc<Vec<ToolDefinition>> {
+    fn get_cached_tool_definitions(
+        &self,
+        tool_registry: &ToolRegistry,
+        alias_table: &AliasTable,
+    ) -> Arc<Vec<ToolDefinition>> {
         let expose = self.tool_names_exposed(alias_table);
         {
             let guard = self.cached_tool_definitions.read();
             if let Some((ref key, ref defs)) = *guard
-                && key.0 == self.tool_registry.version()
+                && key.0 == tool_registry.version()
                 && key.1 == expose
                 && key.2 == *alias_table
             {
                 return defs.clone();
             }
         }
-        let defs = alias_table.outbound_definitions(&self.tool_registry.definitions(), expose);
+        let defs = alias_table.outbound_definitions(&tool_registry.definitions(), expose);
         // PERF-003: also cache the tool-name list used by the `ToolsSent`
         // event so we don't allocate ~111 Strings on every loop step.
         let names: Arc<[String]> = defs.iter().map(|t| t.name.clone()).collect();
@@ -1643,7 +1715,7 @@ impl SessionProcessor {
         {
             let mut guard = self.cached_tool_definitions.write();
             *guard = Some((
-                (self.tool_registry.version(), expose, alias_table.clone()),
+                (tool_registry.version(), expose, alias_table.clone()),
                 defs.clone(),
             ));
         }
@@ -1699,12 +1771,13 @@ impl SessionProcessor {
     /// can only widen caution, never widen the bypass.
     fn write_capable_tools(
         &self,
+        tool_registry: &ToolRegistry,
         definitions: &[ToolDefinition],
     ) -> Arc<std::collections::HashSet<String>> {
         let set = definitions
             .iter()
             .filter(|def| {
-                self.tool_registry.get(&def.name).is_none_or(|tool| {
+                tool_registry.get(&def.name).is_none_or(|tool| {
                     crate::session::permissions::is_write_capable_permission_category(
                         tool.permission_category(),
                     )
@@ -1825,6 +1898,250 @@ impl SessionProcessor {
             env_overrides_present,
         });
         arc
+    }
+
+    /// The code index for the project that contains `working_dir`
+    /// (spec MULTISESSION M8): the launch project's index for a directory in
+    /// the launch project, otherwise that project's registered index.
+    ///
+    /// # Arguments
+    ///
+    /// * `working_dir` - a session's working directory.
+    ///
+    /// # Returns
+    ///
+    /// The index, or `None` when that project has no open index.
+    pub fn code_index_for(
+        &self,
+        working_dir: &std::path::Path,
+    ) -> Option<Arc<ragent_codeindex::CodeIndex>> {
+        let root = PathBuf::from(ragent_storage::project_root(
+            &working_dir.display().to_string(),
+        ));
+        if let Some(index) = self.project_code_indexes.lock().get(&root) {
+            return Some(Arc::clone(index));
+        }
+        let launch_root = std::env::current_dir()
+            .map(|cwd| PathBuf::from(ragent_storage::project_root(&cwd.display().to_string())));
+        match launch_root {
+            Ok(launch) if launch == root => self.code_index.get().cloned(),
+            // A working directory that is not in the launch project has no
+            // index until one is registered for its project.
+            Ok(_) => None,
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot resolve launch directory; using launch index");
+                self.code_index.get().cloned()
+            }
+        }
+    }
+
+    /// The tool registry a session working in `working_dir` uses
+    /// (spec MULTISESSION M8): its project's own registry when that project
+    /// has opened its MCP servers, otherwise the base registry.
+    ///
+    /// # Arguments
+    ///
+    /// * `working_dir` - a session's working directory.
+    pub fn tool_registry_for(&self, working_dir: &std::path::Path) -> Arc<ToolRegistry> {
+        let root = PathBuf::from(ragent_storage::project_root(
+            &working_dir.display().to_string(),
+        ));
+        let mut projects = self.project_tool_registries.lock();
+        let Some(project) = projects.get_mut(&root) else {
+            return Arc::clone(&self.tool_registry);
+        };
+        let base_version = self.tool_registry.version();
+        if project.base_version != base_version {
+            project.registry = build_project_registry(&self.tool_registry, &project.wrappers);
+            project.base_version = base_version;
+        }
+        Arc::clone(&project.registry)
+    }
+
+    /// Connects a project's own MCP servers and gives its sessions a tool
+    /// registry with those servers' tools instead of the launch project's
+    /// (spec MULTISESSION M8). Servers switched off in the enable ledger are
+    /// registered as disabled, as at startup.
+    ///
+    /// # Arguments
+    ///
+    /// * `project_root` - the project's root.
+    /// * `servers` - the project's merged server list (configured plus
+    ///   plugin-contributed).
+    ///
+    /// # Returns
+    ///
+    /// The number of servers that connected.
+    pub async fn open_project_mcp(
+        &self,
+        project_root: PathBuf,
+        servers: Vec<(String, ragent_config::McpServerConfig)>,
+    ) -> usize {
+        let client = Arc::new(tokio::sync::RwLock::new(
+            crate::mcp::McpClient::with_working_dir(project_root.clone()),
+        ));
+        // Register first (no MCP tools yet) so a release that arrives while
+        // the servers connect can find and stop this client.
+        let previous = self.project_tool_registries.lock().insert(
+            project_root.clone(),
+            ProjectToolRegistry {
+                client: Arc::clone(&client),
+                wrappers: Vec::new(),
+                registry: build_project_registry(&self.tool_registry, &[]),
+                base_version: self.tool_registry.version(),
+            },
+        );
+        if let Some(previous) = previous {
+            previous.client.write().await.shutdown().await;
+        }
+        self.invalidate_tool_cache();
+
+        let still_wanted = |this: &Self| {
+            this.project_tool_registries
+                .lock()
+                .get(&project_root)
+                .is_some_and(|project| Arc::ptr_eq(&project.client, &client))
+        };
+        let ledger = crate::mcp::McpEnableLedger::load();
+        let mut connected = 0;
+        for (id, cfg) in servers {
+            if !still_wanted(self) {
+                client.write().await.shutdown().await;
+                return 0;
+            }
+            if !crate::mcp::is_server_enabled(&cfg, &ledger, &id) {
+                client.write().await.register_disabled(&id, cfg);
+                continue;
+            }
+            match client.write().await.connect(&id, cfg).await {
+                Ok(()) => connected += 1,
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    server_id = %id,
+                    project = %project_root.display(),
+                    "project MCP server failed to connect"
+                ),
+            }
+        }
+        let per_server = {
+            let c = client.read().await;
+            c.servers()
+                .iter()
+                .filter(|server| server.status == crate::mcp::McpStatus::Connected)
+                .map(|server| (server.id.clone(), server.tools.clone()))
+                .collect::<Vec<_>>()
+        };
+        let mut wrappers: Vec<Arc<dyn crate::tool::Tool>> = Vec::new();
+        for (server_id, tools) in per_server {
+            let bridged =
+                crate::tool::mcp_tool::bridge_server_tools(&server_id, &tools, Arc::clone(&client));
+            wrappers.extend(
+                bridged
+                    .wrappers
+                    .into_iter()
+                    .map(|w| Arc::new(w) as Arc<dyn crate::tool::Tool>),
+            );
+        }
+        let published = {
+            let mut projects = self.project_tool_registries.lock();
+            match projects.get_mut(&project_root) {
+                Some(project) if Arc::ptr_eq(&project.client, &client) => {
+                    project.registry = build_project_registry(&self.tool_registry, &wrappers);
+                    project.wrappers = wrappers;
+                    project.base_version = self.tool_registry.version();
+                    true
+                }
+                _ => false,
+            }
+        };
+        if !published {
+            // Released while connecting: stop what was started.
+            client.write().await.shutdown().await;
+            return 0;
+        }
+        self.invalidate_tool_cache();
+        connected
+    }
+
+    /// Shuts down a project's MCP servers once no open session uses the
+    /// project (spec MULTISESSION M8). Its sessions fall back to the base
+    /// registry.
+    pub async fn release_project_mcp(&self, project_root: &std::path::Path) {
+        let removed = self.project_tool_registries.lock().remove(project_root);
+        if let Some(project) = removed {
+            project.client.write().await.shutdown().await;
+            self.invalidate_tool_cache();
+        }
+    }
+
+    /// The MCP client of a project that opened its own servers.
+    pub fn project_mcp_client(
+        &self,
+        project_root: &std::path::Path,
+    ) -> Option<Arc<tokio::sync::RwLock<crate::mcp::McpClient>>> {
+        self.project_tool_registries
+            .lock()
+            .get(project_root)
+            .map(|project| Arc::clone(&project.client))
+    }
+
+    /// Registers the code index of a project other than the launch project
+    /// (spec MULTISESSION M8), replacing any earlier one for that root.
+    pub fn register_project_code_index(
+        &self,
+        project_root: PathBuf,
+        index: Arc<ragent_codeindex::CodeIndex>,
+    ) {
+        self.project_code_indexes.lock().insert(project_root, index);
+        self.invalidate_tool_cache();
+    }
+
+    /// Releases a project's code index once no open session uses it
+    /// (spec MULTISESSION M8).
+    pub fn release_project_code_index(&self, project_root: &std::path::Path) {
+        if self
+            .project_code_indexes
+            .lock()
+            .remove(project_root)
+            .is_some()
+        {
+            self.invalidate_tool_cache();
+        }
+    }
+
+    /// Resolve the per-turn config for a session working in `directory`
+    /// (spec MULTISESSION M6).
+    ///
+    /// A session whose directory has its own `.ragent/ragent.json` (and is
+    /// not the process cwd) gets that project's config through
+    /// [`ragent_config::Config::load_for`], which keeps its own mtime cache
+    /// per directory. Every other session - the process cwd, or a directory
+    /// with no project config - gets the launch config from
+    /// [`Self::load_config_cached`], exactly as before multi-session. A
+    /// broken config falls back to defaults and is logged.
+    ///
+    /// # Arguments
+    ///
+    /// * `directory` - the session's working directory.
+    pub fn load_config_for(&self, directory: &std::path::Path) -> Arc<ragent_config::Config> {
+        let canonical = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        let in_cwd =
+            std::env::current_dir().is_ok_and(|cwd| canonical(&cwd) == canonical(directory));
+        let own_config = directory.join(".ragent").join("ragent.json").is_file();
+        if in_cwd || !own_config {
+            return self.load_config_cached();
+        }
+        match ragent_config::Config::load_for(directory) {
+            Ok(cfg) => Arc::new(cfg),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    directory = %directory.display(),
+                    "config load failed; using default config"
+                );
+                Arc::new(ragent_config::Config::default())
+            }
+        }
     }
 
     /// C-001: load (and cache) the skill registry for a working directory,
@@ -2209,7 +2526,7 @@ impl SessionProcessor {
         let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> = if max_steps <= 1 {
             std::sync::Arc::new(Vec::new())
         } else if let Some(allowed) = loop_tool_set {
-            let all = self.get_cached_tool_definitions(&turn.alias_table);
+            let all = self.get_cached_tool_definitions(&turn.tool_registry, &turn.alias_table);
             std::sync::Arc::new(
                 all.iter()
                     .filter(|def| {
@@ -2227,13 +2544,15 @@ impl SessionProcessor {
             // (fail closed). Cached by tool-registry version.
             self.system_prompt_cache()
                 .get_subagent_tool_definitions(
-                    &self.tool_registry,
+                    &turn.tool_registry,
                     &turn.alias_table,
                     turn.session_config.tools.expose_alias_names,
                 )
-                .unwrap_or_else(|| self.get_cached_tool_definitions(&turn.alias_table))
+                .unwrap_or_else(|| {
+                    self.get_cached_tool_definitions(&turn.tool_registry, &turn.alias_table)
+                })
         } else {
-            self.get_cached_tool_definitions(&turn.alias_table)
+            self.get_cached_tool_definitions(&turn.tool_registry, &turn.alias_table)
         };
         // P-7: prime the tool-definition byte cache alongside the definitions
         // cache so the per-step request-size estimator can reuse the sum.
@@ -2243,7 +2562,7 @@ impl SessionProcessor {
         // yields an empty set and therefore no automatic YOLO scope; any run
         // that *can* write carries the whole set, so a tool the model was never
         // offered cannot be waved through by a name it never had.
-        let write_capable_tools = self.write_capable_tools(&tool_definitions);
+        let write_capable_tools = self.write_capable_tools(&turn.tool_registry, &tool_definitions);
         let cached_tool_names: Option<std::sync::Arc<[String]>> = if max_steps > 1 {
             self.get_cached_tool_names()
         } else {
@@ -3108,11 +3427,11 @@ impl SessionProcessor {
                     // resolves is left untouched so it reaches the unknown-tool
                     // refusal naming the spelling the client actually sent.
                     let canonical = crate::tool::alias_table::resolve_inbound_tool_name(
-                        &self.tool_registry,
+                        &turn.tool_registry,
                         &turn.alias_table,
                         &tc.name,
                     )
-                    .or_else(|| canonical_dispatch_name(&self.tool_registry, &tc.name));
+                    .or_else(|| canonical_dispatch_name(&turn.tool_registry, &tc.name));
                     let Some(canonical) = canonical else {
                         continue;
                     };
@@ -3144,7 +3463,7 @@ impl SessionProcessor {
                         .team_manager
                         .get()
                         .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
-                    code_index: self.code_index.get().cloned(),
+                    code_index: self.code_index_for(&turn.working_dir),
                     bg_service: self.bg_service.get().cloned(),
                     spec_manager: self.spec_manager.get().cloned(),
                     active_spec_id: active_spec_id.clone(),
@@ -3156,7 +3475,7 @@ impl SessionProcessor {
                     permission_checker: Some(self.permission_checker.clone()),
                     read_timestamps: self.read_timestamps.clone(),
                     canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
-                    tool_registry: self.tool_registry.clone(),
+                    tool_registry: turn.tool_registry.clone(),
                 };
                 // FR-012: one dispatched call's outcome in the concurrent arm,
                 // carrying the position the call had in the provider's step so
@@ -3373,7 +3692,7 @@ impl SessionProcessor {
                     // sentence, the record status and the `is_error` flag are one
                     // derivation and a call can be measured against the tool it
                     // will not run.
-                    let resolved = resolve_tool_call(&self.tool_registry, tc);
+                    let resolved = resolve_tool_call(&turn.tool_registry, tc);
                     // The decoded, schema-validated arguments. A refused call
                     // keeps them in its record so the TUI can render what the
                     // model sent; it is `Value::Null` only when the payload would

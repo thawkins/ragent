@@ -50,21 +50,21 @@ fn draw(app: &mut App, cols: u16, rows: u16) -> String {
 #[tokio::test]
 async fn alt_o_enables_autopilot() {
     let mut app = support::make_app();
-    assert!(!app.autopilot_enabled, "autopilot starts disabled");
+    assert!(!app.session.autopilot_enabled, "autopilot starts disabled");
 
     press_alt_o(&mut app).await;
 
-    assert!(app.autopilot_enabled, "Alt+O must enable autopilot");
+    assert!(app.session.autopilot_enabled, "Alt+O must enable autopilot");
     assert!(
-        app.autopilot_started_at.is_some(),
+        app.session.autopilot_started_at.is_some(),
         "the start instant is stamped so the time limit can be enforced"
     );
     assert!(
-        app.autopilot_time_limit_secs.is_some(),
+        app.session.autopilot_time_limit_secs.is_some(),
         "the key toggle applies a bounded time limit"
     );
     assert_eq!(
-        app.autopilot_time_limit_secs,
+        app.session.autopilot_time_limit_secs,
         Some(5000),
         "Alt+O arms the 5000-second default limit"
     );
@@ -75,17 +75,17 @@ async fn alt_o_second_press_disables_autopilot_and_clears_limits() {
     let mut app = support::make_app();
 
     press_alt_o(&mut app).await;
-    assert!(app.autopilot_enabled);
+    assert!(app.session.autopilot_enabled);
 
     press_alt_o(&mut app).await;
     assert!(
-        !app.autopilot_enabled,
+        !app.session.autopilot_enabled,
         "second Alt+O must disable autopilot"
     );
-    assert!(app.autopilot_started_at.is_none());
-    assert!(app.autopilot_time_limit_secs.is_none());
-    assert!(app.autopilot_token_budget.is_none());
-    assert!(app.autopilot_pending_continue.is_none());
+    assert!(app.session.autopilot_started_at.is_none());
+    assert!(app.session.autopilot_time_limit_secs.is_none());
+    assert!(app.session.autopilot_token_budget.is_none());
+    assert!(app.session.autopilot_pending_continue.is_none());
 }
 
 #[tokio::test]
@@ -104,12 +104,12 @@ async fn alt_o_does_not_toggle_the_telemetry_panel() {
 #[tokio::test]
 async fn alt_o_is_not_inserted_into_the_input_buffer() {
     let mut app = support::make_app();
-    app.input.clear();
+    app.session.input.clear();
 
     press_alt_o(&mut app).await;
 
     assert_eq!(
-        app.input, "",
+        app.session.input, "",
         "the chord must be consumed, never typed as a literal 'o'"
     );
 }
@@ -120,25 +120,25 @@ async fn slash_autopilot_off_and_alt_o_share_one_state_machine() {
 
     // Enabled by the key, then disabled by the slash command.
     press_alt_o(&mut app).await;
-    assert!(app.autopilot_enabled);
+    assert!(app.session.autopilot_enabled);
     app.execute_slash_command("/autopilot off").await;
     assert!(
-        !app.autopilot_enabled,
+        !app.session.autopilot_enabled,
         "/autopilot off must clear state set by Alt+O"
     );
-    assert!(app.autopilot_started_at.is_none());
+    assert!(app.session.autopilot_started_at.is_none());
 
     // Enabled by the slash command, then disabled by the key.
     app.execute_slash_command("/autopilot on --max-time 60")
         .await;
-    assert!(app.autopilot_enabled);
-    assert_eq!(app.autopilot_time_limit_secs, Some(60));
+    assert!(app.session.autopilot_enabled);
+    assert_eq!(app.session.autopilot_time_limit_secs, Some(60));
     press_alt_o(&mut app).await;
     assert!(
-        !app.autopilot_enabled,
+        !app.session.autopilot_enabled,
         "Alt+O must clear state set by /autopilot on"
     );
-    assert!(app.autopilot_time_limit_secs.is_none());
+    assert!(app.session.autopilot_time_limit_secs.is_none());
 }
 
 // -----------------------------------------------------------------------------
@@ -206,7 +206,7 @@ async fn status_bar_omits_the_countdown_without_a_time_limit() {
     // `/autopilot on` with no flags runs unbounded, so there is nothing to
     // count down.
     app.execute_slash_command("/autopilot on").await;
-    assert!(app.autopilot_time_limit_secs.is_none());
+    assert!(app.session.autopilot_time_limit_secs.is_none());
     let screen = draw(&mut app, 200, 40);
 
     assert!(

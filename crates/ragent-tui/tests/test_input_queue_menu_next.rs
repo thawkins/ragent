@@ -35,7 +35,7 @@ fn entry(text: &str) -> QueuedInput {
 /// Build an app with an active session so the dispatch path has a session.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
@@ -51,7 +51,11 @@ async fn message_end(app: &mut App, reason: FinishReason) {
 
 /// Count user messages in the conversation.
 fn user_message_count(app: &App) -> usize {
-    app.messages.iter().filter(|m| m.role == Role::User).count()
+    app.session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::User)
+        .count()
 }
 
 // ---------------------------------------------------------------------------
@@ -61,8 +65,8 @@ fn user_message_count(app: &App) -> usize {
 #[tokio::test]
 async fn test_next_row_dispatches_oldest_entry_when_not_processing() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("NEXT-QUEUE-1"));
-    app.input_queue.push_back(entry("NEXT-QUEUE-2"));
+    app.session.input_queue.push_back(entry("NEXT-QUEUE-1"));
+    app.session.input_queue.push_back(entry("NEXT-QUEUE-2"));
 
     app.queue_menu_select_next().await;
 
@@ -72,11 +76,12 @@ async fn test_next_row_dispatches_oldest_entry_when_not_processing() {
         "FR-024: Next pops exactly one entry (the oldest)"
     );
     assert_eq!(
-        app.last_prompt, "NEXT-QUEUE-1",
+        app.session.last_prompt, "NEXT-QUEUE-1",
         "FR-024: the oldest entry is dispatched as the next user turn"
     );
     assert!(
-        app.messages
+        app.session
+            .messages
             .iter()
             .any(|m| m.role == Role::User && m.text_content() == "NEXT-QUEUE-1"),
         "FR-024: the dispatched entry is added to the conversation"
@@ -86,29 +91,35 @@ async fn test_next_row_dispatches_oldest_entry_when_not_processing() {
 #[tokio::test]
 async fn test_next_row_preserves_fifo_order_across_selections() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("A"));
-    app.input_queue.push_back(entry("B"));
+    app.session.input_queue.push_back(entry("A"));
+    app.session.input_queue.push_back(entry("B"));
 
     app.queue_menu_select_next().await;
-    assert_eq!(app.last_prompt, "A", "FR-019: oldest entry goes first");
+    assert_eq!(
+        app.session.last_prompt, "A",
+        "FR-019: oldest entry goes first"
+    );
     assert_eq!(app.input_queue_len(), 1);
 
     app.queue_menu_select_next().await;
-    assert_eq!(app.last_prompt, "B", "FR-019: the next entry follows");
+    assert_eq!(
+        app.session.last_prompt, "B",
+        "FR-019: the next entry follows"
+    );
     assert_eq!(app.input_queue_len(), 0);
 }
 
 #[tokio::test]
 async fn test_next_row_arms_the_async_dispatch_path() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("async"));
+    app.session.input_queue.push_back(entry("async"));
 
     app.queue_menu_select_next().await;
 
     // NFR-006: dispatch_user_message spawns the turn on a tokio task and arms a
     // cancel flag; it never runs the turn inline, so the UI thread stays free.
     assert!(
-        app.cancel_flag.is_some(),
+        app.session.cancel_flag.is_some(),
         "NFR-006: the dispatch armed a cancel flag off the UI thread"
     );
 }
@@ -120,10 +131,10 @@ async fn test_next_row_arms_the_async_dispatch_path() {
 #[tokio::test]
 async fn test_next_row_halts_the_running_turn() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
-    app.input_queue.push_back(entry("first"));
+    app.session.cancel_flag = Some(flag.clone());
+    app.session.input_queue.push_back(entry("first"));
 
     app.queue_menu_select_next().await;
 
@@ -136,10 +147,10 @@ async fn test_next_row_halts_the_running_turn() {
 #[tokio::test]
 async fn test_next_row_does_not_advance_the_queue_while_processing() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
-    app.input_queue.push_back(entry("first"));
-    app.input_queue.push_back(entry("second"));
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+    app.session.input_queue.push_back(entry("first"));
+    app.session.input_queue.push_back(entry("second"));
     let before = user_message_count(&app);
 
     app.queue_menu_select_next().await;
@@ -155,7 +166,7 @@ async fn test_next_row_does_not_advance_the_queue_while_processing() {
         "FR-029: no entry is dispatched while the turn is still executing"
     );
     assert!(
-        app.queue_next_pending,
+        app.session.queue_next_pending,
         "FR-030: the dispatch is deferred to the turn boundary the cancel opens"
     );
 }
@@ -163,9 +174,9 @@ async fn test_next_row_does_not_advance_the_queue_while_processing() {
 #[tokio::test]
 async fn test_next_row_defers_dispatch_to_the_turn_boundary() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
-    app.input_queue.push_back(entry("deferred-entry"));
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+    app.session.input_queue.push_back(entry("deferred-entry"));
 
     app.queue_menu_select_next().await;
     assert_eq!(app.input_queue_len(), 1, "precondition: deferred");
@@ -179,12 +190,12 @@ async fn test_next_row_defers_dispatch_to_the_turn_boundary() {
     message_end(&mut app, FinishReason::Cancelled).await;
 
     assert_eq!(
-        app.last_prompt, "deferred-entry",
+        app.session.last_prompt, "deferred-entry",
         "FR-024: the deferred entry runs at the boundary the cancel opened"
     );
     assert_eq!(app.input_queue_len(), 0);
     assert!(
-        !app.queue_next_pending,
+        !app.session.queue_next_pending,
         "the pending flag is consumed exactly once"
     );
 }
@@ -192,20 +203,20 @@ async fn test_next_row_defers_dispatch_to_the_turn_boundary() {
 #[tokio::test]
 async fn test_pending_next_fires_only_once_at_later_boundaries() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
-    app.input_queue.push_back(entry("one"));
-    app.input_queue.push_back(entry("two"));
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+    app.session.input_queue.push_back(entry("one"));
+    app.session.input_queue.push_back(entry("two"));
 
     app.queue_menu_select_next().await;
     message_end(&mut app, FinishReason::Cancelled).await;
-    assert_eq!(app.last_prompt, "one");
+    assert_eq!(app.session.last_prompt, "one");
     assert_eq!(app.input_queue_len(), 1);
 
     // A normal completion now drains only because the queue is non-empty; the
     // spent pending flag does not force a second dispatch of its own.
     message_end(&mut app, FinishReason::Stop).await;
-    assert_eq!(app.last_prompt, "two");
+    assert_eq!(app.session.last_prompt, "two");
     assert_eq!(app.input_queue_len(), 0);
 }
 
@@ -216,8 +227,8 @@ async fn test_pending_next_fires_only_once_at_later_boundaries() {
 #[tokio::test]
 async fn test_cancelled_turn_without_pending_next_still_retains_the_queue() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("keep me"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("keep me"));
 
     // A plain Escape cancel (not a Next) leaves the queue alone (FR-018).
     message_end(&mut app, FinishReason::Cancelled).await;
@@ -241,8 +252,8 @@ async fn test_cancelled_turn_without_pending_next_still_retains_the_queue() {
 #[tokio::test]
 async fn test_next_row_defers_while_compaction_owns_the_turn() {
     let mut app = app_with_session();
-    app.compact_in_progress = true;
-    app.input_queue.push_back(entry("deferred"));
+    app.session.compact_in_progress = true;
+    app.session.input_queue.push_back(entry("deferred"));
 
     app.queue_menu_select_next().await;
 
@@ -253,7 +264,7 @@ async fn test_next_row_defers_while_compaction_owns_the_turn() {
     );
     assert_eq!(user_message_count(&app), 0);
     assert!(
-        !app.queue_next_pending,
+        !app.session.queue_next_pending,
         "FR-030: a compaction window refuses (no boundary to defer to)"
     );
     assert_eq!(app.status, "queue: next deferred - compaction in progress");
@@ -262,8 +273,8 @@ async fn test_next_row_defers_while_compaction_owns_the_turn() {
 #[tokio::test]
 async fn test_next_row_defers_while_auto_compaction_owns_the_turn() {
     let mut app = app_with_session();
-    app.auto_compact_in_progress = true;
-    app.input_queue.push_back(entry("deferred"));
+    app.session.auto_compact_in_progress = true;
+    app.session.input_queue.push_back(entry("deferred"));
 
     app.queue_menu_select_next().await;
 
@@ -278,8 +289,8 @@ async fn test_next_row_defers_while_auto_compaction_owns_the_turn() {
 #[tokio::test]
 async fn test_next_row_defers_when_a_post_compact_send_is_pending() {
     let mut app = app_with_session();
-    app.pending_send_after_compact = Some(("in flight".to_string(), Vec::new()));
-    app.input_queue.push_back(entry("deferred"));
+    app.session.pending_send_after_compact = Some(("in flight".to_string(), Vec::new()));
+    app.session.input_queue.push_back(entry("deferred"));
 
     app.queue_menu_select_next().await;
 
@@ -294,22 +305,22 @@ async fn test_next_row_defers_when_a_post_compact_send_is_pending() {
 #[tokio::test]
 async fn test_pending_next_is_retried_at_the_next_safe_boundary() {
     let mut app = app_with_session();
-    app.queue_next_pending = true;
-    app.compact_in_progress = true;
-    app.input_queue.push_back(entry("retry me"));
+    app.session.queue_next_pending = true;
+    app.session.compact_in_progress = true;
+    app.session.input_queue.push_back(entry("retry me"));
 
     // While compaction blocks the boundary the pending flag is retained.
     app.advance_input_queue().await;
     assert_eq!(app.input_queue_len(), 1, "FR-030: deferred, not lost");
     assert!(
-        app.queue_next_pending,
+        app.session.queue_next_pending,
         "FR-030: the pending dispatch survives an unavailable boundary"
     );
 
     // Once the boundary is safe the pending dispatch fires.
-    app.compact_in_progress = false;
+    app.session.compact_in_progress = false;
     app.advance_input_queue().await;
-    assert_eq!(app.last_prompt, "retry me");
+    assert_eq!(app.session.last_prompt, "retry me");
     assert_eq!(app.input_queue_len(), 0);
 }
 
@@ -337,7 +348,7 @@ async fn test_next_row_closes_the_menu_and_resets_selection() {
     let mut app = app_with_session();
     app.queue_menu_open = true;
     app.queue_menu_selected = 0;
-    app.input_queue.push_back(entry("run me"));
+    app.session.input_queue.push_back(entry("run me"));
 
     app.queue_menu_select_next().await;
 
@@ -351,21 +362,25 @@ async fn test_next_row_closes_the_menu_and_resets_selection() {
 #[tokio::test]
 async fn test_next_row_leaves_input_buffer_and_attachments_untouched() {
     let mut app = app_with_session();
-    app.input = "unfinished draft".to_string();
-    app.input_cursor = 5;
-    app.pending_attachments
+    app.session.input = "unfinished draft".to_string();
+    app.session.input_cursor = 5;
+    app.session
+        .pending_attachments
         .push(std::path::PathBuf::from("/tmp/diagram.png"));
-    app.input_queue.push_back(entry("run me"));
+    app.session.input_queue.push_back(entry("run me"));
 
     app.queue_menu_select_next().await;
 
     assert_eq!(
-        app.input, "unfinished draft",
+        app.session.input, "unfinished draft",
         "FR-031: Next must not mutate the editable input buffer"
     );
-    assert_eq!(app.input_cursor, 5, "the cursor position is unchanged");
     assert_eq!(
-        app.pending_attachments.len(),
+        app.session.input_cursor, 5,
+        "the cursor position is unchanged"
+    );
+    assert_eq!(
+        app.session.pending_attachments.len(),
         1,
         "the staged attachments are untouched"
     );
@@ -374,7 +389,7 @@ async fn test_next_row_leaves_input_buffer_and_attachments_untouched() {
 #[tokio::test]
 async fn test_next_row_sets_the_redraw_flag() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("run me"));
+    app.session.input_queue.push_back(entry("run me"));
     app.needs_redraw = false;
 
     app.queue_menu_select_next().await;

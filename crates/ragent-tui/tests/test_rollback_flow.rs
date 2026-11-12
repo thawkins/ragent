@@ -162,6 +162,8 @@ fn make_scripted_app() -> App {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
@@ -213,7 +215,7 @@ fn make_scripted_app() -> App {
         name: "Ollama".to_string(),
         source: ProviderSource::AutoDiscovered,
     });
-    app.selected_model = Some("ollama/qwen3:latest".to_string());
+    app.session.selected_model = Some("ollama/qwen3:latest".to_string());
     app
 }
 
@@ -244,10 +246,10 @@ async fn arm_capture(app: &App) -> (tempfile::TempDir, std::path::PathBuf) {
 #[tokio::test]
 async fn test_rollback_offer_arms_on_change_summary() {
     let mut app = make_scripted_app();
-    app.session_id = Some("sess-rollback".to_string());
+    app.session.session_id = Some("sess-rollback".to_string());
     app.handle_event(change_summary("sess-rollback")).await;
 
-    let offer = app.pending_rollback.as_ref().expect("offer armed");
+    let offer = app.session.pending_rollback.as_ref().expect("offer armed");
     assert_eq!(offer.session_id, "sess-rollback");
     assert_eq!(offer.status, "completed");
     assert_eq!(offer.iterations, 3);
@@ -264,10 +266,10 @@ async fn test_rollback_offer_arms_on_change_summary() {
 #[tokio::test]
 async fn test_rollback_offer_ignores_other_sessions() {
     let mut app = make_scripted_app();
-    app.session_id = Some("sess-rollback".to_string());
+    app.session.session_id = Some("sess-rollback".to_string());
     app.handle_event(change_summary("sess-other")).await;
     assert!(
-        app.pending_rollback.is_none(),
+        app.session.pending_rollback.is_none(),
         "a foreign session's summary must not arm the offer"
     );
 }
@@ -277,9 +279,9 @@ async fn test_rollback_offer_ignores_other_sessions() {
 async fn test_rollback_accept_restores_snapshot() -> Result<()> {
     let mut app = make_scripted_app();
     let (_dir_guard, target) = arm_capture(&app).await;
-    app.session_id = Some("sess-rollback".to_string());
+    app.session.session_id = Some("sess-rollback".to_string());
     app.handle_event(change_summary("sess-rollback")).await;
-    assert!(app.pending_rollback.is_some());
+    assert!(app.session.pending_rollback.is_some());
 
     // Route through the App handler so the returned InputAction is
     // dispatched exactly as the runtime does.
@@ -319,7 +321,7 @@ async fn test_rollback_accept_restores_snapshot() -> Result<()> {
 async fn test_rollback_decline_keeps_changes() -> Result<()> {
     let mut app = make_scripted_app();
     let (_dir_guard, target) = arm_capture(&app).await;
-    app.session_id = Some("sess-rollback".to_string());
+    app.session.session_id = Some("sess-rollback".to_string());
     app.handle_event(change_summary("sess-rollback")).await;
 
     app.handle_key_event(key(KeyCode::Esc)).await;
@@ -350,6 +352,7 @@ async fn test_rollback_decline_keeps_changes() -> Result<()> {
         "FR-020: declining keeps the loop's changes"
     );
     let transcript = app
+        .session
         .messages
         .last()
         .map(|m| m.text_content())
@@ -382,7 +385,8 @@ fn terminated(session_id: &str, status: &str, iterations: u64) -> Event {
 
 /// Last transcript message text (empty when no messages).
 fn last_transcript(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(|m| m.text_content())
         .unwrap_or_default()
@@ -418,7 +422,7 @@ async fn test_loop_terminated_banner_is_status_aware() {
     ];
     for (status, icon, phrase, iterations, iterations_label) in cases {
         let mut app = make_scripted_app();
-        app.session_id = Some("sess-rollback".to_string());
+        app.session.session_id = Some("sess-rollback".to_string());
         app.handle_event(terminated("sess-rollback", status, iterations))
             .await;
         let transcript = last_transcript(&app);
@@ -434,7 +438,7 @@ async fn test_loop_terminated_banner_is_status_aware() {
 
     // completed carries the verification outcome; error carries the reason.
     let mut app = make_scripted_app();
-    app.session_id = Some("sess-rollback".to_string());
+    app.session.session_id = Some("sess-rollback".to_string());
     app.handle_event(terminated("sess-rollback", "completed", 2))
         .await;
     assert!(
@@ -443,7 +447,7 @@ async fn test_loop_terminated_banner_is_status_aware() {
     );
 
     let mut app = make_scripted_app();
-    app.session_id = Some("sess-rollback".to_string());
+    app.session.session_id = Some("sess-rollback".to_string());
     app.handle_event(terminated("sess-rollback", "interrupted", 3))
         .await;
     let transcript = last_transcript(&app);
@@ -454,7 +458,7 @@ async fn test_loop_terminated_banner_is_status_aware() {
 
     // A foreign session's termination is not rendered.
     let mut app = make_scripted_app();
-    app.session_id = Some("sess-rollback".to_string());
+    app.session.session_id = Some("sess-rollback".to_string());
     app.handle_event(terminated("sess-other", "error", 1)).await;
     assert!(
         !last_transcript(&app).contains("Goal loop"),
@@ -467,7 +471,7 @@ async fn test_loop_terminated_banner_is_status_aware() {
 #[tokio::test]
 async fn test_change_summary_renders_diffstat_and_rollback_offer() {
     let mut app = make_scripted_app();
-    app.session_id = Some("sess-rollback".to_string());
+    app.session.session_id = Some("sess-rollback".to_string());
     app.handle_event(change_summary("sess-rollback")).await;
 
     let transcript = last_transcript(&app);

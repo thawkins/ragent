@@ -153,12 +153,14 @@ fn test_agents_modal_paints_borders_and_bold_cyan_title() {
 #[test]
 fn test_agents_modal_clears_the_underlay() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     for i in 0..40 {
-        app.messages.push(ragent_agent::message::Message::user_text(
-            "s1",
-            format!("UNDERLAY-{i}-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"),
-        ));
+        app.session
+            .messages
+            .push(ragent_agent::message::Message::user_text(
+                "s1",
+                format!("UNDERLAY-{i}-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"),
+            ));
     }
     let buffer = render(&mut app, 120, 40);
 

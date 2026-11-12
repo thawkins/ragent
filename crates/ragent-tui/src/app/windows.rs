@@ -91,7 +91,7 @@ impl App {
     /// True while a team is active (FR-004).
     #[must_use]
     pub fn teams_window_available(&self) -> bool {
-        self.active_team.is_some()
+        self.session.active_team.is_some()
     }
 
     /// Toggle the Agents window (spec `agentui` FR-028, FR-029).
@@ -198,7 +198,7 @@ impl App {
             return;
         }
         self.output_view = None;
-        self.selected_agent_session_id = None;
+        self.session.selected_agent_session_id = None;
         self.selected_agent_index = None;
         self.needs_redraw = true;
     }
@@ -323,7 +323,8 @@ impl App {
 /// The status of the team member `agent_id`, `None` when the list no longer
 /// carries it (FR-069 stale-row rule).
 fn member_status_of(app: &App, agent_id: &str) -> Option<MemberStatus> {
-    app.team_members
+    app.session
+        .team_members
         .iter()
         .find(|m| m.agent_id == agent_id)
         .map(|m| m.status)
@@ -689,10 +690,13 @@ impl App {
         let agent_id = self
             .teams_cursor_teammate
             .and_then(|c| self.teams_teammate_agent_ids.get(c).cloned());
-        let Some(member) = agent_id
-            .as_deref()
-            .and_then(|id| self.team_members.iter().find(|m| m.agent_id == id).cloned())
-        else {
+        let Some(member) = agent_id.as_deref().and_then(|id| {
+            self.session
+                .team_members
+                .iter()
+                .find(|m| m.agent_id == id)
+                .cloned()
+        }) else {
             self.status = "teams: selected row is gone".to_string();
             self.needs_redraw = true;
             return;
@@ -725,10 +729,13 @@ impl App {
         let agent_id = self
             .teams_cursor_teammate
             .and_then(|c| self.teams_teammate_agent_ids.get(c).cloned());
-        let Some(member) = agent_id
-            .as_deref()
-            .and_then(|id| self.team_members.iter().find(|m| m.agent_id == id).cloned())
-        else {
+        let Some(member) = agent_id.as_deref().and_then(|id| {
+            self.session
+                .team_members
+                .iter()
+                .find(|m| m.agent_id == id)
+                .cloned()
+        }) else {
             self.status = "teams: selected row is gone".to_string();
             self.needs_redraw = true;
             return;

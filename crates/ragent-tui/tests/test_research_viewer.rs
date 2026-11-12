@@ -260,6 +260,6 @@ mod interaction_tests {
         app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
             .await;
         assert!(app.research_view.is_some());
-        assert_eq!(app.input, "");
+        assert_eq!(app.session.input, "");
     }
 }

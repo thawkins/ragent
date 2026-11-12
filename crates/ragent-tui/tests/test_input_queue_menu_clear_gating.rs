@@ -40,7 +40,7 @@ fn entry(text: &str) -> QueuedInput {
 /// Build an app with an active session.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
@@ -48,8 +48,8 @@ fn app_with_session() -> App {
 /// press `Enter`. The queue is seeded with two entries first.
 fn app_with_dialog_open() -> App {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("GATE-QUEUE-1"));
-    app.input_queue.push_back(entry("GATE-QUEUE-2"));
+    app.session.input_queue.push_back(entry("GATE-QUEUE-1"));
+    app.session.input_queue.push_back(entry("GATE-QUEUE-2"));
     app.queue_menu_open = true;
     app.queue_menu_select_clear();
     assert!(
@@ -114,8 +114,8 @@ async fn test_yes_removes_every_entry_and_closes_the_dialog() {
 #[tokio::test]
 async fn test_yes_updates_the_painted_queue_counter() {
     let mut app = app_with_dialog_open();
-    app.input = "draft".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = "draft".to_string();
+    app.session.input_cursor = app.input_len_chars();
 
     let before = render(&mut app, 80, 24);
     assert!(
@@ -156,13 +156,13 @@ async fn test_yes_resets_the_selection_and_arms_a_redraw() {
 #[tokio::test]
 async fn test_yes_drops_a_pending_queue_control_next() {
     let mut app = app_with_dialog_open();
-    app.queue_next_pending = true;
+    app.session.queue_next_pending = true;
     app.handle_key_event(key(KeyCode::Right)).await;
 
     app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert!(
-        !app.queue_next_pending,
+        !app.session.queue_next_pending,
         "FR-024: a pending `Next` is meaningless once the queue is emptied"
     );
 }
@@ -170,7 +170,7 @@ async fn test_yes_drops_a_pending_queue_control_next() {
 #[tokio::test]
 async fn test_yes_on_an_empty_queue_is_a_safe_noop() {
     let mut app = app_with_dialog_open();
-    app.input_queue.clear();
+    app.session.input_queue.clear();
 
     app.handle_key_event(key(KeyCode::Right)).await;
     app.handle_key_event(key(KeyCode::Enter)).await;
@@ -230,8 +230,8 @@ async fn test_esc_keeps_every_entry() {
 #[tokio::test]
 async fn test_opening_the_dialog_never_removes_an_entry() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("GATE-QUEUE-1"));
-    app.input_queue.push_back(entry("GATE-QUEUE-2"));
+    app.session.input_queue.push_back(entry("GATE-QUEUE-1"));
+    app.session.input_queue.push_back(entry("GATE-QUEUE-2"));
     app.queue_menu_open = true;
 
     app.queue_menu_select_clear();

@@ -388,7 +388,17 @@ fn model_picker_heading_band(widths: &[usize]) -> String {
 /// # }
 /// ```
 pub fn render(frame: &mut Frame, app: &mut App) {
-    render_chat(frame, app);
+    // Session sidebar on the left (spec MULTISESSION M5); the chat gets the
+    // rest. Overlays below still centre on the whole frame.
+    let (sidebar_area, chat_area) = crate::sessions_sidebar::split_area(app, frame.area());
+    match sidebar_area {
+        Some(area) => crate::sessions_sidebar::render(frame, app, area),
+        None => {
+            app.sidebar.area = Rect::default();
+            app.sidebar.focused = false;
+        }
+    }
+    render_chat(frame, app, chat_area);
     // Config-save picker overlay - rendered on top of chat, before history
     // picker so that whichever picker is open gets drawn last (i.e. on top).
     if app.config_save_picker.is_some() {
@@ -400,7 +410,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
     // Run-cost summary banner (FR-012): a transient one-line overlay rendered
     // last so it sits above all other UI. Dismissed on the next keypress.
-    if app.run_cost_banner.is_some() {
+    if app.session.run_cost_banner.is_some() {
         render_run_cost_banner(frame, app);
     }
     // Queue-control menu overlay (ALT-Q) - a modal drawn above everything so the
@@ -494,7 +504,7 @@ fn render_backend_panel(frame: &mut Frame, app: &mut App) {
     let Some(panel) = app.backend_panel.as_ref() else {
         return;
     };
-    let active_kind = app.active_backend.clone();
+    let active_kind = app.session.active_backend.clone();
 
     let rows = &panel.rows;
     let id_w = rows
@@ -1263,7 +1273,7 @@ fn connector_catalogue_footer(
 /// takes the form `* run complete * {in}+{out} tokens * ${cost} * {dur}s`.
 /// It is drawn on top of all other UI and cleared on the next keypress.
 fn render_run_cost_banner(frame: &mut Frame, app: &mut App) {
-    let Some(text) = app.run_cost_banner.as_ref() else {
+    let Some(text) = app.session.run_cost_banner.as_ref() else {
         return;
     };
     let area = frame.area();
@@ -1411,7 +1421,7 @@ fn render_queue_menu(frame: &mut Frame, app: &mut App) {
 fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
     use ratatui::widgets::{List, ListItem, ListState};
 
-    let len = app.input_queue.len();
+    let len = app.session.input_queue.len();
     // Keep the highlight within range while the queue length can change under
     // the panel (e.g. a turn-boundary drain) so the block cursor is always valid.
     let selected = app.queue_show_selected.min(len.saturating_sub(1));
@@ -1421,6 +1431,7 @@ fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
     // screen so a long queue scrolls instead of overflowing.
     let screen = frame.area();
     let max_entry = app
+        .session
         .input_queue
         .iter()
         .map(|e| e.text.chars().count())
@@ -1458,6 +1469,7 @@ fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
     let index_style = Style::default().fg(Color::DarkGray);
 
     let items: Vec<ListItem> = app
+        .session
         .input_queue
         .iter()
         .enumerate()
@@ -2738,6 +2750,7 @@ fn agents_button_label(app: &App) -> String {
 /// count is 0.
 fn teams_button_label(app: &App) -> String {
     let count = app
+        .session
         .team_members
         .iter()
         .filter(|m| {
@@ -3811,7 +3824,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                             Style::default().fg(Color::Yellow),
                         ));
                     }
-                    if i == app.current_agent_index {
+                    if i == app.session.current_agent_index {
                         spans.push(Span::styled(
                             " *",
                             Style::default()
@@ -5118,15 +5131,15 @@ fn refresh_input_render_cache(app: &mut App, inner_width: u16) {
     let queue_len = app.input_queue_len();
     let prefix = input_prompt_prefix(queue_len);
     let prefix_len = input_prompt_prefix_len(queue_len);
-    let height = input_widget_height(&app.input, inner_width as usize, prefix_len);
-    let cache = &mut app.input_render_cache;
-    let rows_current = cache.key == app.input
+    let height = input_widget_height(&app.session.input, inner_width as usize, prefix_len);
+    let cache = &mut app.session.input_render_cache;
+    let rows_current = cache.key == app.session.input
         && cache.selection == selection
         && cache.width == inner_width
         && cache.queue_len == queue_len
         && !cache.lines.is_empty();
-    let cursor_current = cache.key == app.input
-        && cache.cursor == app.input_cursor
+    let cursor_current = cache.key == app.session.input
+        && cache.cursor == app.session.input_cursor
         && cache.width == inner_width
         && cache.queue_len == queue_len
         && cache.height != 0;
@@ -5134,22 +5147,26 @@ fn refresh_input_render_cache(app: &mut App, inner_width: u16) {
         return;
     }
     if !rows_current {
-        cache.lines =
-            input_lines_with_kb_selection(&app.input, inner_width as usize, selection, &prefix);
+        cache.lines = input_lines_with_kb_selection(
+            &app.session.input,
+            inner_width as usize,
+            selection,
+            &prefix,
+        );
         cache.selection = selection;
     }
     if !cursor_current {
         cache.cursor_pos = input_cursor_display_pos(
-            &app.input,
-            app.input_cursor,
+            &app.session.input,
+            app.session.input_cursor,
             (inner_width as usize).max(1),
             prefix_len,
         );
-        cache.cursor = app.input_cursor;
+        cache.cursor = app.session.input_cursor;
     }
     cache.height = height;
     cache.queue_len = queue_len;
-    cache.key.clone_from(&app.input);
+    cache.key.clone_from(&app.session.input);
     cache.width = inner_width;
 }
 
@@ -5574,7 +5591,7 @@ fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // The panel shares the counter catalogue with `/telemetry counters`, so it
     // also needs the state of the OTLP logs signal (spec `otel` FR-036). Use
-    // the live subsystem's copy rather than `Config::load()`: this runs every
+    // the live subsystem's copy rather than `Config::load_for(&self.cwd_path)`: this runs every
     // frame, and reloading the config from disk on the UI thread per frame
     // was both slow and a description of the next start, not of this one.
     let telemetry = &app.session_processor.telemetry;
@@ -5935,8 +5952,8 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     let io_label = format!(
         "io: ^{} v{}",
-        format_kilobytes(app.stream_out_bytes),
-        format_kilobytes(app.stream_in_bytes)
+        format_kilobytes(app.session.stream_out_bytes),
+        format_kilobytes(app.session.stream_in_bytes)
     );
     lines.push(Line::from(Span::styled(
         format!("{margin_left}{io_label}"),
@@ -5970,9 +5987,8 @@ fn render_context_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 // Chat screen
 // ---------------------------------------------------------------------------
 
-fn render_chat(frame: &mut Frame, app: &mut App) {
+fn render_chat(frame: &mut Frame, app: &mut App, chat_area: Rect) {
     // Compute chat input height based on wrapped text
-    let chat_area = frame.area();
 
     // Responsive breakpoint for layout decisions
     let breakpoint = ResponsiveBreakpoint::from_width(chat_area.width);
@@ -5996,7 +6012,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     // wrapped rows and cursor position are then reused verbatim across
     // frames, so per-frame input work is O(1) while the user is not typing.
     refresh_input_render_cache(app, input_inner_width as u16);
-    let input_height = app.input_render_cache.height;
+    let input_height = app.session.input_render_cache.height;
 
     // Whether to show the teammate strip (1 row under the status bar, FR-027).
     // A team with no members reserves no line at all (FR-066).
@@ -6181,16 +6197,16 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_file_menu(frame, app, input_chunks[1]);
     }
 
-    if !app.question_queue.is_empty() {
+    if !app.session.question_queue.is_empty() {
         render_question_dialog(frame, app);
     }
 
-    if !app.permission_queue.is_empty() {
+    if !app.session.permission_queue.is_empty() {
         render_permission_dialog(frame, app);
     }
 
     // Force-cleanup confirmation modal overlay
-    if app.pending_forcecleanup.is_some() {
+    if app.session.pending_forcecleanup.is_some() {
         render_force_cleanup_dialog(frame, app);
     }
 
@@ -6214,7 +6230,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     }
 
     // Alt+X stop-agent confirmation modal overlay
-    if app.pending_stop_confirm {
+    if app.session.pending_stop_confirm {
         render_stop_confirm_dialog(frame);
     }
 
@@ -6933,9 +6949,10 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     // Determine which session to display logs for.
     // If a specific agent is selected, show its logs; otherwise show primary session.
     let _display_session = app
+        .session
         .selected_agent_session_id
         .clone()
-        .or_else(|| app.session_id.clone());
+        .or_else(|| app.session.session_id.clone());
 
     // Show all log entries from all sessions (not filtered by session).
     // This allows viewing all agent activity in one view with agent_id labels.
@@ -7210,15 +7227,16 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     // session id when no specific agent session is selected, mirroring the
     // log panel's session-resolution logic.
     let session_id = app
+        .session
         .selected_agent_session_id
         .clone()
-        .or_else(|| app.session_id.clone());
+        .or_else(|| app.session.session_id.clone());
 
     // Refresh the cached task rows only when dirty, avoiding a per-frame
     // SQLite query + DAG computation.  The cache is marked dirty by
     // task-related events (tool results for task_create/task_update, and
     // the TaskCompleted / SubagentStart / SubagentComplete events).
-    if app.tasks_cache_dirty {
+    if app.session.tasks_cache_dirty {
         let rows_result: anyhow::Result<Vec<ragent_storage::TaskRow>> = match &session_id {
             Some(sid) => app
                 .storage
@@ -7228,14 +7246,14 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         };
         match rows_result {
             Ok(rows) => {
-                app.tasks_cache_rows = rows;
-                app.tasks_cache_dirty = false;
+                app.session.tasks_cache_rows = rows;
+                app.session.tasks_cache_dirty = false;
             }
             Err(e) => {
                 // Keep stale cache on error so the panel does not blank out
                 // on a transient SQLite failure. Retry on the next render.
                 tracing::warn!("tasks panel cache refresh failed: {e}");
-                app.tasks_cache_dirty = true;
+                app.session.tasks_cache_dirty = true;
             }
         }
     }
@@ -7244,7 +7262,7 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     // we must distinguish "no tasks" from "query failed" - the latter only
     // happens on the refresh attempt, so we can rely on cache emptiness
     // for the placeholder.
-    let lines: Vec<Line> = if app.tasks_cache_rows.is_empty() {
+    let lines: Vec<Line> = if app.session.tasks_cache_rows.is_empty() {
         app.tasks_max_scroll = 0;
         vec![Line::from(Span::styled(
             "No tasks",
@@ -7253,10 +7271,10 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         // Compute derived DAG fields so we can show [blocked by ...]
         // annotations (FR-005, FR-018).
-        let dag = ragent_storage::compute_task_dag(&app.tasks_cache_rows);
+        let dag = ragent_storage::compute_task_dag(&app.session.tasks_cache_rows);
 
         let mut all_lines: Vec<Line> = Vec::new();
-        for row in &app.tasks_cache_rows {
+        for row in &app.session.tasks_cache_rows {
             let status_upper = row.status.to_uppercase();
             let status_color = match status_upper.as_str() {
                 "PENDING" => Color::Yellow,
@@ -7659,7 +7677,12 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
     } = view.target
     {
         if session_id.is_none() {
-            if let Some(member) = app.team_members.iter().find(|m| m.agent_id == *agent_id) {
+            if let Some(member) = app
+                .session
+                .team_members
+                .iter()
+                .find(|m| m.agent_id == *agent_id)
+            {
                 if let Some(ref sid) = member.session_id {
                     *session_id = Some(sid.clone());
                 }
@@ -7722,10 +7745,10 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
 
         let session_messages: Option<std::borrow::Cow<'_, [Message]>> =
             target_session.as_ref().map(|sid| {
-                if app.session_id.as_deref() == Some(sid.as_str()) {
+                if app.session.session_id.as_deref() == Some(sid.as_str()) {
                     // Borrow the in-memory transcript without cloning; the
                     // overlay only reads it for this frame.
-                    std::borrow::Cow::Borrowed(app.messages.as_slice())
+                    std::borrow::Cow::Borrowed(app.session.messages.as_slice())
                 } else {
                     // Storage-backed sessions: fetch once here; derive
                     // generation and render from the same result. Surface DB
@@ -8477,15 +8500,16 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // Determine which session to display messages for.
     // If a specific agent is selected, show its messages; otherwise show primary session.
     let _display_session = app
+        .session
         .selected_agent_session_id
         .clone()
-        .or_else(|| app.session_id.clone());
+        .or_else(|| app.session.session_id.clone());
 
     // Filter messages to the selected agent's session.
     // For now, messages are still stored globally, so we match by session_id if available.
     // Tasks: Implement proper multi-session message storage to filter by _display_session.
     // This is a placeholder for future multi-session message handling.
-    let messages_to_show = &app.messages;
+    let messages_to_show = &app.session.messages;
     let inner_width = area.width.saturating_sub(2);
 
     // -- Per-message line cache (FR-003, FR-006) --------------------------
@@ -8509,27 +8533,34 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // version counter, so mutating one message never invalidates the cached
     // renders of the others.
 
-    let need_rewrap = app.message_cache_width != inner_width;
+    let need_rewrap = app.session.message_cache_width != inner_width;
 
     // Reconcile cache length: if messages were added or removed, adjust.
-    let cache_len_before = app.message_line_cache.len();
-    if app.message_line_cache.len() > messages_to_show.len() {
-        app.message_line_cache.truncate(messages_to_show.len());
+    let cache_len_before = app.session.message_line_cache.len();
+    if app.session.message_line_cache.len() > messages_to_show.len() {
+        app.session
+            .message_line_cache
+            .truncate(messages_to_show.len());
         // The cache shrank; the watermark may now point past the end.
-        app.message_cache_dirty_from = app.message_cache_dirty_from.min(messages_to_show.len());
+        app.session.message_cache_dirty_from = app
+            .session
+            .message_cache_dirty_from
+            .min(messages_to_show.len());
     }
 
     // Ensure every message has a cache slot.
-    while app.message_line_cache.len() < messages_to_show.len() {
-        app.message_line_cache.push(crate::app::MessageLineGroup {
-            lines: Vec::new(),
-            wrapped_lines: Vec::new(),
-            content_lines: Vec::new(),
-            wrapped_count: 0,
-            edit_seq: 0, // rendered on the first pass below
-        });
+    while app.session.message_line_cache.len() < messages_to_show.len() {
+        app.session
+            .message_line_cache
+            .push(crate::app::MessageLineGroup {
+                lines: Vec::new(),
+                wrapped_lines: Vec::new(),
+                content_lines: Vec::new(),
+                wrapped_count: 0,
+                edit_seq: 0, // rendered on the first pass below
+            });
     }
-    let cache_len_changed = app.message_line_cache.len() != cache_len_before;
+    let cache_len_changed = app.session.message_line_cache.len() != cache_len_before;
 
     // Re-render stale groups.  A group is stale when its cached `edit_seq`
     // no longer matches the message's current `edit_seq`, or when the slot
@@ -8541,7 +8572,10 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // watermark to, so an idle frame iterates zero groups instead of the
     // whole transcript.
     let w = inner_width.max(1) as usize;
-    let scan_from = app.message_cache_dirty_from.min(messages_to_show.len());
+    let scan_from = app
+        .session
+        .message_cache_dirty_from
+        .min(messages_to_show.len());
     // PERF-042: bound streaming re-render frequency.  `edit_seq` is bumped on
     // every `TextDelta`, so without throttling a growing reply is re-parsed and
     // re-wrapped on every token - O(n^2) over the reply.  A group that has
@@ -8549,13 +8583,14 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // `MESSAGE_STREAM_MIN_INTERVAL`; intermediate edits stay pending via the
     // dirty watermark and render on a later frame.
     let throttle_ok = app
+        .session
         .message_stream_throttle_at
         .is_none_or(|t| t.elapsed() >= MESSAGE_STREAM_MIN_INTERVAL);
     let mut any_rendered = false;
     let mut pending_from = messages_to_show.len();
     for i in scan_from..messages_to_show.len() {
         let msg = &messages_to_show[i];
-        let group = &mut app.message_line_cache[i];
+        let group = &mut app.session.message_line_cache[i];
         if group.edit_seq != msg.edit_seq || group.lines.is_empty() {
             // A brand-new group must render immediately so it is never blank;
             // otherwise the throttle governs how often the group may refresh.
@@ -8587,15 +8622,15 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     // Everything before `pending_from` is up to date; a throttled group keeps
     // its index so the next frame retries it.
-    app.message_cache_dirty_from = pending_from;
+    app.session.message_cache_dirty_from = pending_from;
     if any_rendered {
-        app.message_stream_throttle_at = Some(std::time::Instant::now());
+        app.session.message_stream_throttle_at = Some(std::time::Instant::now());
     }
 
     // Re-wrap all groups when the width changed (FR-003).
     let mut rewrapped_clean = false;
     if need_rewrap {
-        for group in app.message_line_cache.iter_mut() {
+        for group in app.session.message_line_cache.iter_mut() {
             group.wrapped_lines = group
                 .lines
                 .iter()
@@ -8604,7 +8639,7 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             group.content_lines = wrapped_lines_to_strings(&group.wrapped_lines);
             group.wrapped_count = group.wrapped_lines.len() as u16;
         }
-        app.message_cache_width = inner_width;
+        app.session.message_cache_width = inner_width;
         rewrapped_clean = true;
     }
 
@@ -8612,7 +8647,7 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // buffer only when a group's wrapped rows changed (PERF-041).  Idle frames
     // no longer clone every rendered row into `message_content_lines`.
     let mut total_wrapped: u16 = 0;
-    for group in app.message_line_cache.iter() {
+    for group in app.session.message_line_cache.iter() {
         total_wrapped = total_wrapped.saturating_add(group.wrapped_count);
     }
 
@@ -8623,27 +8658,28 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // calls `App::ensure_copy_content_lines`, which rebuilds on demand from
     // the per-message cache.
     if rewrapped_clean || cache_len_changed {
-        app.message_content_lines_dirty = true;
+        app.session.message_content_lines_dirty = true;
     }
-    if any_rendered || app.message_content_lines_dirty {
+    if any_rendered || app.session.message_content_lines_dirty {
         let mut all_content_lines: Vec<String> = Vec::new();
-        for group in app.message_line_cache.iter() {
+        for group in app.session.message_line_cache.iter() {
             all_content_lines.extend(group.content_lines.iter().cloned());
         }
-        app.message_content_lines = all_content_lines;
-        app.message_content_lines_dirty = false;
+        app.session.message_content_lines = all_content_lines;
+        app.session.message_content_lines_dirty = false;
     }
 
     // Compute scroll geometry from the cached wrapped counts (cheap - no
     // re-wrapping involved).
     let session_display = app
+        .session
         .session_id
         .as_deref()
         .map(short_id)
         .unwrap_or_else(|| "none".to_string());
     let title = format!(
         " Messages │ agent: {} │ session: {} ",
-        app.agent_name, session_display
+        app.session.agent_name, session_display
     );
     let messages_block = Block::default()
         .borders(Borders::ALL)
@@ -8660,9 +8696,9 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let max_scroll = total.saturating_sub(visible);
     // Clamp scroll_offset when content shrinks to prevent blank timeline
     // (C3 fix: Timeline no longer goes blank when content shrinks)
-    app.scroll_offset = app.scroll_offset.min(max_scroll);
-    app.message_max_scroll = max_scroll;
-    let scroll_from_top = max_scroll.saturating_sub(app.scroll_offset);
+    app.session.scroll_offset = app.session.scroll_offset.min(max_scroll);
+    app.session.message_max_scroll = max_scroll;
+    let scroll_from_top = max_scroll.saturating_sub(app.session.scroll_offset);
 
     // -- Scroll-window slice (idle-CPU fix) --------------------------------
     //
@@ -8678,10 +8714,12 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // the scroll geometry are both expressed in the same wrapped-row
     // coordinate system, the pinned-bottom view always shows the true tail
     // of the transcript and newly appended messages stay visible.
-    let window =
-        slice_group_wrapped_window(&app.message_line_cache, scroll_from_top, visible, |g| {
-            &g.wrapped_lines
-        });
+    let window = slice_group_wrapped_window(
+        &app.session.message_line_cache,
+        scroll_from_top,
+        visible,
+        |g| &g.wrapped_lines,
+    );
 
     // NOTE: no `.wrap(...)` here.  The cached rows are already pre-wrapped to
     // the inner width, and re-wrapping them with `Wrap { trim: false }` would
@@ -8716,26 +8754,27 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 /// reads exactly what is on screen, then project the wrapped rows into
 /// `message_content_lines`.
 pub fn ensure_message_copy_lines(app: &mut App) {
-    let w = app.message_cache_width.max(1) as usize;
+    let w = app.session.message_cache_width.max(1) as usize;
     // Render only the groups whose `edit_seq` is behind (usually the single
     // streaming message), so a copy costs one group render at most.
-    for i in 0..app.message_line_cache.len() {
+    for i in 0..app.session.message_line_cache.len() {
         let stale = app
+            .session
             .messages
             .get(i)
-            .map(|msg| app.message_line_cache[i].edit_seq != msg.edit_seq)
+            .map(|msg| app.session.message_line_cache[i].edit_seq != msg.edit_seq)
             .unwrap_or(false);
         if !stale {
             continue;
         }
         let lines = message_to_lines(
-            &app.messages[i],
+            &app.session.messages[i],
             &app.tool_step_map,
             &app.sid_to_display_name,
             &app.cwd,
         );
-        let edit_seq = app.messages[i].edit_seq;
-        let group = &mut app.message_line_cache[i];
+        let edit_seq = app.session.messages[i].edit_seq;
+        let group = &mut app.session.message_line_cache[i];
         group.lines = lines;
         group.edit_seq = edit_seq;
         group.wrapped_lines = group
@@ -8746,20 +8785,20 @@ pub fn ensure_message_copy_lines(app: &mut App) {
         group.content_lines = wrapped_lines_to_strings(&group.wrapped_lines);
         group.wrapped_count = group.wrapped_lines.len() as u16;
     }
-    app.message_cache_dirty_from = app.message_line_cache.len();
+    app.session.message_cache_dirty_from = app.session.message_line_cache.len();
     let mut rebuilt = Vec::new();
-    for group in &app.message_line_cache {
+    for group in &app.session.message_line_cache {
         rebuilt.extend(group.content_lines.iter().cloned());
     }
-    app.message_content_lines = rebuilt;
-    app.message_content_lines_dirty = false;
+    app.session.message_content_lines = rebuilt;
+    app.session.message_content_lines_dirty = false;
 }
 
 fn render_input(frame: &mut Frame, app: &App, area: Rect) {
     // Build title: show staged attachments in the block title. FR-058 (amended):
     // teammate focus no longer redirects the input box, so the title never names
     // a recipient - it stays ` Input ` and only attachments lengthen it.
-    let (title, title_style) = if app.pending_attachments.is_empty() {
+    let (title, title_style) = if app.session.pending_attachments.is_empty() {
         (
             " Input ".to_string(),
             Style::default()
@@ -8768,6 +8807,7 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
         )
     } else {
         let names: Vec<String> = app
+            .session
             .pending_attachments
             .iter()
             .filter_map(|p| {
@@ -8799,7 +8839,7 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
     // (NFR-002).
     let prefix = input_prompt_prefix(app.input_queue_len());
 
-    if app.input.is_empty() {
+    if app.session.input.is_empty() {
         // Show the prompt with dimmed placeholder text so the line doesn't jump.
         let ghost = Line::from(vec![
             Span::raw(prefix.clone()),
@@ -8814,7 +8854,7 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
         // PERF-046: reuse the rows and cursor position cached by
         // `refresh_input_render_cache` instead of re-wrapping and re-measuring
         // the buffer on every frame.
-        let cache = &app.input_render_cache;
+        let cache = &app.session.input_render_cache;
         let wrapped_lines = cache.lines.clone();
         let paragraph = Paragraph::new(wrapped_lines).block(block);
         frame.render_widget(paragraph, area);
@@ -9016,7 +9056,7 @@ fn render_context_menu(frame: &mut Frame, app: &App) {
 }
 
 fn render_permission_dialog(frame: &mut Frame, app: &App) {
-    let Some(ref req) = app.permission_queue.front() else {
+    let Some(ref req) = app.session.permission_queue.front() else {
         return;
     };
     // Standard permission dialog: y/a/n with countdown timer.
@@ -9069,7 +9109,7 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
         )),
     ];
 
-    let queue_depth = app.permission_queue.len();
+    let queue_depth = app.session.permission_queue.len();
     let title_suffix = if queue_depth > 1 {
         format!(
             "[warn]  Permission Required {} ({} queued)",
@@ -9093,7 +9133,7 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
 }
 
 fn render_question_dialog(frame: &mut Frame, app: &App) {
-    let Some(req) = app.question_queue.front() else {
+    let Some(req) = app.session.question_queue.front() else {
         return;
     };
 
@@ -9126,7 +9166,7 @@ fn render_question_dialog(frame: &mut Frame, app: &App) {
         ];
 
         for (i, option) in req.options.iter().enumerate() {
-            let is_selected = i == app.question_selected_index;
+            let is_selected = i == app.session.question_selected_index;
             let style = if is_selected {
                 Style::default()
                     .fg(Color::Black)
@@ -9174,10 +9214,10 @@ fn render_question_dialog(frame: &mut Frame, app: &App) {
     // the same way the provider API-key field does, so a password is never
     // painted in clear text while it is being entered (audit high finding).
     let input_display = if req.secret {
-        let masked = "*".repeat(app.pending_question_input.chars().count());
+        let masked = "*".repeat(app.session.pending_question_input.chars().count());
         format!("> {masked}_")
     } else {
-        format!("> {}_", app.pending_question_input)
+        format!("> {}_", app.session.pending_question_input)
     };
     let text = vec![
         Line::from(Span::styled(
@@ -9236,7 +9276,7 @@ fn render_force_cleanup_dialog(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 40, frame.area());
     frame.render_widget(Clear, area);
 
-    if let Some(ref pending) = app.pending_forcecleanup {
+    if let Some(ref pending) = app.session.pending_forcecleanup {
         let mut lines: Vec<Line<'_>> = vec![
             Line::from(Span::styled(
                 "Force-cleanup Confirmation",
