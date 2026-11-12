@@ -16,6 +16,16 @@
 > supersedes nothing: the `1.0.168` tree it measures is the spec-system repair
 > pair (`6953c57c`, `9ed32bd8`, merged as PR #11) plus these three commits.
 >
+> The `projects` spec (`specs/projects/PLAN.md`), added on top of the
+> multi-session work, is not re-measured in the tables below. It adds 6,879
+> and removes 198 lines across 54 files, tests included:
+> `crates/ragent-agent` +3,031 (the new `project` module: manager, remote
+> detection, session worktrees, request counts, reports),
+> `crates/ragent-tui` +1,631 (`app/projects.rs`, the sidebar),
+> `crates/ragent-storage` +1,294 (`project_store.rs`, schema 6) and
+> `crates/ragent-server` +827 (`routes/projects.rs`). No crate or binary is
+> added; 12 test files are added.
+>
 > The `1.0.167` pass repairs a flaky ACP transport test
 > (`test_mcp_acp_more`'s four ACP cases shared one scratch script path, so a
 > sibling nextest process could hand `python3` a half-written script) and

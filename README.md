@@ -235,6 +235,12 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   `--log-level all` is accepted as a spelling of
   `trace`, so it records every severity for both the local sink and the export
 - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
+- **Projects** — every session belongs to a project: a local checkout with a
+  name, an optional base model and, when it came from GitHub or GitLab, its
+  remote. A session can run in its own `git worktree` at a branch
+  (`/session new --branch`), and the session sidebar groups sessions by
+  project and shows the pull/merge request count for each session's branch
+  (`/project`, `ragent project`)
 - **Session management** — persistent conversation history stored in SQLite;
   list, resume, export-archive, and import sessions. A session's transcript can be
   aged out with `/db prune [--days N] [--dry-run]` (TUI) or `ragent db prune`
