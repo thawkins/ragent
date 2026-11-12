@@ -11294,6 +11294,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 std::collections::HashMap::new(),
                             )),
                             research_root: std::sync::Arc::new(self.cwd_path.join("research")),
+                            worktree_root: std::sync::Arc::new(self.session_worktree_root()),
                         };
 
                         let addr_clone = addr.clone();

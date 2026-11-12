@@ -12,6 +12,7 @@
 //! git and the GitHub/GitLab API clients.
 
 pub mod remote;
+pub mod report;
 pub mod requests;
 pub mod worktree;
 

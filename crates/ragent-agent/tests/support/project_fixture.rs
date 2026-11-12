@@ -4,6 +4,9 @@
 //! tree in a directory unique to the calling test, so parallel test
 //! processes never share one and nothing is written into the repository.
 
+// Each test file includes this module and uses only part of it.
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;

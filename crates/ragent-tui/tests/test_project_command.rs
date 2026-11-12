@@ -178,7 +178,11 @@ async fn test_project_command_rename_and_model_edit_the_focused_project() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the cwd
 async fn test_project_command_add_registers_permitted_directories_only() {
+    // The permitted roots start from the process cwd, which other tests in
+    // this binary swap under the same lock.
+    let _cwd = crate::global_env_lock();
     let mut app = support::make_app();
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
 

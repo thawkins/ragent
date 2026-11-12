@@ -218,7 +218,7 @@ fn test_session_worktree_prune_removes_clean_and_keeps_dirty() {
     let m = managers();
     let project = project_in(&m, &base);
     let root = base.join("trees");
-    let mut make = |branch: &str| {
+    let make = |branch: &str| {
         m.projects
             .create_session(&m.sessions, &project.id, Some(branch), &root)
             .expect("session")

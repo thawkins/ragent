@@ -73,7 +73,7 @@ fn test_project_manager_edits_publish_project_updated() {
         .resolve_for_dir(std::path::Path::new("/nonexistent/manager_edits"))
         .expect("resolve");
     let mut rx = m.events.subscribe();
-    let mut updates = |rx: &mut tokio::sync::broadcast::Receiver<Event>| {
+    let updates = |rx: &mut tokio::sync::broadcast::Receiver<Event>| {
         let mut n = 0;
         while let Ok(event) = rx.try_recv() {
             if matches!(&event, Event::ProjectUpdated { project_id } if *project_id == project.id) {

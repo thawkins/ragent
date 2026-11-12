@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
@@ -146,6 +146,11 @@ enum Commands {
     Session {
         #[command(subcommand)]
         command: SessionCommands,
+    },
+    /// Manage projects (a local checkout with a base model and remote)
+    Project {
+        #[command(subcommand)]
+        command: ProjectCommands,
     },
 
     /// Inspect and compact the session database
@@ -289,11 +294,40 @@ enum ConfigCommands {
     },
 }
 
+/// Sub-commands for the `project` namespace.
+#[derive(Subcommand)]
+enum ProjectCommands {
+    /// List projects
+    List,
+    /// Show one project
+    Show {
+        /// Project name, id or id prefix
+        name: String,
+    },
+    /// Register the project that contains a directory
+    Add {
+        /// A directory inside the project's checkout
+        path: String,
+    },
+    /// Remove a project with no live sessions from the list (files are kept)
+    Remove {
+        /// Project name, id or id prefix
+        name: String,
+    },
+}
+
 /// Sub-commands for the `session` namespace.
 #[derive(Subcommand)]
 enum SessionCommands {
-    /// List all sessions
-    List,
+    /// List sessions grouped by project
+    List {
+        /// Only list the sessions of this project (name, id or id prefix)
+        #[arg(long)]
+        project: Option<String>,
+        /// Output the grouped listing as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Resume an existing session
     Resume {
         /// Session ID
@@ -542,6 +576,7 @@ async fn async_main() -> Result<()> {
                 | Commands::New { .. }
                 | Commands::Spec { .. }
                 | Commands::Session { .. }
+                | Commands::Project { .. }
                 | Commands::Db { .. }
                 | Commands::Config { .. }
                 | Commands::Research { .. }
@@ -1420,6 +1455,10 @@ async fn async_main() -> Result<()> {
                 coordinator: Some(coordinator),
                 research_runs: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                 research_root: Arc::new(crate::working_dir().join("research")),
+                worktree_root: Arc::new(
+                    ragent_agent::project::worktree::default_worktree_root()
+                        .unwrap_or_else(|| crate::working_dir().join(".ragent/worktrees")),
+                ),
             };
             ragent_server::start_server(&addr, state).await?;
         }
@@ -1427,23 +1466,54 @@ async fn async_main() -> Result<()> {
             tracing::info!("Starting orchestration example");
             cli::run_orchestration_example().await?;
         }
+        Some(Commands::Project { command }) => {
+            use ragent_agent::project::{ProjectManager, report};
+            let manager = ProjectManager::new(Arc::clone(&storage), Arc::clone(&event_bus));
+            let find = |name: &str| {
+                manager
+                    .find(name)?
+                    .ok_or_else(|| anyhow::anyhow!("no project named '{name}'"))
+            };
+            let mut stdout = std::io::stdout().lock();
+            match command {
+                ProjectCommands::List => write!(stdout, "{}", report::projects_text(&storage)?)?,
+                ProjectCommands::Show { name } => {
+                    let project = find(&name)?;
+                    let live = storage.list_project_sessions(&project.id, false)?.len();
+                    write!(stdout, "{}", report::project_text(&project, live))?;
+                }
+                ProjectCommands::Add { path } => {
+                    let dir = std::path::Path::new(&path)
+                        .canonicalize()
+                        .with_context(|| format!("cannot use '{path}'"))?;
+                    anyhow::ensure!(dir.is_dir(), "'{path}' is not a directory");
+                    let project = manager.resolve_for_dir(&dir)?;
+                    write!(stdout, "{}", report::project_text(&project, 0))?;
+                }
+                ProjectCommands::Remove { name } => {
+                    let project = find(&name)?;
+                    manager.remove(&project.id)?;
+                    writeln!(
+                        stdout,
+                        "Removed project {} from the list; its files are untouched.",
+                        project.name
+                    )?;
+                }
+            }
+        }
         Some(Commands::Session { command }) => match command {
-            SessionCommands::List => {
-                let sessions = storage.list_sessions()?;
-                if sessions.is_empty() {
-                    tracing::info!("No sessions found");
+            SessionCommands::List { project, json } => {
+                use ragent_agent::project::report;
+                let mut stdout = std::io::stdout().lock();
+                if json {
+                    let listing = report::grouped_sessions_json(&storage, project.as_deref())?;
+                    writeln!(stdout, "{}", serde_json::to_string_pretty(&listing)?)?;
                 } else {
-                    let mut stdout = std::io::stdout().lock();
-                    for s in sessions {
-                        writeln!(
-                            stdout,
-                            "{} | {} | {} | {}",
-                            &s.id[..8.min(s.id.len())],
-                            s.title,
-                            s.directory,
-                            s.updated_at
-                        )?;
-                    }
+                    write!(
+                        stdout,
+                        "{}",
+                        report::grouped_sessions_text(&storage, project.as_deref())?
+                    )?;
                 }
             }
             SessionCommands::Resume { id } => {

@@ -7,6 +7,7 @@ pub mod automation;
 pub mod memory;
 pub mod openai;
 pub mod openapi;
+pub mod projects;
 pub mod research;
 
 use std::collections::HashMap;
@@ -37,7 +38,7 @@ use ragent_agent::{
     event::{Event, EventBus},
     sanitize::redact_secrets,
     session::processor::SessionProcessor,
-    storage::{SessionRow, Storage},
+    storage::{SessionCheckout, SessionRow, Storage},
     task::AgentManager,
 };
 
@@ -115,6 +116,9 @@ pub struct AppState {
     /// `research/` tree into the repository. The parent directory is treated as
     /// the project root for `from_files` containment (SEC-002).
     pub research_root: Arc<std::path::PathBuf>,
+    /// Directory session-owned git worktrees are created under (spec
+    /// `projects`). Explicit state so a test can point it at `target/temp/`.
+    pub worktree_root: Arc<std::path::PathBuf>,
 }
 
 /// Count of currently open `/events` SSE connections across the process (F-M9).
@@ -166,6 +170,15 @@ pub fn router(state: AppState) -> Router {
         .route("/providers", get(get_providers))
         .route("/sessions", get(list_sessions).post(create_session))
         .route("/sessions/{id}", get(get_session).delete(archive_session))
+        .route(
+            "/projects",
+            get(projects::list_projects).post(projects::create_project),
+        )
+        .route(
+            "/projects/{id}",
+            get(projects::get_project).delete(projects::remove_project),
+        )
+        .route("/projects/{id}/sessions", get(projects::project_sessions))
         .route(
             "/sessions/{id}/messages",
             get(get_messages).post(send_message),
@@ -378,21 +391,32 @@ async fn get_providers(State(state): State<AppState>) -> (StatusCode, Json<serde
 }
 
 #[derive(Serialize)]
-struct SessionResponse {
+pub(crate) struct SessionResponse {
     id: String,
     title: String,
+    /// The project the session belongs to (spec `projects`).
+    project_id: String,
     directory: String,
+    /// Branch of the session-owned worktree, if it has one.
+    branch: Option<String>,
+    /// Session-owned git worktree, if it has one.
+    worktree: Option<String>,
     created_at: String,
     updated_at: String,
     summary: Option<String>,
 }
 
-impl From<SessionRow> for SessionResponse {
-    fn from(row: SessionRow) -> Self {
+impl SessionResponse {
+    /// Builds the response from a session row and its checkout data.
+    pub(crate) fn new(row: SessionRow, checkout: Option<SessionCheckout>) -> Self {
+        let checkout = checkout.unwrap_or_default();
         Self {
             id: row.id,
             title: row.title,
+            project_id: row.project_id,
             directory: row.directory,
+            branch: checkout.branch,
+            worktree: checkout.worktree,
             created_at: row.created_at,
             updated_at: row.updated_at,
             summary: row.summary,
@@ -400,63 +424,26 @@ impl From<SessionRow> for SessionResponse {
     }
 }
 
-async fn list_sessions(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
-    let storage = Arc::clone(&state.storage);
-    match tokio::task::spawn_blocking(move || storage.list_sessions()).await {
-        Ok(Ok(sessions)) => {
-            let resp: Vec<SessionResponse> = sessions.into_iter().map(Into::into).collect();
-            serialize_response(resp, "list_sessions")
-        }
-        Ok(Err(e)) => internal_error_response("list_sessions", e),
-        Err(e) => internal_error_response("list_sessions", e),
-    }
-}
-
-#[derive(Deserialize)]
-struct CreateSessionRequest {
-    directory: String,
-}
-
-#[tracing::instrument(skip(state, body))]
-async fn create_session(
-    State(state): State<AppState>,
-    Json(body): Json<CreateSessionRequest>,
-) -> impl IntoResponse {
-    // F-L9: throttle session creation through the shared limiter. There is no
-    // session id yet, so all creations share one fixed bucket.
-    if let Some(rate_limited) = check_rate_limit(&state, "create_session").await {
-        return rate_limited.into_response();
-    }
-
-    let path = std::path::Path::new(&body.directory);
+/// Canonicalises `directory` and checks it is a directory inside a permitted
+/// root (SEC-062): the server's working directory or a configured
+/// `dirs.allowed_roots` entry. Returns `None` for anything else; the reason
+/// is logged, never sent to the client (SEC-ragent-server-008).
+pub(crate) async fn permitted_directory(state: &AppState, directory: &str) -> Option<String> {
+    let path = std::path::Path::new(directory);
     let canonical = match tokio::fs::canonicalize(path).await {
         Ok(p) => p,
         Err(e) => {
-            // SEC-ragent-server-008 (SECTASKS T-064): `canonicalize`'s error
-            // embeds the resolved path component, so log it and answer
-            // generically.
+            // `canonicalize`'s error embeds the resolved path component.
             tracing::warn!(error = %e, "session directory rejected");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": "invalid directory" })),
-            )
-                .into_response();
+            return None;
         }
     };
     let is_dir = tokio::fs::metadata(&canonical)
         .await
         .is_ok_and(|m| m.is_dir());
     if !is_dir {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "invalid directory" })),
-        )
-            .into_response();
+        return None;
     }
-    // SEC-062: a session directory must resolve inside a permitted root, never
-    // an arbitrary host path. The permitted roots are the server's working
-    // directory (serve runs from the project root) plus any configured
-    // `dirs.allowed_roots` (mirroring the file-tool containment rule).
     let roots: Vec<std::path::PathBuf> = {
         let cfg = state.config.read().await;
         let mut roots = Vec::with_capacity(cfg.dirs.allowed_roots.len() + 1);
@@ -471,13 +458,84 @@ async fn create_session(
     };
     if !roots.iter().any(|root| canonical.starts_with(root)) {
         tracing::warn!(directory = %canonical.display(), "session directory outside permitted roots");
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "invalid directory" })),
-        )
-            .into_response();
+        return None;
     }
-    let directory = canonical.display().to_string();
+    Some(canonical.display().to_string())
+}
+
+async fn list_sessions(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
+    let storage = Arc::clone(&state.storage);
+    let listed = tokio::task::spawn_blocking(move || {
+        Ok::<_, anyhow::Error>((storage.list_sessions()?, storage.session_checkouts()?))
+    })
+    .await;
+    match listed {
+        Ok(Ok((sessions, mut checkouts))) => {
+            let resp: Vec<SessionResponse> = sessions
+                .into_iter()
+                .map(|row| {
+                    let checkout = checkouts.remove(&row.id);
+                    SessionResponse::new(row, checkout)
+                })
+                .collect();
+            serialize_response(resp, "list_sessions")
+        }
+        Ok(Err(e)) => internal_error_response("list_sessions", e),
+        Err(e) => internal_error_response("list_sessions", e),
+    }
+}
+
+/// Body of `POST /sessions`: a `directory`, or a `project_id` with an
+/// optional `branch` (spec `projects`).
+#[derive(Deserialize)]
+struct CreateSessionRequest {
+    #[serde(default)]
+    directory: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    branch: Option<String>,
+}
+
+#[tracing::instrument(skip(state, body))]
+async fn create_session(
+    State(state): State<AppState>,
+    Json(body): Json<CreateSessionRequest>,
+) -> impl IntoResponse {
+    // F-L9: throttle session creation through the shared limiter. There is no
+    // session id yet, so all creations share one fixed bucket.
+    if let Some(rate_limited) = check_rate_limit(&state, "create_session").await {
+        return rate_limited.into_response();
+    }
+
+    let invalid = |message: &'static str| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": message })),
+        )
+            .into_response()
+    };
+    let directory = match (&body.directory, &body.project_id) {
+        (Some(_), Some(_)) => return invalid("give a directory or a project_id, not both"),
+        (None, None) => return invalid("a directory or a project_id is required"),
+        (None, Some(project_id)) => {
+            return projects::create_session_in_project(
+                &state,
+                project_id.clone(),
+                body.branch.clone(),
+            )
+            .await;
+        }
+        (Some(_), None) if body.branch.is_some() => {
+            return invalid("a branch needs a project_id");
+        }
+        (Some(directory), None) => directory.clone(),
+    };
+    // SEC-062: a session directory must resolve inside a permitted root, never
+    // an arbitrary host path.
+    let Some(directory) = permitted_directory(&state, &directory).await else {
+        return invalid("invalid directory");
+    };
     let id = uuid::Uuid::new_v4().to_string();
     let storage = Arc::clone(&state.storage);
     let id_for_spawn = id.clone();
@@ -505,11 +563,16 @@ async fn get_session(
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let storage = Arc::clone(&state.storage);
-    match tokio::task::spawn_blocking(move || storage.get_session(&id)).await {
-        Ok(Ok(Some(session))) => {
-            let resp: SessionResponse = session.into();
-            serialize_response(resp, "get_session")
-        }
+    let found = tokio::task::spawn_blocking(move || {
+        let Some(row) = storage.get_session(&id)? else {
+            return Ok::<_, anyhow::Error>(None);
+        };
+        let checkout = storage.session_checkout(&id)?;
+        Ok(Some(SessionResponse::new(row, checkout)))
+    })
+    .await;
+    match found {
+        Ok(Ok(Some(resp))) => serialize_response(resp, "get_session"),
         Ok(Ok(None)) => error_response(StatusCode::NOT_FOUND, "session not found"),
         Ok(Err(e)) => internal_error_response("get_session", e),
         Err(e) => internal_error_response("get_session", e),

@@ -14,6 +14,7 @@ fn test_archive_manifest_serialization() {
         session_id: "test-session".to_string(),
         session_title: "Test Session".to_string(),
         session_directory: "/tmp/test".to_string(),
+        project: None,
         created_at: Utc::now().to_rfc3339(),
         message_count: 10,
         trigger_count: 2,

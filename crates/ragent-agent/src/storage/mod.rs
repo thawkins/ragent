@@ -22,6 +22,6 @@
 
 pub use ragent_storage::{
     ActivityLog, InitiativeMilestone, InitiativeRow, KgEntityRow, KgRelationshipRow, MemoryRow,
-    RunCostSummaryRow, SessionRow, Storage, TaskRow, TaskUpdateParams, decrypt_key,
-    deobfuscate_key, encrypt_key, obfuscate_key,
+    ProjectRemoteRow, ProjectRow, RunCostSummaryRow, SessionCheckout, SessionRow, Storage, TaskRow,
+    TaskUpdateParams, decrypt_key, deobfuscate_key, encrypt_key, obfuscate_key,
 };
