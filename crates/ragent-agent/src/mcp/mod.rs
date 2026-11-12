@@ -293,6 +293,10 @@ pub struct McpClient {
     /// map lookup.  First connected server advertising a name wins, matching
     /// the previous linear-scan semantics.
     tool_index: HashMap<String, String>,
+    /// Directory stdio servers are started in; `None` inherits the process
+    /// working directory. A project's own client (spec MULTISESSION M8)
+    /// starts its servers in the project root.
+    working_dir: Option<std::path::PathBuf>,
 }
 
 impl Drop for McpClient {
@@ -380,7 +384,21 @@ impl McpClient {
             // on the first request instead.
             http_client: None,
             tool_index: HashMap::new(),
+            working_dir: None,
         }
+    }
+
+    /// A client whose stdio servers start in `working_dir`
+    /// (spec MULTISESSION M8: a project's servers run in its root).
+    ///
+    /// # Arguments
+    ///
+    /// * `working_dir` - the directory stdio server processes start in.
+    #[must_use]
+    pub fn with_working_dir(working_dir: std::path::PathBuf) -> Self {
+        let mut client = Self::new();
+        client.working_dir = Some(working_dir);
+        client
     }
 
     /// PERF-076: rebuild the `tool_name -> server_id` index from the current
@@ -686,6 +704,7 @@ impl McpClient {
 
                 let args = config.args.clone();
                 let env = config.env.clone();
+                let working_dir = self.working_dir.clone();
 
                 // An interrupted earlier `npx` run leaves a retired directory
                 // that makes every later `reify` of that package fail with
@@ -707,6 +726,9 @@ impl McpClient {
                         }
                         for (k, v) in &env {
                             cmd.env(k, v);
+                        }
+                        if let Some(dir) = &working_dir {
+                            cmd.current_dir(dir);
                         }
                         // The child leads its own process group so shutdown
                         // can `killpg` the whole tree: launcher commands

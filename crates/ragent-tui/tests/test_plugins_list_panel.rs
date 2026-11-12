@@ -177,7 +177,7 @@ async fn plugins_list_opens_a_panel_with_the_pinned_table_and_capabilities() {
     let (_lock, _guard, _temp) = enter_project("codex-weather", 1);
     let mut app = support::make_app();
     app.cwd_path = std::env::current_dir().expect("cwd");
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
 
@@ -241,7 +241,7 @@ async fn plugins_list_escape_closes_the_panel() {
     let (_lock, _guard, _temp) = enter_project("codex-weather", 1);
     let mut app = support::make_app();
     app.cwd_path = std::env::current_dir().expect("cwd");
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
     assert!(app.plugins_list.is_some());
@@ -259,7 +259,7 @@ async fn plugins_list_down_moves_cursor_and_clamps_at_ends() {
     let (_lock, _guard, _temp) = enter_project("codex-weather", 3);
     let mut app = support::make_app();
     app.cwd_path = std::env::current_dir().expect("cwd");
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
     let last = app
@@ -301,7 +301,7 @@ async fn plugins_list_list_scrolls_to_keep_the_cursor_visible() {
     let (_lock, _guard, _temp) = enter_project("codex-plugin", 30);
     let mut app = support::make_app();
     app.cwd_path = std::env::current_dir().expect("cwd");
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
 
@@ -343,7 +343,7 @@ async fn plugins_list_block_cursor_paints_the_selected_row() {
     let (_lock, _guard, _temp) = enter_project("codex-weather", 2);
     let mut app = support::make_app();
     app.cwd_path = std::env::current_dir().expect("cwd");
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
     // The block cursor starts on body line 0 (the first plugin table row).
@@ -377,7 +377,7 @@ async fn plugins_list_space_toggles_the_highlighted_plugin() {
     let (_lock, _guard, _temp) = enter_project("codex-weather", 1);
     let mut app = support::make_app();
     app.cwd_path = std::env::current_dir().expect("cwd");
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
     assert!(
@@ -423,7 +423,7 @@ async fn plugins_list_feedback_row_shows_the_toggle_outcome() {
     let (_lock, _guard, _temp) = enter_project("codex-weather", 1);
     let mut app = support::make_app();
     app.cwd_path = std::env::current_dir().expect("cwd");
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
     press(&mut app, KeyCode::Char(' ')).await;

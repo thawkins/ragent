@@ -1349,6 +1349,49 @@ ragent session export-archive <session-id> -o session_archive.tar.gz
 ragent session import session_archive.tar.gz
 ```
 
+### Multiple sessions in the TUI
+
+The TUI keeps several sessions open at once. A session keeps working while
+you look at another one; when it needs you (a permission prompt or a
+question) its sidebar row shows `!` and the status bar shows `N need you`.
+
+```text
+/session new                 # start another session in this project
+/session new ../other-repo   # ...or in a directory under the launch directory
+                             #    or a `dirs.allowed_roots` entry
+/session switch fix-parser   # focus by id, id prefix/suffix, or title prefix
+/session list                # open sessions and their state
+/session list --all          # every stored session, grouped by project
+/session rename Fix the parser
+/session pin                 # pin/unpin the focused session
+/session archive             # archive and close it (/session unarchive <id>)
+/session close               # close it; it stays in storage
+```
+
+`ragent` reopens the sessions that were open when it last exited;
+`ragent --new` starts a fresh one. Untitled sessions take their title from
+the first prompt.
+
+The left-hand sidebar lists sessions by project. `Alt+S` shows, focuses or
+hides it; `Ctrl+N` opens a session; `Ctrl+Up`/`Ctrl+Down` move to the
+previous/next one; `Alt+R` returns to the last one.
+
+To get a desktop notification when a background session needs you, add an
+`on_notification` hook to `ragent.json`:
+
+```json
+{
+  "hooks": [
+    {
+      "trigger": "on_notification",
+      "command": "notify-send ragent \"$RAGENT_NOTIFICATION_MESSAGE\""
+    }
+  ]
+}
+```
+
+`RAGENT_NOTIFICATION_KIND` is `waiting`, `finished` or `failed`.
+
 ### Pruning an old transcript
 
 A session's messages can be aged out without deleting the session. The
@@ -2065,6 +2108,10 @@ Notes:
 | `Ctrl+PageUp/Down` | Scroll log panel |
 | `Alt+C` | Toggle the live context-window panel |
 | `Alt+Q` | Open the queue-control menu (`Next` / `Stop`/`Resume` / `Clear` / `Show`) |
+| `Alt+S` | Show/focus/hide the session sidebar |
+| `Ctrl+N` | New session |
+| `Ctrl+Up` / `Ctrl+Down` | Previous / next session |
+| `Alt+R` | Most recently focused session |
 | `Ctrl+C` | Abort / exit |
 
 ---

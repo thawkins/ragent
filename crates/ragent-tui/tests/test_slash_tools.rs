@@ -89,8 +89,8 @@ async fn tools_too_many_args_shows_usage() {
 #[tokio::test]
 async fn thinking_without_model_warns() {
     let mut app = app_session();
-    app.selected_model = None;
-    app.agent_info.model = None;
+    app.session.selected_model = None;
+    app.session.agent_info.model = None;
     app.execute_slash_command("/thinking").await;
     assert!(app.status.contains("No model selected"));
 }
@@ -100,7 +100,7 @@ async fn thinking_invalid_setting_shows_usage() {
     let mut app = app_session();
     // Provide a selected model so the early no-model guard is bypassed; the
     // invalid setting is rejected before any level lookup.
-    app.selected_model = Some("ollama/llama3".to_string());
+    app.session.selected_model = Some("ollama/llama3".to_string());
     app.execute_slash_command("/thinking nonsense").await;
     assert_eq!(app.status, "Usage: /thinking [auto|off|low|medium|high]");
 }
@@ -110,7 +110,7 @@ async fn thinking_report_without_resolvable_model() {
     let mut app = app_session();
     // A model that the provider registry cannot resolve: the supported set is
     // empty, so the bare report renders "unknown".
-    app.selected_model = Some("nonexistent-provider/nonexistent-model".to_string());
+    app.session.selected_model = Some("nonexistent-provider/nonexistent-model".to_string());
     app.execute_slash_command("/thinking").await;
     assert_eq!(app.status, "thinking");
     assert!(last_message(&app).contains("Supported:"));
@@ -120,7 +120,7 @@ async fn thinking_report_without_resolvable_model() {
 /// `/thinking` cases that never touch the config).
 fn app_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("slash-thinking".to_string());
+    app.session.session_id = Some("slash-thinking".to_string());
     // Neutralise the ambient provider config so the selected model is the only
     // source considered.
     app.configured_provider = None;

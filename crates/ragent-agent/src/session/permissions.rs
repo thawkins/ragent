@@ -696,6 +696,10 @@ pub async fn check_permission_with_prompt(
     // this flag is the whole question and the prompt path below does not have
     // to know what a sub-agent is.
     subagent_yolo: bool,
+    // The calling session's working directory (spec MULTISESSION M6): the
+    // `file:read` auto-grant covers files under it, not under the process
+    // cwd, so a session in another project is judged against its own tree.
+    working_dir: &std::path::Path,
 ) -> Result<PermissionAction> {
     // Short-circuit if --yes / --no-prompt flag is set. A forced
     // destructive-action checkpoint (FR-015) suppresses this: auto-approval
@@ -806,12 +810,16 @@ pub async fn check_permission_with_prompt(
             // destructive call; the request goes to a human checkpoint
             // prompt whose timeout counts as denial (FR-024).
             if !checkpoint_forced && (permission == "file:read" || permission == "read") {
-                if let Ok(cwd) = std::env::current_dir() {
+                if let Ok(cwd) = working_dir.canonicalize() {
+                    // A relative resource is relative to the session's
+                    // working directory, as the tools resolve it - not to the
+                    // process cwd (MULTISESSION M6).
+                    let resource_full = working_dir.join(resource);
                     // FR-017: use the per-step canonical path cache when
                     // available to avoid a blocking canonicalize syscall.
                     let resource_canonical = match canonical_cache {
-                        Some(cache) => cache.get_or_canonicalize(std::path::Path::new(resource)),
-                        None => std::path::Path::new(resource).canonicalize().ok(),
+                        Some(cache) => cache.get_or_canonicalize(&resource_full),
+                        None => resource_full.canonicalize().ok(),
                     };
                     if let Some(resource_path) = resource_canonical {
                         if resource_path.starts_with(&cwd) {

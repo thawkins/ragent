@@ -38,11 +38,19 @@ pub use self::status_bar_cache::StatusBarCache;
 mod model_picker_cache;
 pub use self::model_picker_cache::ModelPickerRowsCache;
 
+mod project_services;
 pub mod prompt;
 mod research;
 mod reverse;
+pub use self::project_services::ProjectServices;
 mod session_ops;
+mod session_registry;
+mod session_view;
+pub(crate) mod sessions;
 pub use self::session_ops::emit_log_entry_to_tracing;
+pub use self::session_registry::SessionRegistry;
+pub use self::session_view::{Attention, SessionView};
+pub use self::sessions::title_from_prompt;
 pub mod skillgen;
 mod slash;
 

@@ -153,7 +153,10 @@ async fn status_bar_surfaces_the_default_local_backend() {
     let (_guard, _env, _temp) = enter_project(r#"{"defaultAgent": "general"}"#);
     let mut app = support::make_app();
 
-    assert_eq!(app.active_backend, "local", "FR-019 default backend");
+    assert_eq!(
+        app.session.active_backend, "local",
+        "FR-019 default backend"
+    );
     let frame = render_app_to_string(&mut app);
     let line2 = frame.lines().nth(1).unwrap_or("");
     assert!(
@@ -178,7 +181,7 @@ async fn backend_command_opens_the_switcher_panel() {
     "#;
     let (_guard, _env, _temp) = enter_project(project_config);
     let mut app = support::make_app();
-    app.session_id = Some("backend-test".to_string());
+    app.session.session_id = Some("backend-test".to_string());
 
     app.execute_slash_command("/backend").await;
 
@@ -217,7 +220,7 @@ async fn panel_lists_docker_and_podman_kinds_with_health() {
     "#;
     let (_guard, _env, _temp) = enter_project(project_config);
     let mut app = support::make_app();
-    app.session_id = Some("backend-test".to_string());
+    app.session.session_id = Some("backend-test".to_string());
 
     app.execute_slash_command("/backend").await;
     let panel = app.backend_panel.as_ref().expect("panel must open");
@@ -238,7 +241,7 @@ async fn panel_lists_docker_and_podman_kinds_with_health() {
 async fn panel_renders_rows_and_footer() {
     let (_guard, _env, _temp) = enter_project(r#"{"defaultAgent": "general"}"#);
     let mut app = support::make_app();
-    app.session_id = Some("backend-test".to_string());
+    app.session.session_id = Some("backend-test".to_string());
     app.execute_slash_command("/backend").await;
 
     let backend = TestBackend::new(120, 40);
@@ -266,7 +269,7 @@ async fn panel_renders_rows_and_footer() {
 async fn panel_owns_the_keyboard_until_escape() {
     let (_guard, _env, _temp) = enter_project(r#"{"defaultAgent": "general"}"#);
     let mut app = support::make_app();
-    app.session_id = Some("backend-test".to_string());
+    app.session.session_id = Some("backend-test".to_string());
     app.execute_slash_command("/backend").await;
     assert!(app.backend_panel.is_some(), "panel open");
 
@@ -274,7 +277,7 @@ async fn panel_owns_the_keyboard_until_escape() {
     app.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
         .await;
     assert!(
-        app.input.is_empty(),
+        app.session.input.is_empty(),
         "no character may reach the input buffer"
     );
     assert!(
@@ -300,7 +303,7 @@ async fn panel_switches_the_active_backend_and_persists_it() {
     "#;
     let (_guard, _env, _temp) = enter_project(project_config);
     let mut app = support::make_app();
-    app.session_id = Some("backend-test".to_string());
+    app.session.session_id = Some("backend-test".to_string());
 
     app.execute_slash_command("/backend").await;
     // Move the cursor off `local` and switch.
@@ -315,14 +318,17 @@ async fn panel_switches_the_active_backend_and_persists_it() {
         serde_json::from_str(&std::fs::read_to_string(".ragent/ragent.json").expect("read"))
             .expect("parse config");
     let persisted = serde_json::to_value(&config).expect("serialise");
-    if app.active_backend == "docker" {
+    if app.session.active_backend == "docker" {
         assert_eq!(
             persisted.get("execution_backend").and_then(|v| v.as_str()),
             Some("docker"),
             "a successful switch persists execution_backend"
         );
     } else {
-        assert_eq!(app.active_backend, "local", "a refused switch keeps local");
+        assert_eq!(
+            app.session.active_backend, "local",
+            "a refused switch keeps local"
+        );
         assert!(
             persisted.get("execution_backend").is_none(),
             "a refused switch writes no key"
@@ -334,14 +340,14 @@ async fn panel_switches_the_active_backend_and_persists_it() {
 async fn switching_by_kind_persists_and_updates_the_status_bar() {
     let (_guard, _env, _temp) = enter_project(r#"{"defaultAgent": "general"}"#);
     let mut app = support::make_app();
-    app.session_id = Some("backend-test".to_string());
+    app.session.session_id = Some("backend-test".to_string());
 
     app.execute_slash_command("/backend remote").await;
 
     // A `remote` backend with no URL/key is `unavailable`, so the switcher
     // refuses it and leaves the active backend on `local`.
     assert_eq!(
-        app.active_backend, "local",
+        app.session.active_backend, "local",
         "an unavailable backend cannot be selected"
     );
     assert_eq!(
@@ -355,7 +361,7 @@ async fn switching_by_kind_persists_and_updates_the_status_bar() {
 async fn switching_to_the_active_backend_is_a_no_op() {
     let (_guard, _env, _temp) = enter_project(r#"{"defaultAgent": "general"}"#);
     let mut app = support::make_app();
-    app.session_id = Some("backend-test".to_string());
+    app.session.session_id = Some("backend-test".to_string());
 
     app.execute_slash_command("/backend local").await;
     assert_eq!(app.status, "backend: active");
@@ -365,11 +371,12 @@ async fn switching_to_the_active_backend_is_a_no_op() {
 async fn unknown_selector_is_reported() {
     let (_guard, _env, _temp) = enter_project(r#"{"defaultAgent": "general"}"#);
     let mut app = support::make_app();
-    app.session_id = Some("backend-test".to_string());
+    app.session.session_id = Some("backend-test".to_string());
 
     app.execute_slash_command("/backend nosuchkind").await;
 
     let text = app
+        .session
         .messages
         .last()
         .map(ragent_types::message::Message::text_content)
@@ -385,11 +392,12 @@ async fn unknown_selector_is_reported() {
 async fn backend_help_renders_usage_and_changes_no_state() {
     let (_guard, _env, _temp) = enter_project(r#"{"defaultAgent": "general"}"#);
     let mut app = support::make_app();
-    app.session_id = Some("backend-test".to_string());
+    app.session.session_id = Some("backend-test".to_string());
 
     app.execute_slash_command("/backend help").await;
 
     let text = app
+        .session
         .messages
         .last()
         .map(ragent_types::message::Message::text_content)
@@ -405,5 +413,5 @@ async fn backend_help_renders_usage_and_changes_no_state() {
     }
     assert_eq!(app.status, "backend: help");
     assert!(app.backend_panel.is_none(), "help never opens the panel");
-    assert_eq!(app.active_backend, "local");
+    assert_eq!(app.session.active_backend, "local");
 }

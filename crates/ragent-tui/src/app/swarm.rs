@@ -48,6 +48,7 @@ impl App {
         let team_name = format!("swarm-{ts}");
         let working_dir = self.swarm_working_dir();
         let lead_sid = self
+            .session
             .session_id
             .clone()
             .unwrap_or_else(|| "unknown".to_string());
@@ -71,10 +72,10 @@ impl App {
                 }
 
                 // Set up active team state
-                self.active_team = Some(store.config.clone());
-                self.team_members.clear();
-                self.team_task_counts.clear();
-                self.team_task_counts_dirty = true;
+                self.session.active_team = Some(store.config.clone());
+                self.session.team_members.clear();
+                self.session.team_task_counts.clear();
+                self.session.team_task_counts_dirty = true;
                 self.show_teams = true;
                 self.ensure_team_manager_for_team(&team_name, Some(store.dir.clone()));
 
@@ -106,10 +107,11 @@ impl App {
                 // Record swarm state (prompt is blank for now - it was consumed in the slash command)
                 let swarm_prompt = String::new();
                 let default_agent_type = self
+                    .session
                     .swarm_state
                     .as_ref()
                     .and_then(|s| s.default_agent_type.clone());
-                self.swarm_state = Some(SwarmState {
+                self.session.swarm_state = Some(SwarmState {
                     team_name: team_name.clone(),
                     prompt: swarm_prompt,
                     decomposition: decomposition.clone(),
@@ -201,7 +203,7 @@ impl App {
                     });
                     match recorded {
                         // Add to local state
-                        Ok(Some(member)) => self.team_members.push(member),
+                        Ok(Some(member)) => self.session.team_members.push(member),
                         Ok(None) => {}
                         // FUNC-027: surface a failed team-state save rather than
                         // silently dropping it while the swarm reports success.
@@ -245,7 +247,7 @@ impl App {
             self.ensure_team_manager_for_team_inner(team_name, Some(team_dir.to_path_buf()), true);
         }
 
-        if let Some(ref mut swarm) = self.swarm_state {
+        if let Some(ref mut swarm) = self.session.swarm_state {
             swarm.spawned = true;
         }
 
@@ -259,7 +261,7 @@ impl App {
     }
 
     pub(crate) fn handle_swarm_status(&mut self) {
-        let Some(ref swarm) = self.swarm_state else {
+        let Some(ref swarm) = self.session.swarm_state else {
             self.append_assistant_text(
                 "From: /swarm status\n\nNo active swarm. Use `/swarm <prompt>` to start one.\n",
             );
@@ -345,10 +347,10 @@ impl App {
 
         // Teammate status
         output.push_str("\n**Teammates:**\n");
-        if self.team_members.is_empty() {
+        if self.session.team_members.is_empty() {
             output.push_str("  (spawning...)\n");
         } else {
-            for m in &self.team_members {
+            for m in &self.session.team_members {
                 let status = format!("{:?}", m.status).to_lowercase();
                 output.push_str(&format!(
                     "  * {} - {} ({} agent)\n",
@@ -364,7 +366,7 @@ impl App {
     }
 
     pub(crate) async fn handle_swarm_cancel(&mut self) {
-        let Some(swarm) = self.swarm_state.take() else {
+        let Some(swarm) = self.session.swarm_state.take() else {
             self.append_assistant_text("From: /swarm cancel\n\nNo active swarm to cancel.\n");
             return;
         };
@@ -388,11 +390,11 @@ impl App {
     /// a permission prompt and, if so, surface the unblock UI so the lead can
     /// approve/deny without leaving the swarm view.
     pub(crate) fn poll_swarm_unblock(&mut self) {
-        if self.swarm_unblock_last_poll.elapsed() < std::time::Duration::from_secs(2) {
+        if self.session.swarm_unblock_last_poll.elapsed() < std::time::Duration::from_secs(2) {
             return;
         }
-        self.swarm_unblock_last_poll = std::time::Instant::now();
-        let Some(ref swarm) = self.swarm_state else {
+        self.session.swarm_unblock_last_poll = std::time::Instant::now();
+        let Some(ref swarm) = self.session.swarm_state else {
             return;
         };
         if swarm.completed {
@@ -405,6 +407,7 @@ impl App {
 
         // Find blocked members
         let blocked_members: Vec<(String, String)> = self
+            .session
             .team_members
             .iter()
             .filter(|m| m.status == MemberStatus::Blocked)
@@ -418,6 +421,7 @@ impl App {
         // Build set of completed task IDs from member status.
         // A task ID is the suffix after "swarm-" in the teammate name.
         let completed_task_ids: std::collections::HashSet<String> = self
+            .session
             .team_members
             .iter()
             .filter(|m| matches!(m.status, MemberStatus::Idle | MemberStatus::Stopped))
@@ -483,6 +487,7 @@ impl App {
         for (member_name, agent_id, task_id) in &unblocked {
             // Update local state
             if let Some(m) = self
+                .session
                 .team_members
                 .iter_mut()
                 .find(|m| m.agent_id == *agent_id)
@@ -537,11 +542,11 @@ impl App {
     /// Periodically (every 2s) check the active swarm's overall completion
     /// status and update the status line / log panel accordingly.
     pub(crate) async fn poll_swarm_completion(&mut self) {
-        if self.swarm_completion_last_poll.elapsed() < std::time::Duration::from_secs(2) {
+        if self.session.swarm_completion_last_poll.elapsed() < std::time::Duration::from_secs(2) {
             return;
         }
-        self.swarm_completion_last_poll = std::time::Instant::now();
-        let Some(ref swarm) = self.swarm_state else {
+        self.session.swarm_completion_last_poll = std::time::Instant::now();
+        let Some(ref swarm) = self.session.swarm_state else {
             return;
         };
         if swarm.completed || !swarm.spawned {
@@ -554,6 +559,7 @@ impl App {
         // Check member status - if all non-lead members are terminal (idle/failed/stopped),
         // the swarm is effectively done regardless of task store state.
         let members: Vec<_> = self
+            .session
             .team_members
             .iter()
             .filter(|m| m.name != "lead" && !m.name.is_empty())
@@ -671,7 +677,7 @@ impl App {
             format!("Swarm complete: {team_name} - {completed}/{total} tasks done"),
         );
 
-        if let Some(ref mut s) = self.swarm_state {
+        if let Some(ref mut s) = self.session.swarm_state {
             s.completed = true;
         }
         self.needs_redraw = true;

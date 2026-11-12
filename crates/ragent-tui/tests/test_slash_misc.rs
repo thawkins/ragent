@@ -14,13 +14,14 @@ mod support;
 /// Build an app with a live session.
 fn app() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("slash-misc".to_string());
+    app.session.session_id = Some("slash-misc".to_string());
     app
 }
 
 /// Text of the most recent message in the message window.
 fn last_message(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(ragent_types::message::Message::text_content)
         .unwrap_or_default()
@@ -37,14 +38,17 @@ async fn system_help_sets_prompt_and_shows_current() {
     assert_eq!(app.status, "system: help");
 
     // No prompt set yet -> the no-arg form reports that.
-    app.agent_info.prompt = None;
+    app.session.agent_info.prompt = None;
     app.execute_slash_command("/system").await;
     assert_eq!(app.status, "No system prompt set");
 
     // Setting a prompt stores it and flips the status.
     app.execute_slash_command("/system You are terse.").await;
     assert_eq!(app.status, "system prompt updated");
-    assert_eq!(app.agent_info.prompt.as_deref(), Some("You are terse."));
+    assert_eq!(
+        app.session.agent_info.prompt.as_deref(),
+        Some("You are terse.")
+    );
 
     // The no-arg form now echoes the stored prompt.
     app.execute_slash_command("/system").await;
@@ -90,8 +94,8 @@ async fn model_unknown_arg_shows_usage() {
 #[tokio::test]
 async fn model_show_without_model_warns() {
     let mut app = app();
-    app.selected_model = None;
-    app.agent_info.model = None;
+    app.session.selected_model = None;
+    app.session.agent_info.model = None;
     app.execute_slash_command("/model show").await;
     assert_eq!(app.status, "[warn] No active model selected");
 }
@@ -244,7 +248,7 @@ async fn swarm_help_renders_usage() {
 #[tokio::test]
 async fn swarm_status_without_swarm() {
     let mut app = app();
-    app.swarm_state = None;
+    app.session.swarm_state = None;
     app.execute_slash_command("/swarm status").await;
     assert_ne!(app.status, "");
 }

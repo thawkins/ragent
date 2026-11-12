@@ -24,8 +24,8 @@ fn test_govcreate_advertised_in_spec_registry_entry() {
 #[test]
 fn test_govcreate_in_spec_autocomplete_suggestions() {
     let mut app = make_app();
-    app.input = "/spec".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "/spec".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.update_slash_menu();
 
     let menu = app

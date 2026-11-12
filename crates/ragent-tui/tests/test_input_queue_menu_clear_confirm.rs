@@ -43,15 +43,15 @@ fn entry(text: &str) -> QueuedInput {
 /// Build an app with an active session and a running turn.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
 /// Open the dialog the way the user would: ALT-Q, select `Clear`, `Enter`.
 fn app_with_dialog_open() -> App {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("CONFIRM-QUEUE-1"));
-    app.input_queue.push_back(entry("CONFIRM-QUEUE-2"));
+    app.session.input_queue.push_back(entry("CONFIRM-QUEUE-1"));
+    app.session.input_queue.push_back(entry("CONFIRM-QUEUE-2"));
     app.queue_menu_open = true;
     app.queue_menu_select_clear();
     assert!(
@@ -307,18 +307,18 @@ async fn test_dismiss_sets_the_redraw_flag_and_resets_the_default() {
 #[tokio::test]
 async fn test_plain_character_is_swallowed_while_dialog_is_open() {
     let mut app = app_with_dialog_open();
-    app.input = "KEEP-ME".to_string();
-    app.input_cursor = app.input_len_chars();
-    app.pending_attachments = vec![std::path::PathBuf::from("/tmp/keep.png")];
+    app.session.input = "KEEP-ME".to_string();
+    app.session.input_cursor = app.input_len_chars();
+    app.session.pending_attachments = vec![std::path::PathBuf::from("/tmp/keep.png")];
 
     app.handle_key_event(key(KeyCode::Char('z'))).await;
 
     assert_eq!(
-        app.input, "KEEP-ME",
+        app.session.input, "KEEP-ME",
         "FR-035: the modal must swallow characters so the input buffer is untouched"
     );
     assert_eq!(
-        app.pending_attachments,
+        app.session.pending_attachments,
         vec![std::path::PathBuf::from("/tmp/keep.png")],
         "FR-035: staged attachments must be preserved"
     );
@@ -331,14 +331,14 @@ async fn test_plain_character_is_swallowed_while_dialog_is_open() {
 #[tokio::test]
 async fn test_dismiss_leaves_the_running_turn_untouched() {
     let mut app = app_with_dialog_open();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
+    app.session.cancel_flag = Some(flag.clone());
 
     app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "the confirmation dialog must not affect the running turn"
     );
     assert!(

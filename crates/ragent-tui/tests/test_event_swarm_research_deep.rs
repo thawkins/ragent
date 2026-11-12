@@ -40,7 +40,7 @@ use slash_support::{app_with_session, enter_project, last_message};
 /// An app with a live session, no filesystem isolation.
 fn new_app(session: &str) -> App {
     let mut app = support::make_app();
-    app.session_id = Some(session.to_string());
+    app.session.session_id = Some(session.to_string());
     app.needs_redraw = false;
     app
 }
@@ -60,7 +60,8 @@ fn isolated_app() -> (
 
 /// Concatenated text of every text part in the message window.
 fn joined_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .flat_map(|m| m.parts.iter())
         .filter_map(|p| match p {
@@ -140,8 +141,8 @@ fn mcp_server(id: &str, status: McpStatus) -> McpServer {
 #[tokio::test]
 async fn message_end_cancelled_consumes_pending_reverse_create_folder() {
     let mut app = new_app("s1");
-    app.pending_reverse_create = Some("newspec".to_string());
-    app.pending_reverse_create_folder = Some("/tmp/scaffold".to_string());
+    app.session.pending_reverse_create = Some("newspec".to_string());
+    app.session.pending_reverse_create_folder = Some("/tmp/scaffold".to_string());
 
     app.handle_event(Event::MessageEnd {
         session_id: "s1".to_string(),
@@ -150,9 +151,9 @@ async fn message_end_cancelled_consumes_pending_reverse_create_folder() {
     })
     .await;
 
-    assert_eq!(app.pending_reverse_create, None);
-    assert_eq!(app.pending_reverse_create_folder, None);
-    assert!(app.agent_halted, "a cancelled turn halts the agent");
+    assert_eq!(app.session.pending_reverse_create, None);
+    assert_eq!(app.session.pending_reverse_create_folder, None);
+    assert!(app.session.agent_halted, "a cancelled turn halts the agent");
     assert!(
         !joined_text(&app).contains("Generating specification"),
         "a cancelled turn must not chain into /spec create"
@@ -162,15 +163,15 @@ async fn message_end_cancelled_consumes_pending_reverse_create_folder() {
 #[tokio::test]
 async fn message_end_reverse_create_with_folder_chains_into_spec_create() {
     let mut app = new_app("s1");
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "s1",
         Role::Assistant,
         vec![MessagePart::Text {
             text: "Build a widget service.".to_string(),
         }],
     ));
-    app.pending_reverse_create = Some("newspec".to_string());
-    app.pending_reverse_create_folder = Some("/tmp/scaffold".to_string());
+    app.session.pending_reverse_create = Some("newspec".to_string());
+    app.session.pending_reverse_create_folder = Some("/tmp/scaffold".to_string());
 
     app.handle_event(Event::MessageEnd {
         session_id: "s1".to_string(),
@@ -179,8 +180,8 @@ async fn message_end_reverse_create_with_folder_chains_into_spec_create() {
     })
     .await;
 
-    assert_eq!(app.pending_reverse_create, None);
-    assert_eq!(app.pending_reverse_create_folder, None);
+    assert_eq!(app.session.pending_reverse_create, None);
+    assert_eq!(app.session.pending_reverse_create_folder, None);
     let text = joined_text(&app);
     assert!(
         text.contains("Generating specification"),
@@ -191,7 +192,8 @@ async fn message_end_reverse_create_with_folder_chains_into_spec_create() {
 #[tokio::test]
 async fn message_end_pending_plan_task_delegates_to_the_plan_agent() {
     let mut app = new_app("s1");
-    app.pending_plan_task = Some(("Plan the migration".to_string(), "src/db.rs".to_string()));
+    app.session.pending_plan_task =
+        Some(("Plan the migration".to_string(), "src/db.rs".to_string()));
 
     app.handle_event(Event::MessageEnd {
         session_id: "s1".to_string(),
@@ -200,8 +202,8 @@ async fn message_end_pending_plan_task_delegates_to_the_plan_agent() {
     })
     .await;
 
-    assert_eq!(app.agent_name, "plan");
-    assert_eq!(app.pending_plan_task, None);
+    assert_eq!(app.session.agent_name, "plan");
+    assert_eq!(app.session.pending_plan_task, None);
     assert!(
         app.status.contains("agent: plan (delegated from"),
         "got: {}",
@@ -209,14 +211,18 @@ async fn message_end_pending_plan_task_delegates_to_the_plan_agent() {
     );
     let text = joined_text(&app);
     assert!(text.contains("Context:"), "the context is appended: {text}");
-    assert_eq!(app.agent_stack.len(), 1, "the previous agent is stacked");
+    assert_eq!(
+        app.session.agent_stack.len(),
+        1,
+        "the previous agent is stacked"
+    );
 }
 
 #[tokio::test]
 async fn message_end_plan_delegation_without_plan_agent_logs_an_error() {
     let mut app = new_app("s1");
     app.cycleable_agents.retain(|a| a.name != "plan");
-    app.pending_plan_task = Some(("Plan it".to_string(), String::new()));
+    app.session.pending_plan_task = Some(("Plan it".to_string(), String::new()));
 
     app.handle_event(Event::MessageEnd {
         session_id: "s1".to_string(),
@@ -226,16 +232,20 @@ async fn message_end_plan_delegation_without_plan_agent_logs_an_error() {
     .await;
 
     assert!(logged(&app, "plan agent not found"), "logs the miss");
-    assert_eq!(app.agent_stack.len(), 0, "the pushed agent is popped");
-    assert_eq!(app.pending_plan_task, None);
+    assert_eq!(
+        app.session.agent_stack.len(),
+        0,
+        "the pushed agent is popped"
+    );
+    assert_eq!(app.session.pending_plan_task, None);
 }
 
 #[tokio::test]
 async fn message_end_autopilot_schedules_a_continuation() {
     let mut app = new_app("s1");
-    app.autopilot_enabled = true;
-    app.last_task_completed_at = None;
-    app.autopilot_time_limit_secs = None;
+    app.session.autopilot_enabled = true;
+    app.session.last_task_completed_at = None;
+    app.session.autopilot_time_limit_secs = None;
 
     app.handle_event(Event::MessageEnd {
         session_id: "s1".to_string(),
@@ -244,17 +254,17 @@ async fn message_end_autopilot_schedules_a_continuation() {
     })
     .await;
 
-    assert!(app.autopilot_pending_continue.is_some());
+    assert!(app.session.autopilot_pending_continue.is_some());
     assert_eq!(app.status, " autopilot");
 }
 
 #[tokio::test]
 async fn message_end_autopilot_time_limit_stops_the_run() {
     let mut app = new_app("s1");
-    app.autopilot_enabled = true;
-    app.last_task_completed_at = None;
-    app.autopilot_time_limit_secs = Some(0);
-    app.autopilot_started_at = Some(
+    app.session.autopilot_enabled = true;
+    app.session.last_task_completed_at = None;
+    app.session.autopilot_time_limit_secs = Some(0);
+    app.session.autopilot_started_at = Some(
         std::time::Instant::now()
             .checked_sub(Duration::from_secs(5))
             .unwrap_or_else(std::time::Instant::now),
@@ -267,9 +277,9 @@ async fn message_end_autopilot_time_limit_stops_the_run() {
     })
     .await;
 
-    assert!(!app.autopilot_enabled);
-    assert_eq!(app.autopilot_started_at, None);
-    assert_eq!(app.autopilot_pending_continue, None);
+    assert!(!app.session.autopilot_enabled);
+    assert_eq!(app.session.autopilot_started_at, None);
+    assert_eq!(app.session.autopilot_pending_continue, None);
     assert_eq!(app.status, "autopilot: time limit reached");
     assert!(joined_text(&app).contains("Autopilot stopped"));
 }
@@ -350,9 +360,9 @@ async fn router_classification_short_prompt_notes_the_requested_tier() {
         dimensions: vec![("length".to_string(), 0.5), ("depth".to_string(), 0.75)],
     })
     .await;
-    assert_eq!(app.router_current_tier.as_deref(), Some("standard"));
+    assert_eq!(app.session.router_current_tier.as_deref(), Some("standard"));
     assert_eq!(
-        app.router_current_model.as_deref(),
+        app.session.router_current_model.as_deref(),
         Some("anthropic/claude")
     );
     let entry = app
@@ -491,7 +501,11 @@ async fn permission_requested_duplicate_and_other_session_are_ignored() {
         })
         .await;
     }
-    assert_eq!(app.permission_queue.len(), 1, "the duplicate is dropped");
+    assert_eq!(
+        app.session.permission_queue.len(),
+        1,
+        "the duplicate is dropped"
+    );
 
     app.handle_event(Event::PermissionRequested {
         session_id: "other".to_string(),
@@ -501,7 +515,11 @@ async fn permission_requested_duplicate_and_other_session_are_ignored() {
         options: Vec::new(),
     })
     .await;
-    assert_eq!(app.permission_queue.len(), 1, "another session is ignored");
+    assert_eq!(
+        app.session.permission_queue.len(),
+        1,
+        "another session is ignored"
+    );
 }
 
 #[tokio::test]
@@ -516,8 +534,11 @@ async fn question_requested_clamps_an_out_of_range_default_index() {
         default_index: Some(99),
     })
     .await;
-    assert_eq!(app.question_queue.len(), 1);
-    assert_eq!(app.question_selected_index, 1, "clamped to the last option");
+    assert_eq!(app.session.question_queue.len(), 1);
+    assert_eq!(
+        app.session.question_selected_index, 1,
+        "clamped to the last option"
+    );
 
     // A duplicate request id is dropped.
     app.handle_event(Event::QuestionRequested {
@@ -529,7 +550,7 @@ async fn question_requested_clamps_an_out_of_range_default_index() {
         default_index: None,
     })
     .await;
-    assert_eq!(app.question_queue.len(), 1);
+    assert_eq!(app.session.question_queue.len(), 1);
 }
 
 #[tokio::test]
@@ -540,7 +561,7 @@ async fn shell_cwd_changed_and_user_input_update_state() {
         cwd: "/tmp/elsewhere".to_string(),
     })
     .await;
-    assert_eq!(app.shell_cwd.as_deref(), Some("/tmp/elsewhere"));
+    assert_eq!(app.session.shell_cwd.as_deref(), Some("/tmp/elsewhere"));
 
     app.status = "idle".to_string();
     app.handle_event(Event::UserInput {
@@ -601,7 +622,7 @@ async fn open_research_view_populates_the_viewer() {
 #[tokio::test]
 async fn reasoning_delta_appends_to_an_existing_reasoning_part() {
     let mut app = new_app("s1");
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "s1",
         Role::Assistant,
         vec![MessagePart::Reasoning {
@@ -616,18 +637,26 @@ async fn reasoning_delta_appends_to_an_existing_reasoning_part() {
     })
     .await;
 
-    assert_eq!(app.messages.len(), 1, "the existing message is reused");
-    match app.messages[0].parts.last() {
+    assert_eq!(
+        app.session.messages.len(),
+        1,
+        "the existing message is reused"
+    );
+    match app.session.messages[0].parts.last() {
         Some(MessagePart::Reasoning { text, .. }) => assert_eq!(text, "first second"),
         other => panic!("expected a reasoning part, got {other:?}"),
     }
-    assert!(app.stream_in_bytes > 0, "the delta is accounted for");
+    assert!(
+        app.session.stream_in_bytes > 0,
+        "the delta is accounted for"
+    );
 }
 
 #[tokio::test]
 async fn reasoning_delta_starts_a_new_message_after_a_user_turn() {
     let mut app = new_app("s1");
-    app.messages
+    app.session
+        .messages
         .push(Message::user_text("s1", "explain the design"));
 
     app.handle_event(Event::ReasoningDelta {
@@ -636,9 +665,13 @@ async fn reasoning_delta_starts_a_new_message_after_a_user_turn() {
     })
     .await;
 
-    assert_eq!(app.messages.len(), 2, "a fresh assistant message is pushed");
-    assert_eq!(app.messages[1].role, Role::Assistant);
-    match app.messages[1].parts.first() {
+    assert_eq!(
+        app.session.messages.len(),
+        2,
+        "a fresh assistant message is pushed"
+    );
+    assert_eq!(app.session.messages[1].role, Role::Assistant);
+    match app.session.messages[1].parts.first() {
         Some(MessagePart::Reasoning { text, .. }) => assert_eq!(text, "thinking"),
         other => panic!("expected a leading reasoning part, got {other:?}"),
     }
@@ -693,7 +726,7 @@ async fn advance_spec_impl_auto_completes_and_dispatches_the_next_task() {
     .expect("build runner");
 
     let mut app = new_app("s1");
-    app.spec_impl_state = Some(SpecImplState {
+    app.session.spec_impl_state = Some(SpecImplState {
         spec_id: "sample".to_string(),
         specs_root: specs_root.clone(),
         task_ids: vec!["T-001".to_string(), "T-002".to_string()],
@@ -710,9 +743,9 @@ async fn advance_spec_impl_auto_completes_and_dispatches_the_next_task() {
     .await;
 
     assert_eq!(app.status, "spec: implementing sample - task 2/2");
-    assert!(app.is_processing, "the next task is dispatched");
+    assert!(app.session.is_processing, "the next task is dispatched");
     assert_eq!(
-        app.spec_impl_state.as_ref().map(|s| s.current_rank),
+        app.session.spec_impl_state.as_ref().map(|s| s.current_rank),
         Some(2),
         "the rank advances"
     );
@@ -740,7 +773,7 @@ async fn advance_spec_impl_finishes_the_run_and_transitions_the_spec() {
     .expect("build runner");
 
     let mut app = new_app("s1");
-    app.spec_impl_state = Some(SpecImplState {
+    app.session.spec_impl_state = Some(SpecImplState {
         spec_id: "sample".to_string(),
         specs_root: specs_root.clone(),
         task_ids: vec!["T-001".to_string(), "T-002".to_string()],
@@ -756,7 +789,7 @@ async fn advance_spec_impl_finishes_the_run_and_transitions_the_spec() {
     })
     .await;
 
-    assert!(app.spec_impl_state.is_none(), "the run stops");
+    assert!(app.session.spec_impl_state.is_none(), "the run stops");
     assert_eq!(app.status, "spec: sample implemented");
     assert!(joined_text(&app).contains("All 2 tasks completed"));
 }
@@ -798,7 +831,7 @@ async fn advance_spec_impl_reports_a_failed_implemented_write() {
     }
 
     let mut app = new_app("s1");
-    app.spec_impl_state = Some(SpecImplState {
+    app.session.spec_impl_state = Some(SpecImplState {
         spec_id: "sample".to_string(),
         specs_root: specs_root.clone(),
         task_ids: vec!["T-001".to_string(), "T-002".to_string()],
@@ -835,7 +868,7 @@ async fn advance_spec_impl_with_an_invalid_spec_id_stops_the_run() {
     .expect("build runner");
 
     let mut app = new_app("s1");
-    app.spec_impl_state = Some(SpecImplState {
+    app.session.spec_impl_state = Some(SpecImplState {
         spec_id: "Bad Name".to_string(),
         specs_root,
         task_ids: vec!["T-001".to_string()],
@@ -851,7 +884,7 @@ async fn advance_spec_impl_with_an_invalid_spec_id_stops_the_run() {
     })
     .await;
 
-    assert!(app.spec_impl_state.is_none());
+    assert!(app.session.spec_impl_state.is_none());
     assert!(joined_text(&app).contains("[warn] Invalid spec ID `Bad Name`"));
 }
 
@@ -868,7 +901,7 @@ async fn advance_spec_impl_with_a_blocked_task_stops_the_run() {
     .expect("build runner");
 
     let mut app = new_app("s1");
-    app.spec_impl_state = Some(SpecImplState {
+    app.session.spec_impl_state = Some(SpecImplState {
         spec_id: "sample".to_string(),
         specs_root,
         task_ids: vec!["T-001".to_string(), "T-002".to_string()],
@@ -884,10 +917,10 @@ async fn advance_spec_impl_with_a_blocked_task_stops_the_run() {
     })
     .await;
 
-    assert!(app.spec_impl_state.is_none());
+    assert!(app.session.spec_impl_state.is_none());
     let text = joined_text(&app);
     assert!(text.contains("[stop] Task **T-001**"), "got: {text}");
-    assert!(!app.is_processing);
+    assert!(!app.session.is_processing);
 }
 
 // ===========================================================================
@@ -897,52 +930,52 @@ async fn advance_spec_impl_with_a_blocked_task_stops_the_run() {
 #[tokio::test]
 async fn alt_down_and_alt_up_cycle_teammate_focus() {
     let mut app = new_app("s1");
-    app.team_members = vec![member("swarm-s1", "tm-001"), member("swarm-s2", "tm-002")];
-    app.active_team = Some(TeamConfig::new("team-a", "s1"));
+    app.session.team_members = vec![member("swarm-s1", "tm-001"), member("swarm-s2", "tm-002")];
+    app.session.active_team = Some(TeamConfig::new("team-a", "s1"));
 
     app.handle_key_event(alt_key(KeyCode::Down)).await;
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-001"));
     assert_eq!(app.status, "team: focused -> swarm-s1");
 
     app.handle_key_event(alt_key(KeyCode::Down)).await;
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-002"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-002"));
 
     // Forward from the last member clears the focus.
     app.handle_key_event(alt_key(KeyCode::Down)).await;
-    assert_eq!(app.focused_teammate, None);
+    assert_eq!(app.session.focused_teammate, None);
     assert!(app.output_view.is_none());
     assert_eq!(app.status, "team: focus cleared");
 
     // Backward from "no focus" lands on the last member.
     app.handle_key_event(alt_key(KeyCode::Up)).await;
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-002"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-002"));
 
     app.handle_key_event(alt_key(KeyCode::Up)).await;
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-001"));
 
     // Backward from the first member clears the focus again.
     app.handle_key_event(alt_key(KeyCode::Up)).await;
-    assert_eq!(app.focused_teammate, None);
+    assert_eq!(app.session.focused_teammate, None);
 }
 
 #[tokio::test]
 async fn alt_down_without_members_clears_the_focus() {
     let mut app = new_app("s1");
-    app.team_members.clear();
-    app.focused_teammate = Some("tm-999".to_string());
+    app.session.team_members.clear();
+    app.session.focused_teammate = Some("tm-999".to_string());
 
     app.handle_key_event(alt_key(KeyCode::Down)).await;
-    assert_eq!(app.focused_teammate, None);
+    assert_eq!(app.session.focused_teammate, None);
 }
 
 #[tokio::test]
 async fn team_focus_by_name_resolves_ambiguity_and_misses() {
     let mut app = new_app("s1");
-    app.active_team = Some(TeamConfig::new("team-a", "s1"));
-    app.team_members = vec![member("swarm-s1", "tm-001"), member("swarm-s2", "tm-002")];
+    app.session.active_team = Some(TeamConfig::new("team-a", "s1"));
+    app.session.team_members = vec![member("swarm-s1", "tm-001"), member("swarm-s2", "tm-002")];
 
     app.execute_slash_command("/team focus swarm-s1").await;
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-001"));
     assert!(joined_text(&app).contains("Focused on **swarm-s1**"));
 
     app.execute_slash_command("/team focus swarm").await;
@@ -962,11 +995,11 @@ async fn enter_with_a_focused_teammate_still_addresses_the_lead_session() {
     let (_g, _e, temp, mut app) = isolated_app();
     TeamStore::create("team-a", "s1", temp.path(), true).expect("create team");
 
-    app.active_team = Some(TeamConfig::new("team-a", "s1"));
-    app.team_members = vec![member("swarm-s1", "tm-001")];
-    app.focused_teammate = Some("tm-001".to_string());
-    app.input = "please review the diff".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.active_team = Some(TeamConfig::new("team-a", "s1"));
+    app.session.team_members = vec![member("swarm-s1", "tm-001")];
+    app.session.focused_teammate = Some("tm-001".to_string());
+    app.session.input = "please review the diff".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
 
     app.handle_key_event(key(KeyCode::Enter)).await;
 
@@ -996,11 +1029,11 @@ async fn focused_message_without_a_team_or_member_reports_the_reason() {
     // take the lead-session path and refuse for the ordinary reason.
     let mut app = new_app("s1");
     crate::without_host_providers(&mut app);
-    app.active_team = None;
-    app.team_members = vec![member("swarm-s1", "tm-001")];
-    app.focused_teammate = Some("tm-001".to_string());
-    app.input = "hello".to_string();
-    app.input_cursor = 5;
+    app.session.active_team = None;
+    app.session.team_members = vec![member("swarm-s1", "tm-001")];
+    app.session.focused_teammate = Some("tm-001".to_string());
+    app.session.input = "hello".to_string();
+    app.session.input_cursor = 5;
     app.handle_key_event(key(KeyCode::Enter)).await;
     assert!(
         app.status.contains("No provider configured"),
@@ -1010,11 +1043,11 @@ async fn focused_message_without_a_team_or_member_reports_the_reason() {
 
     let mut app = new_app("s1");
     crate::without_host_providers(&mut app);
-    app.active_team = Some(TeamConfig::new("team-a", "s1"));
-    app.team_members = vec![member("swarm-s1", "tm-001")];
-    app.focused_teammate = Some("tm-404".to_string());
-    app.input = "hello".to_string();
-    app.input_cursor = 5;
+    app.session.active_team = Some(TeamConfig::new("team-a", "s1"));
+    app.session.team_members = vec![member("swarm-s1", "tm-001")];
+    app.session.focused_teammate = Some("tm-404".to_string());
+    app.session.input = "hello".to_string();
+    app.session.input_cursor = 5;
     app.handle_key_event(key(KeyCode::Enter)).await;
     assert!(
         app.status.contains("No provider configured"),
@@ -1028,11 +1061,11 @@ async fn focused_message_for_a_missing_team_store_reports_the_load_failure() {
     // A focused teammate whose team directory is gone no longer produces a
     // mailbox-load failure from Enter: the input box never opens a mailbox.
     let (_g, _e, _temp, mut app) = isolated_app();
-    app.active_team = Some(TeamConfig::new("ghost-team", "s1"));
-    app.team_members = vec![member("swarm-s1", "tm-001")];
-    app.focused_teammate = Some("tm-001".to_string());
-    app.input = "hello".to_string();
-    app.input_cursor = 5;
+    app.session.active_team = Some(TeamConfig::new("ghost-team", "s1"));
+    app.session.team_members = vec![member("swarm-s1", "tm-001")];
+    app.session.focused_teammate = Some("tm-001".to_string());
+    app.session.input = "hello".to_string();
+    app.session.input_cursor = 5;
 
     app.handle_key_event(key(KeyCode::Enter)).await;
 
@@ -1150,7 +1183,7 @@ async fn swarm_status_with_a_store_reports_cancelled_tasks() {
     cancelled.status = ragent_agent::team::TaskStatus::Cancelled;
     ts.add_task(cancelled).await.expect("add task");
 
-    app.swarm_state = Some(SwarmState {
+    app.session.swarm_state = Some(SwarmState {
         team_name: "swarm-store".to_string(),
         prompt: "go".to_string(),
         decomposition: SwarmDecomposition {
@@ -1167,7 +1200,7 @@ async fn swarm_status_with_a_store_reports_cancelled_tasks() {
         completed: false,
         default_agent_type: None,
     });
-    app.team_members = vec![TeamMember {
+    app.session.team_members = vec![TeamMember {
         status: MemberStatus::Idle,
         ..member("swarm-s1", "tm-001")
     }];
@@ -1184,7 +1217,7 @@ async fn swarm_status_with_a_store_reports_cancelled_tasks() {
 async fn swarm_cancel_after_completion_clears_the_state() {
     let (_g, _e, temp, mut app) = isolated_app();
     TeamStore::create("swarm-done", "s1", temp.path(), true).expect("create team");
-    app.swarm_state = Some(SwarmState {
+    app.session.swarm_state = Some(SwarmState {
         team_name: "swarm-done".to_string(),
         prompt: "go".to_string(),
         decomposition: ragent_agent::team::SwarmDecomposition { tasks: Vec::new() },
@@ -1194,7 +1227,7 @@ async fn swarm_cancel_after_completion_clears_the_state() {
     });
 
     app.execute_slash_command("/swarm cancel").await;
-    assert!(app.swarm_state.is_none());
+    assert!(app.session.swarm_state.is_none());
     assert_eq!(app.status, "swarm: cancelled");
 }
 
@@ -1389,8 +1422,8 @@ async fn research_cluster_with_a_model_spawns_the_extraction_and_reports_failure
     std::fs::create_dir_all(&sources).expect("create sources dir");
     std::fs::write(sources.join("web-01.md"), "body text").expect("write source");
 
-    app.selected_model = Some("gemini/gemini-2.0-flash".to_string());
-    app.selected_model_ctx_window = Some(1_048_576);
+    app.session.selected_model = Some("gemini/gemini-2.0-flash".to_string());
+    app.session.selected_model_ctx_window = Some(1_048_576);
     let mut rx = app.event_bus.clone().subscribe();
 
     app.execute_slash_command("/research cluster kilo").await;

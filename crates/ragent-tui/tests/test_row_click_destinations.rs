@@ -113,8 +113,8 @@ fn enter_on_the_cursor_opens_the_task_painted_on_that_row() {
     // child of `task-1`, so the painted tree lists it before `task-2` even
     // though `task-2` was appended first (FR-034, FR-069).
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks = vec![
         task("task-1", LEAD_SESSION, "explore", TaskStatus::Running),
         task(
@@ -170,8 +170,8 @@ fn enter_on_the_cursor_opens_the_task_painted_on_that_row() {
 #[test]
 fn enter_on_the_cursor_label_carries_agent_and_short_task_id() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks.push(task(
         "task-42",
         LEAD_SESSION,
@@ -199,8 +199,8 @@ fn enter_on_the_cursor_label_carries_agent_and_short_task_id() {
 #[test]
 fn a_stale_cursor_row_is_a_consumed_no_op() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("task-1", LEAD_SESSION, "explore", TaskStatus::Running));
     app.show_agents_window = true;
@@ -229,8 +229,8 @@ fn a_stale_cursor_row_is_a_consumed_no_op() {
 #[test]
 fn the_cursor_clamps_at_both_ends_of_the_row_list() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks = vec![
         task("task-1", LEAD_SESSION, "explore", TaskStatus::Running),
         task("task-2", LEAD_SESSION, "plan", TaskStatus::Running),
@@ -268,10 +268,10 @@ fn the_cursor_clamps_at_both_ends_of_the_row_list() {
 
 fn app_with_team() -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
-    app.team_members = vec![member("tm-001", "reviewer"), member("tm-002", "tester")];
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
+    app.session.team_members = vec![member("tm-001", "reviewer"), member("tm-002", "tester")];
     app.show_teams_window = true;
     app.needs_redraw = false;
     app
@@ -293,7 +293,7 @@ fn enter_on_the_teammate_cursor_focuses_the_teammate_and_reports_it() {
     app.teams_cursor_focus();
 
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "Enter on the teammate cursor focuses the teammate (FR-038)"
     );
@@ -344,13 +344,13 @@ fn a_stale_teammate_cursor_is_ignored_without_mutating_state() {
 
     // The member list changes after the render that published the row map:
     // the cursor is stale (FR-069).
-    app.team_members.clear();
+    app.session.team_members.clear();
     app.move_teams_cursor(1);
     app.status = "sentinel".to_string();
     app.teams_cursor_focus();
 
     assert_eq!(
-        app.focused_teammate, None,
+        app.session.focused_teammate, None,
         "a stale cursor must not focus anything (FR-069)"
     );
     assert_eq!(
@@ -395,8 +395,8 @@ fn a_stale_teammate_cursor_ordinal_reports_the_no_op() {
 #[tokio::test]
 async fn agents_cursor_survives_a_close_and_reopen() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("task-1", LEAD_SESSION, "explore", TaskStatus::Running));
     app.show_agents_window = true;
@@ -448,7 +448,7 @@ async fn teams_focus_survives_a_close_and_reopen() {
     app.move_teams_cursor(1);
     app.teams_cursor_focus();
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "Enter focuses the teammate"
     );
@@ -463,7 +463,7 @@ async fn teams_focus_survives_a_close_and_reopen() {
     assert!(!app.show_teams_window);
     assert!(app.output_view.is_none(), "the overlay closed first");
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "closing the window preserves the focused teammate (FR-065)"
     );
@@ -471,7 +471,7 @@ async fn teams_focus_survives_a_close_and_reopen() {
     app.toggle_teams_window();
     assert!(app.show_teams_window);
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "reopening preserves the focused teammate (FR-065)"
     );
@@ -496,7 +496,7 @@ fn flat_row(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
 #[test]
 fn focused_teammate_does_not_title_the_input_border() {
     let mut app = app_with_team();
-    app.focused_teammate = Some("tm-001".to_string());
+    app.session.focused_teammate = Some("tm-001".to_string());
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).expect("create test terminal");
     terminal
@@ -549,11 +549,11 @@ async fn focused_input_is_not_routed_to_the_teammate_mailbox() {
 
     let mut app = app_with_team();
     crate::without_host_providers(&mut app);
-    app.focused_teammate = Some("tm-001".to_string());
+    app.session.focused_teammate = Some("tm-001".to_string());
     // With the popup open `Enter` is the open-overlay key (FR-038); the send
     // behaviour applies once the window is closed again.
     app.show_teams_window = false;
-    app.input = "please report your progress".to_string();
+    app.session.input = "please report your progress".to_string();
     let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
     app.handle_key_event(key).await;
 
@@ -561,7 +561,7 @@ async fn focused_input_is_not_routed_to_the_teammate_mailbox() {
     // no-provider guard of this fixture. The mailbox path is never taken and
     // the unsubmitted draft stays in the input.
     assert_eq!(
-        app.input, "please report your progress",
+        app.session.input, "please report your progress",
         "the lead path keeps the draft instead of consuming it"
     );
     assert!(
@@ -576,7 +576,7 @@ async fn focused_input_is_not_routed_to_the_teammate_mailbox() {
     );
 
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "the submission keeps the focus (FR-058)"
     );

@@ -30,7 +30,7 @@ fn test_osinfo_registered_in_slash_commands() {
 #[test]
 fn test_osinfo_suggestions_offer_show_and_help() {
     let mut app = make_app();
-    app.input = "/osinfo".to_string();
+    app.session.input = "/osinfo".to_string();
     app.update_slash_menu();
     let menu = app
         .slash_menu
@@ -62,7 +62,7 @@ fn test_osinfo_slash_menu_matches_prefix() {
     // Typing the bare `/os` prefix must surface the osinfo trigger (prefix
     // match path of `update_slash_menu`).
     let mut app = make_app();
-    app.input = "/os".to_string();
+    app.session.input = "/os".to_string();
     app.update_slash_menu();
     let menu = app
         .slash_menu
@@ -78,11 +78,12 @@ fn test_osinfo_slash_menu_matches_prefix() {
 #[tokio::test]
 async fn test_help_index_lists_osinfo() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/help").await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("help should create a message")

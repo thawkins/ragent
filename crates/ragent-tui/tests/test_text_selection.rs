@@ -161,7 +161,7 @@ fn test_opening_active_agents_row_output_view_from_the_keyboard() {
     // cursor (Down + Enter), the same destination chain the old row click
     // drove (FR-034).
     let mut app = make_app();
-    app.session_id = Some("lead-s1".to_string());
+    app.session.session_id = Some("lead-s1".to_string());
     app.show_agents_window = true;
     app.active_tasks.push(ragent_agent::task::TaskEntry {
         id: "task-12345678".to_string(),
@@ -186,7 +186,10 @@ fn test_opening_active_agents_row_output_view_from_the_keyboard() {
     app.move_agents_cursor(1);
     app.agents_cursor_open_output();
     assert!(app.output_view.is_some());
-    assert_eq!(app.selected_agent_session_id.as_deref(), Some("child-s1"));
+    assert_eq!(
+        app.session.selected_agent_session_id.as_deref(),
+        Some("child-s1")
+    );
 }
 
 #[test]
@@ -194,17 +197,17 @@ fn test_opening_teams_row_output_view_from_the_keyboard() {
     // The teammate overlay opens through the cursor (Down + Enter), the same
     // destination chain the old row click drove (FR-038).
     let mut app = make_app();
-    app.session_id = Some("lead-s1".to_string());
+    app.session.session_id = Some("lead-s1".to_string());
     app.show_teams_window = true;
-    app.active_team = Some(TeamConfig::new("alpha", "lead-s1"));
+    app.session.active_team = Some(TeamConfig::new("alpha", "lead-s1"));
     let mut member = TeamMember::new("writer", "tm-001", "general");
     member.session_id = Some("tm-s1".to_string());
-    app.team_members.push(member);
+    app.session.team_members.push(member);
 
     render(&mut app);
     app.move_teams_cursor(1);
     app.teams_cursor_focus();
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-001"));
     let view = app.output_view.as_ref().expect("the overlay must open");
     match &view.target {
         ragent_tui::app::OutputViewTarget::TeamMember { session_id, .. } => {
@@ -272,7 +275,7 @@ fn test_clicking_agents_button_toggles_agents_window() {
 #[test]
 fn test_clicking_teams_button_toggles_teams_window() {
     let mut app = make_app();
-    app.active_team = Some(TeamConfig::new("alpha", "lead-s1"));
+    app.session.active_team = Some(TeamConfig::new("alpha", "lead-s1"));
     app.teams_button_area = Rect::new(12, 30, 9, 3);
 
     app.handle_mouse_event(mouse_down(13, 31));
@@ -303,7 +306,7 @@ fn test_clicking_dimmed_buttons_still_opens_windows() {
 #[test]
 fn test_output_view_can_load_messages_for_non_current_session() {
     let mut app = make_app();
-    app.session_id = Some("lead-s1".to_string());
+    app.session.session_id = Some("lead-s1".to_string());
     app.storage
         .create_session("child-s1", "/tmp")
         .expect("create child session");
@@ -326,7 +329,7 @@ fn test_output_view_can_load_messages_for_non_current_session() {
 fn test_output_view_overlay_renders_non_current_session_message() {
     let mut app = make_app();
     app.current_screen = ScreenMode::Chat;
-    app.session_id = Some("lead-s1".to_string());
+    app.session.session_id = Some("lead-s1".to_string());
     app.storage
         .create_session("child-s1", "/tmp")
         .expect("create child session");
@@ -378,7 +381,7 @@ fn test_output_view_overlay_renders_non_current_session_message() {
 fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
     let mut app = make_app();
     app.current_screen = ScreenMode::Chat;
-    app.session_id = Some("lead-s1".to_string());
+    app.session.session_id = Some("lead-s1".to_string());
     app.storage
         .create_session("tm-s1", "/tmp")
         .expect("create teammate session");
@@ -456,7 +459,7 @@ fn test_output_view_overlay_does_not_render_log_lines() {
     // must not leak in.
     let mut app = make_app();
     app.current_screen = ScreenMode::Chat;
-    app.session_id = Some("lead-s1".to_string());
+    app.session.session_id = Some("lead-s1".to_string());
     app.storage
         .create_session("child-s1", "/tmp")
         .expect("create child session");
@@ -588,7 +591,7 @@ fn test_selection_normalized_same_row() {
 fn test_right_click_opens_context_menu_and_keeps_selection() {
     let mut app = make_app();
     app.message_area = Rect::new(0, 1, 80, 20);
-    app.message_content_lines = vec![
+    app.session.message_content_lines = vec![
         "You: hello world".to_string(),
         "Assistant: hi there".to_string(),
     ];
@@ -644,7 +647,7 @@ fn test_right_click_with_selection_in_other_pane_disables_copy_for_clicked_pane(
 fn test_context_copy_keeps_selection() {
     let mut app = make_app();
     app.message_area = Rect::new(0, 1, 80, 20);
-    app.message_content_lines = vec!["You: hello world".to_string()];
+    app.session.message_content_lines = vec!["You: hello world".to_string()];
     app.text_selection = Some(TextSelection {
         pane: SelectionPane::Messages,
         anchor: (1, 1),
@@ -706,7 +709,7 @@ fn test_extract_partial_single_line() {
 fn test_scrollbar_click_clears_selection() {
     let mut app = make_app();
     app.message_area = Rect::new(0, 1, 80, 20);
-    app.message_max_scroll = 50;
+    app.session.message_max_scroll = 50;
 
     // Pre-set a selection
     app.text_selection = Some(TextSelection {
@@ -743,8 +746,8 @@ fn test_new_click_replaces_selection() {
 fn test_context_cut_on_input_removes_selected_range_only() {
     let mut app = make_app();
     app.input_area = Rect::new(0, 22, 40, 3);
-    app.input = "abcdef".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.text_selection = Some(TextSelection {
         pane: SelectionPane::Input,
         // Select "cd" from "> abcdef" in inner row y=23.
@@ -761,8 +764,8 @@ fn test_context_cut_on_input_removes_selected_range_only() {
 
     app.execute_context_action(ContextAction::Cut);
 
-    assert_eq!(app.input, "abef");
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input, "abef");
+    assert_eq!(app.session.input_cursor, 2);
 }
 
 #[test]
@@ -776,8 +779,8 @@ fn test_extract_text_from_lines_unicode_uses_character_columns() {
 fn test_context_cut_on_wrapped_unicode_input_removes_single_character() {
     let mut app = make_app();
     app.input_area = Rect::new(0, 22, 6, 4); // inner width = 4
-    app.input = "ab💡cd".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "ab💡cd".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.text_selection = Some(TextSelection {
         pane: SelectionPane::Input,
         // Wrapped display lines for "> abcd" (inner_w=4):
@@ -795,16 +798,16 @@ fn test_context_cut_on_wrapped_unicode_input_removes_single_character() {
 
     app.execute_context_action(ContextAction::Cut);
 
-    assert_eq!(app.input, "abcd");
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input, "abcd");
+    assert_eq!(app.session.input_cursor, 2);
 }
 
 #[test]
 fn test_right_click_uses_home_input_geometry_for_file_menu_popup() {
     let mut app = make_app();
     app.input_area = Rect::new(20, 15, 40, 3);
-    app.input = "@src".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "@src".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.file_menu = Some(ragent_tui::app::FileMenuState {
         matches: vec![ragent_tui::app::FileMenuEntry {
             display: "src/main.rs".to_string(),
@@ -825,15 +828,15 @@ fn test_right_click_uses_home_input_geometry_for_file_menu_popup() {
         app.file_menu.is_none(),
         "click should accept file entry and close menu"
     );
-    assert!(app.input.contains("src/main.rs"));
+    assert!(app.session.input.contains("src/main.rs"));
 }
 
 #[test]
 fn test_left_click_outside_file_menu_closes_popup() {
     let mut app = make_app();
     app.input_area = Rect::new(20, 15, 40, 3);
-    app.input = "@".to_string();
-    app.input_cursor = 1;
+    app.session.input = "@".to_string();
+    app.session.input_cursor = 1;
     app.file_menu = Some(ragent_tui::app::FileMenuState {
         matches: vec![ragent_tui::app::FileMenuEntry {
             display: "src/main.rs".to_string(),

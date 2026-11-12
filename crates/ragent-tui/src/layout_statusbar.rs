@@ -202,11 +202,20 @@ pub fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     // (and hitting SQLite + Config::load) on every frame.
     app.update_cached_provider_model_label(app.compute_provider_model_label());
 
+    // FR-06: background sessions waiting on the user get a badge at the
+    // right end of line 1; line 1 is laid out in the remaining width.
+    let waiting = app.background.waiting_count();
+    let badge = (waiting > 0).then(|| format!(" {waiting} need you "));
+    let badge_width = badge
+        .as_deref()
+        .map_or(0, |b| u16::try_from(b.len()).unwrap_or(u16::MAX))
+        .min(area.width);
+
     // Split area into 2 lines
     let line1_area = Rect {
         x: area.x,
         y: area.y,
-        width: area.width,
+        width: area.width - badge_width,
         height: 1,
     };
 
@@ -221,6 +230,24 @@ pub fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     let line2 = build_line2(app, &config, mode, line2_area.width);
 
     frame.render_widget(ratatui::widgets::Paragraph::new(line1), line1_area);
+    if let Some(badge) = badge {
+        let badge_area = Rect {
+            x: area.x + line1_area.width,
+            y: area.y,
+            width: badge_width,
+            height: 1,
+        };
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(Span::styled(
+                badge,
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            badge_area,
+        );
+    }
     frame.render_widget(ratatui::widgets::Paragraph::new(line2), line2_area);
 }
 
@@ -295,7 +322,7 @@ fn build_line1(
     let center_width = spans_width(&center);
     let right_width = spans_width(&right);
 
-    let prompt_tag = prompt_display_text(&app.last_prompt, 48);
+    let prompt_tag = prompt_display_text(&app.session.last_prompt, 48);
     // The branch section and the tag render adjacently, separated by one space,
     // as a single group placed immediately after the cwd section.
     let group_width = if prompt_tag.is_empty() {
@@ -590,18 +617,18 @@ fn build_line2_left(
 
     // Active execution backend (spec `openhands` FR-008): always visible, even in
     // Minimal mode, so the user can always see where tools will run.
-    if !app.active_backend.is_empty() {
+    if !app.session.active_backend.is_empty() {
         spans.push(Span::styled(
-            format!("Backend:{} ", app.active_backend),
+            format!("Backend:{} ", app.session.active_backend),
             Style::default().fg(colors::BACKEND),
         ));
     }
 
     // Compression / Compaction activity indicator - always visible, even in Minimal mode.
-    if app.compact_in_progress || app.compress_in_progress {
-        let label = if app.compact_in_progress && app.compress_in_progress {
+    if app.session.compact_in_progress || app.session.compress_in_progress {
+        let label = if app.session.compact_in_progress && app.session.compress_in_progress {
             "cmp+compress"
-        } else if app.compact_in_progress {
+        } else if app.session.compact_in_progress {
             "compacting"
         } else {
             "compressing"
@@ -649,7 +676,7 @@ fn build_line2_left(
     }
 
     // Thinking level indicator
-    if let Some(level) = app.selected_thinking_level {
+    if let Some(level) = app.session.selected_thinking_level {
         let short = App::thinking_level_short(level);
         let level_color = colors::LABEL;
         let level_icon = t(MessageKey::StatusThinking);
@@ -717,11 +744,11 @@ fn build_line2_center(
 /// missing. A limit already passed reports `0` rather than a negative value;
 /// the event loop clears the mode on its next tick.
 fn autopilot_remaining_secs(app: &App) -> Option<u64> {
-    if !app.autopilot_enabled {
+    if !app.session.autopilot_enabled {
         return None;
     }
-    let limit = app.autopilot_time_limit_secs?;
-    let started = app.autopilot_started_at?;
+    let limit = app.session.autopilot_time_limit_secs?;
+    let started = app.session.autopilot_started_at?;
     let elapsed = started.elapsed().as_secs();
     Some(limit.saturating_sub(elapsed))
 }
@@ -810,7 +837,7 @@ fn build_line2_right(
     push_indicator(
         &mut spans,
         service_icons::AUTOPILOT,
-        app.autopilot_enabled,
+        app.session.autopilot_enabled,
         true,
     );
     if let Some(remaining) = autopilot_remaining_secs(app) {

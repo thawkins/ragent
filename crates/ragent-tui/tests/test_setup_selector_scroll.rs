@@ -254,11 +254,11 @@ fn test_wheel_outside_the_setup_dialog_never_scrolls_the_chat() {
         selected: 0,
     });
     painted(&mut app, 120, 40);
-    let before = app.scroll_offset;
+    let before = app.session.scroll_offset;
 
     app.handle_mouse_event(wheel(MouseEventKind::ScrollDown, 0, 0));
     assert_eq!(
-        app.scroll_offset, before,
+        app.session.scroll_offset, before,
         "the modal swallows a wheel outside it, so the transcript must not move"
     );
     match app.provider_setup.as_ref().expect("picker still open") {

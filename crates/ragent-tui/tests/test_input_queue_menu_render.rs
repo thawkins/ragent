@@ -93,8 +93,8 @@ fn test_menu_labels_are_next_halt_clear_and_show_in_order() {
 #[test]
 fn test_open_menu_paints_all_four_option_rows() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("queued"));
-    app.is_processing = true;
+    app.session.input_queue.push_back(entry("queued"));
+    app.session.is_processing = true;
     app.queue_menu_open = true;
 
     let terminal = render(&mut app, 120, 40);
@@ -111,7 +111,7 @@ fn test_open_menu_paints_all_four_option_rows() {
 #[test]
 fn test_closed_menu_is_not_painted() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("queued"));
+    app.session.input_queue.push_back(entry("queued"));
     app.queue_menu_open = false;
 
     let terminal = render(&mut app, 120, 40);
@@ -136,7 +136,7 @@ fn test_closed_menu_is_not_painted() {
 #[test]
 fn test_next_row_is_selectable_when_queue_is_non_empty() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("queued"));
+    app.session.input_queue.push_back(entry("queued"));
     app.queue_menu_open = true;
     app.queue_menu_selected = 0;
 
@@ -218,7 +218,7 @@ fn test_next_marker_returns_when_an_entry_is_queued_after_an_empty_render() {
         "FR-023: empty queue hides the selection marker"
     );
 
-    app.input_queue.push_back(entry("queued"));
+    app.session.input_queue.push_back(entry("queued"));
     let filled = render(&mut app, 120, 40);
     let filled_rows = menu_rows(&filled, &app);
     assert!(
@@ -275,8 +275,8 @@ fn test_open_menu_overlays_the_chat_beneath_it() {
 #[test]
 fn test_menu_title_reports_the_pending_count() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
-    app.input_queue.push_back(entry("b"));
+    app.session.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("b"));
     app.queue_menu_open = true;
 
     let terminal = render(&mut app, 120, 40);
@@ -300,7 +300,7 @@ fn test_menu_title_reports_the_pending_count() {
 fn test_halt_label_is_stop_while_processing_and_resume_when_idle() {
     let mut app = support::make_app();
 
-    app.is_processing = true;
+    app.session.is_processing = true;
     assert_eq!(
         app.queue_menu_halt_label(),
         "Stop",
@@ -308,7 +308,7 @@ fn test_halt_label_is_stop_while_processing_and_resume_when_idle() {
     );
     assert_eq!(app.queue_menu_labels()[1], "Stop");
 
-    app.is_processing = false;
+    app.session.is_processing = false;
     assert_eq!(
         app.queue_menu_halt_label(),
         "Resume",
@@ -320,9 +320,9 @@ fn test_halt_label_is_stop_while_processing_and_resume_when_idle() {
 #[test]
 fn test_menu_renders_resume_row_when_agent_is_not_processing() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("queued"));
+    app.session.input_queue.push_back(entry("queued"));
     app.queue_menu_open = true;
-    app.is_processing = false;
+    app.session.is_processing = false;
 
     let terminal = render(&mut app, 120, 40);
     let rows = menu_rows(&terminal, &app);

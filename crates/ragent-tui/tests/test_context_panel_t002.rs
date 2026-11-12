@@ -142,7 +142,7 @@ fn test_panel_percent_or_unknown_labels() {
     // FR-010/FR-011: rows show either a percentage (when the window is
     // advertised via selected_model_ctx_window) or an "unknown" label.
     let mut app = support::make_app();
-    app.selected_model_ctx_window = Some(200_000);
+    app.session.selected_model_ctx_window = Some(200_000);
     let backend = ratatui::backend::TestBackend::new(100, 30);
     let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
     app.show_context_panel = true;
@@ -166,13 +166,13 @@ fn test_panel_percent_or_unknown_labels() {
 #[test]
 fn test_panel_shows_sent_to_model_row() {
     // The provider-reported input tokens of the last LLM request
-    // (App::last_input_tokens) render as a "Sent to model" row directly
+    // (SessionView::last_input_tokens) render as a "Sent to model" row directly
     // below the "Context window" capacity row, with a percentage of the
     // advertised window.
     let mut app = support::make_app();
     app.show_context_panel = true;
-    app.selected_model_ctx_window = Some(200_000);
-    app.last_input_tokens = 45_000;
+    app.session.selected_model_ctx_window = Some(200_000);
+    app.session.last_input_tokens = 45_000;
     let backend = ratatui::backend::TestBackend::new(100, 40);
     let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
     terminal
@@ -203,8 +203,8 @@ fn test_panel_sent_to_model_zero_before_first_turn() {
     // a percentage bar.
     let mut app = support::make_app();
     app.show_context_panel = true;
-    app.selected_model_ctx_window = Some(200_000);
-    app.last_input_tokens = 0;
+    app.session.selected_model_ctx_window = Some(200_000);
+    app.session.last_input_tokens = 0;
     let backend = ratatui::backend::TestBackend::new(100, 40);
     let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
     terminal

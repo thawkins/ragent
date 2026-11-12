@@ -30,7 +30,8 @@ fn prompt_report(input: &str) -> String {
         .block_on(async move {
             let mut app = make_app();
             app.execute_slash_command(input).await;
-            app.messages
+            app.session
+                .messages
                 .last()
                 .map(|m| m.text_content())
                 .unwrap_or_default()

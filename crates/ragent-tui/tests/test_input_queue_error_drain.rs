@@ -32,7 +32,7 @@ fn entry(text: &str) -> QueuedInput {
 /// dispatch.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
@@ -48,14 +48,18 @@ async fn agent_error(app: &mut App) {
 
 /// Count user messages in the conversation.
 fn user_message_count(app: &App) -> usize {
-    app.messages.iter().filter(|m| m.role == Role::User).count()
+    app.session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::User)
+        .count()
 }
 
 #[tokio::test]
 async fn test_agent_error_drains_oldest_entry() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("first queued"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("first queued"));
 
     agent_error(&mut app).await;
 
@@ -65,11 +69,12 @@ async fn test_agent_error_drains_oldest_entry() {
         "FR-007: the oldest entry is popped at the AgentError boundary"
     );
     assert_eq!(
-        app.last_prompt, "first queued",
+        app.session.last_prompt, "first queued",
         "FR-007: the popped entry is dispatched as the next user turn"
     );
     assert!(
-        app.messages
+        app.session
+            .messages
             .iter()
             .any(|m| m.role == Role::User && m.text_content() == "first queued"),
         "FR-007: the dispatched message is added to the conversation"
@@ -79,31 +84,34 @@ async fn test_agent_error_drains_oldest_entry() {
 #[tokio::test]
 async fn test_agent_error_drains_strict_fifo_order() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("A"));
-    app.input_queue.push_back(entry("B"));
-    app.input_queue.push_back(entry("C"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("A"));
+    app.session.input_queue.push_back(entry("B"));
+    app.session.input_queue.push_back(entry("C"));
 
     agent_error(&mut app).await;
-    assert_eq!(app.last_prompt, "A", "FR-019: oldest entry goes first");
+    assert_eq!(
+        app.session.last_prompt, "A",
+        "FR-019: oldest entry goes first"
+    );
     assert_eq!(app.input_queue_len(), 2);
 
     // A second failing turn opens the next boundary.
     agent_error(&mut app).await;
-    assert_eq!(app.last_prompt, "B");
+    assert_eq!(app.session.last_prompt, "B");
     assert_eq!(app.input_queue_len(), 1);
 
     agent_error(&mut app).await;
-    assert_eq!(app.last_prompt, "C");
+    assert_eq!(app.session.last_prompt, "C");
     assert_eq!(app.input_queue_len(), 0);
 }
 
 #[tokio::test]
 async fn test_agent_error_retains_the_remaining_entries() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("ERROR-QUEUE-1"));
-    app.input_queue.push_back(entry("ERROR-QUEUE-2"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("ERROR-QUEUE-1"));
+    app.session.input_queue.push_back(entry("ERROR-QUEUE-2"));
 
     agent_error(&mut app).await;
 
@@ -113,7 +121,7 @@ async fn test_agent_error_retains_the_remaining_entries() {
         "FR-018: a failed turn must not discard the remaining queued entries"
     );
     assert_eq!(
-        app.last_prompt, "ERROR-QUEUE-1",
+        app.session.last_prompt, "ERROR-QUEUE-1",
         "FR-007: FIFO order is kept"
     );
 }
@@ -121,7 +129,7 @@ async fn test_agent_error_retains_the_remaining_entries() {
 #[tokio::test]
 async fn test_agent_error_with_empty_queue_is_a_noop() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     agent_error(&mut app).await;
 
@@ -132,30 +140,30 @@ async fn test_agent_error_with_empty_queue_is_a_noop() {
 #[tokio::test]
 async fn test_agent_error_clears_processing_before_draining() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.cancel_flag = Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
         false,
     )));
-    app.input_queue.push_back(entry("queued"));
+    app.session.input_queue.push_back(entry("queued"));
 
     agent_error(&mut app).await;
 
     assert!(
-        !app.is_processing,
+        !app.session.is_processing,
         "the error handler clears the processing gate before the drain"
     );
     assert!(
-        app.cancel_flag.is_some(),
+        app.session.cancel_flag.is_some(),
         "the drain re-armed the cancel flag for the dispatched turn"
     );
-    assert_eq!(app.last_prompt, "queued");
+    assert_eq!(app.session.last_prompt, "queued");
 }
 
 #[tokio::test]
 async fn test_agent_error_for_another_session_does_not_drain() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("foreign"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("foreign"));
 
     app.handle_event(Event::AgentError {
         session_id: "other-session".to_string(),
@@ -169,7 +177,7 @@ async fn test_agent_error_for_another_session_does_not_drain() {
         "FR-018: a foreign-session error cannot drain this session's queue"
     );
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "a foreign-session error does not touch this session's processing state"
     );
 }
@@ -177,8 +185,8 @@ async fn test_agent_error_for_another_session_does_not_drain() {
 #[tokio::test]
 async fn test_agent_error_drain_is_skipped_without_an_active_session() {
     let mut app = support::make_app();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("no session"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("no session"));
 
     // Deliver the error for the (still unbound) session id; the handler's
     // current-session guard rejects it, so the entry must be retained.
@@ -198,9 +206,9 @@ async fn test_agent_error_drain_is_skipped_without_an_active_session() {
 #[tokio::test]
 async fn test_agent_error_drain_requests_redraw_for_the_counter() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("one"));
-    app.input_queue.push_back(entry("two"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("one"));
+    app.session.input_queue.push_back(entry("two"));
     app.needs_redraw = false;
 
     agent_error(&mut app).await;
@@ -214,15 +222,15 @@ async fn test_agent_error_drain_requests_redraw_for_the_counter() {
 #[tokio::test]
 async fn test_agent_error_drain_uses_the_async_dispatch_path() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("async"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("async"));
 
     agent_error(&mut app).await;
 
     // NFR-004: dispatch_user_message spawns the turn on a tokio task and arms a
     // cancel flag; it never runs the turn inline, so the UI thread stays free.
     assert!(
-        app.cancel_flag.is_some(),
+        app.session.cancel_flag.is_some(),
         "NFR-004: the async dispatch armed a cancel flag for the new turn"
     );
 }
@@ -232,21 +240,21 @@ async fn test_error_and_message_end_boundaries_both_drain() {
     // The two turn boundaries share `advance_input_queue`; an error followed by
     // a normal completion drains one entry each, in FIFO order.
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("ERROR-QUEUE-1"));
-    app.input_queue.push_back(entry("ERROR-QUEUE-2"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("ERROR-QUEUE-1"));
+    app.session.input_queue.push_back(entry("ERROR-QUEUE-2"));
 
     agent_error(&mut app).await;
-    assert_eq!(app.last_prompt, "ERROR-QUEUE-1");
+    assert_eq!(app.session.last_prompt, "ERROR-QUEUE-1");
     assert_eq!(app.input_queue_len(), 1);
 
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.handle_event(Event::MessageEnd {
         session_id: "test-session".to_string(),
         message_id: "msg-1".to_string(),
         reason: ragent_agent::event::FinishReason::Stop,
     })
     .await;
-    assert_eq!(app.last_prompt, "ERROR-QUEUE-2");
+    assert_eq!(app.session.last_prompt, "ERROR-QUEUE-2");
     assert_eq!(app.input_queue_len(), 0);
 }

@@ -30,6 +30,7 @@ middle, and status information at the top. You can start typing immediately.
 | `--yes`                              | Auto-approve all permission prompts (YOLO-style)     |
 | `--no-tui`                           | Skip the TUI and run a single prompt in the terminal |
 | `--log`                              | Open the TUI with the log panel already visible      |
+| `--new`                              | Start a fresh session instead of reopening the last ones |
 
 ### Example
 
@@ -968,6 +969,49 @@ The Context panel is display-only: its contents are never sent to the model.
 
 ---
 
+## Multiple sessions and the session sidebar
+
+ragent can hold several sessions at once, each in its own project
+directory. A session keeps running while you work in another one.
+
+The sidebar on the left (shown when the terminal is at least 100 columns
+wide) lists:
+
+- `+ New session`
+- a `Pinned` section
+- one section per project (the git work tree of the session's directory),
+  the current project first
+
+Each session row shows a marker, its title and how long ago it was active:
+
+| Marker | Meaning |
+| ------ | ------- |
+| `!`    | Waiting on you (permission or question) |
+| `*`    | Running |
+| `x`    | Its run failed while you were elsewhere |
+| `o`    | Its run finished while you were elsewhere |
+
+Keys:
+
+| Key | Action |
+| --- | ------ |
+| `Alt+S` | Show and focus, focus, or hide the sidebar |
+| `Ctrl+N` | New session in this project |
+| `Ctrl+Up` / `Ctrl+Down` | Previous / next session |
+| `Alt+R` | The session you were in last |
+| `Up`/`Down`, `Enter` | (sidebar focused) move, open the row |
+| `Left`/`Right` | (sidebar focused) collapse / expand a project |
+| `p` / `a` / `F2` | (sidebar focused) pin, archive, rename |
+| `/` | (sidebar focused) filter by title or project |
+| `Esc` | (sidebar focused) clear the filter, then return to the input |
+
+With the mouse, click a row to open it and drag the sidebar's right border
+to resize it. The same actions are available as `/session` commands
+(`/session help`). ragent reopens your open sessions on the next start;
+use `ragent --new` to start fresh.
+
+---
+
 ## Side panel quick reference
 
 | Key       | Panel     | Purpose                                           |
@@ -1003,6 +1047,10 @@ shortcut again to close the panel.
 | `Alt+O`                       | Toggle autopilot mode                       |
 | `Alt+C`                       | Toggle Context panel                        |
 | `Alt+Q`                       | Open the queue-control menu (Next/Stop/Clear/Show) |
+| `Alt+S`                       | Show/focus/hide the session sidebar         |
+| `Ctrl+N`                      | New session                                 |
+| `Ctrl+Up` / `Ctrl+Down`       | Previous / next session                     |
+| `Alt+R`                       | Most recently focused session               |
 | `Alt+V`                       | Paste image from clipboard                  |
 | `Alt+Y`                       | Toggle YOLO mode on/off                     |
 | `@`                           | Open file mention picker                    |

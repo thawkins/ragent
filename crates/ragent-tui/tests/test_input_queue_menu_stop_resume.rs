@@ -35,13 +35,17 @@ fn entry(text: &str) -> QueuedInput {
 /// Build an app with an active session so the resume path has a session to use.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
 /// Count user messages in the conversation.
 fn user_message_count(app: &App) -> usize {
-    app.messages.iter().filter(|m| m.role == Role::User).count()
+    app.session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::User)
+        .count()
 }
 
 // ---------------------------------------------------------------------------
@@ -51,10 +55,10 @@ fn user_message_count(app: &App) -> usize {
 #[tokio::test]
 async fn test_stop_row_halts_the_running_turn() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
-    app.input_queue.push_back(entry("still queued"));
+    app.session.cancel_flag = Some(flag.clone());
+    app.session.input_queue.push_back(entry("still queued"));
 
     app.queue_menu_select_halt();
 
@@ -71,10 +75,10 @@ async fn test_stop_row_halts_the_running_turn() {
 #[tokio::test]
 async fn test_stop_row_does_not_advance_the_queue() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
-    app.input_queue.push_back(entry("first"));
-    app.input_queue.push_back(entry("second"));
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+    app.session.input_queue.push_back(entry("first"));
+    app.session.input_queue.push_back(entry("second"));
     let before = user_message_count(&app);
 
     app.queue_menu_select_halt();
@@ -94,8 +98,8 @@ async fn test_stop_row_does_not_advance_the_queue() {
 #[tokio::test]
 async fn test_stop_row_closes_the_menu_and_resets_selection() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
     app.queue_menu_open = true;
     app.queue_menu_selected = 1;
 
@@ -114,20 +118,20 @@ async fn test_stop_row_closes_the_menu_and_resets_selection() {
 #[tokio::test]
 async fn test_stop_row_leaves_input_buffer_and_attachments_untouched() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
-    app.input = "DRAFT".to_string();
-    app.input_cursor = app.input_len_chars();
-    app.pending_attachments = vec![std::path::PathBuf::from("/tmp/a.png")];
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+    app.session.input = "DRAFT".to_string();
+    app.session.input_cursor = app.input_len_chars();
+    app.session.pending_attachments = vec![std::path::PathBuf::from("/tmp/a.png")];
 
     app.queue_menu_select_halt();
 
     assert_eq!(
-        app.input, "DRAFT",
+        app.session.input, "DRAFT",
         "FR-031: the halt row must not mutate the input buffer"
     );
     assert_eq!(
-        app.pending_attachments,
+        app.session.pending_attachments,
         vec![std::path::PathBuf::from("/tmp/a.png")],
         "the halt row must not touch staged attachments"
     );
@@ -140,7 +144,7 @@ async fn test_stop_row_leaves_input_buffer_and_attachments_untouched() {
 #[test]
 fn test_halt_label_is_stop_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     assert_eq!(
         app.queue_menu_halt_label(),
@@ -152,7 +156,7 @@ fn test_halt_label_is_stop_while_processing() {
 #[tokio::test]
 async fn test_halt_label_is_resume_after_a_cancelled_turn() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     app.handle_event(Event::MessageEnd {
         session_id: "test-session".to_string(),
@@ -162,11 +166,11 @@ async fn test_halt_label_is_resume_after_a_cancelled_turn() {
     .await;
 
     assert!(
-        !app.is_processing,
+        !app.session.is_processing,
         "precondition: the cancelled turn has stopped the agent"
     );
     assert!(
-        app.agent_halted,
+        app.session.agent_halted,
         "precondition: a cancelled turn marks the agent halted"
     );
     assert_eq!(
@@ -179,8 +183,8 @@ async fn test_halt_label_is_resume_after_a_cancelled_turn() {
 #[test]
 fn test_halt_label_is_stop_while_compaction_runs() {
     let mut app = support::make_app();
-    app.is_processing = false;
-    app.compact_in_progress = true;
+    app.session.is_processing = false;
+    app.session.compact_in_progress = true;
 
     assert_eq!(
         app.queue_menu_halt_label(),
@@ -196,14 +200,14 @@ fn test_halt_label_is_stop_while_compaction_runs() {
 #[tokio::test]
 async fn test_resume_row_dispatches_the_continuation_message() {
     let mut app = app_with_session();
-    app.is_processing = false;
-    app.agent_halted = true;
+    app.session.is_processing = false;
+    app.session.agent_halted = true;
     app.queue_menu_open = true;
 
     app.queue_menu_select_halt();
 
     assert!(
-        !app.agent_halted,
+        !app.session.agent_halted,
         "FR-027: resuming must clear the halted flag"
     );
     assert!(
@@ -211,7 +215,7 @@ async fn test_resume_row_dispatches_the_continuation_message() {
         "FR-027: resuming must put the agent back to work, got {:?}",
         app.status
     );
-    let resumed = app.messages.iter().any(|m| {
+    let resumed = app.session.messages.iter().any(|m| {
         m.role == Role::User
             && m.text_content()
                 .contains("previously interrupted by the user")
@@ -221,7 +225,7 @@ async fn test_resume_row_dispatches_the_continuation_message() {
         "FR-027: resuming must dispatch the continuation prompt as a user turn"
     );
     assert!(
-        app.cancel_flag.is_some(),
+        app.session.cancel_flag.is_some(),
         "FR-027: the resumed turn must arm a fresh cancel flag"
     );
     assert!(!app.queue_menu_open, "the menu must close after the action");
@@ -230,8 +234,8 @@ async fn test_resume_row_dispatches_the_continuation_message() {
 #[tokio::test]
 async fn test_resume_row_does_not_advance_the_queue() {
     let mut app = app_with_session();
-    app.agent_halted = true;
-    app.input_queue.push_back(entry("still queued"));
+    app.session.agent_halted = true;
+    app.session.input_queue.push_back(entry("still queued"));
 
     app.queue_menu_select_halt();
 
@@ -245,7 +249,7 @@ async fn test_resume_row_does_not_advance_the_queue() {
 #[tokio::test]
 async fn test_resume_row_when_not_halted_reports_nothing_to_resume() {
     let mut app = app_with_session();
-    app.agent_halted = false;
+    app.session.agent_halted = false;
     let before = user_message_count(&app);
 
     app.queue_menu_select_halt();
@@ -264,8 +268,8 @@ async fn test_resume_row_when_not_halted_reports_nothing_to_resume() {
 #[tokio::test]
 async fn test_resume_row_without_a_session_reports_no_active_session() {
     let mut app = support::make_app();
-    app.session_id = None;
-    app.agent_halted = true;
+    app.session.session_id = None;
+    app.session.agent_halted = true;
 
     app.queue_menu_select_halt();
 
@@ -274,7 +278,7 @@ async fn test_resume_row_without_a_session_reports_no_active_session() {
         "FR-027: resuming without a session must refuse"
     );
     assert!(
-        app.agent_halted,
+        app.session.agent_halted,
         "FR-027: a refused resume must leave the halted flag set"
     );
 }
@@ -286,8 +290,8 @@ async fn test_resume_row_without_a_session_reports_no_active_session() {
 #[tokio::test]
 async fn test_stop_row_sets_the_redraw_flag() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
     app.needs_redraw = false;
 
     app.queue_menu_select_halt();

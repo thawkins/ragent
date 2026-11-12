@@ -200,7 +200,7 @@ async fn test_arrow_keys_move_fields_and_toggle_checkpoints() {
 #[tokio::test]
 async fn test_esc_cancels_without_starting_and_preserves_values() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-loop".to_string());
+    app.session.session_id = Some("sess-loop".to_string());
     open_dialog(&mut app);
     tab_n(&mut app, 1).await;
     type_char(&mut app, 'g').await;
@@ -239,13 +239,13 @@ async fn test_esc_cancels_without_starting_and_preserves_values() {
 #[tokio::test]
 async fn test_fresh_open_after_confirm_does_not_restore_draft() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-loop".to_string());
+    app.session.session_id = Some("sess-loop".to_string());
     app.configured_provider = Some(ConfiguredProvider {
         id: "ollama".to_string(),
         name: "Ollama".to_string(),
         source: ProviderSource::AutoDiscovered,
     });
-    app.selected_model = Some("ollama/qwen3:latest".to_string());
+    app.session.selected_model = Some("ollama/qwen3:latest".to_string());
     open_dialog(&mut app);
     tab_n(&mut app, 1).await;
     type_char(&mut app, 'g').await;
@@ -265,14 +265,14 @@ async fn test_fresh_open_after_confirm_does_not_restore_draft() {
 #[tokio::test]
 async fn test_confirm_with_empty_goal_returns_to_dialog_with_error() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-loop".to_string());
+    app.session.session_id = Some("sess-loop".to_string());
     open_dialog(&mut app);
     handle_key(&mut app, key(KeyCode::Enter)).await;
     let state = app.loop_setup.as_ref().expect("dialog still open");
     let error = state.error.clone().expect("error set");
     assert!(error.contains("goal"), "error names the field: {error}");
-    assert!(app.messages.is_empty(), "no message sent");
-    assert!(app.cancel_flag.is_none(), "no loop started");
+    assert!(app.session.messages.is_empty(), "no message sent");
+    assert!(app.session.cancel_flag.is_none(), "no loop started");
 }
 
 // -- FR-002: confirm starts the loop -----------------------------
@@ -390,6 +390,8 @@ fn make_scripted_app() -> (App, Arc<Mutex<Vec<ChatRequest>>>) {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
@@ -442,13 +444,13 @@ fn make_scripted_app() -> (App, Arc<Mutex<Vec<ChatRequest>>>) {
         .session_manager
         .create_session(std::env::current_dir().unwrap_or_default())
         .expect("session created");
-    app.session_id = Some(session.id.clone());
+    app.session.session_id = Some(session.id.clone());
     app.configured_provider = Some(ConfiguredProvider {
         id: "ollama".to_string(),
         name: "Ollama".to_string(),
         source: ProviderSource::AutoDiscovered,
     });
-    app.selected_model = Some("ollama/qwen3:latest".to_string());
+    app.session.selected_model = Some("ollama/qwen3:latest".to_string());
     (app, captured)
 }
 
@@ -464,7 +466,7 @@ async fn test_confirm_starts_loop_and_sends_goal() -> Result<()> {
 
     assert!(app.loop_setup.is_none(), "dialog closed after confirm");
     assert!(
-        app.messages.iter().any(|m| {
+        app.session.messages.iter().any(|m| {
             m.text_content().contains("[loop") && m.text_content().contains("fix the flaky test")
         }),
         "goal message pushed to the transcript"
@@ -566,7 +568,7 @@ async fn test_confirm_uses_spec_agent_preset() -> Result<()> {
     let target = app
         .cycleable_agents
         .iter()
-        .position(|a| a.name != app.agent_name)
+        .position(|a| a.name != app.session.agent_name)
         .expect("a second agent exists");
     let target_name = app.cycleable_agents[target].name.clone();
     let mut state = app.loop_setup.take().expect("open");
@@ -584,6 +586,7 @@ async fn test_confirm_uses_spec_agent_preset() -> Result<()> {
     assert_eq!(captured.lock().expect("captured lock").len(), 1);
     // The transcript message records which agent preset was used.
     let text = app
+        .session
         .messages
         .last()
         .map(|m| m.text_content())
@@ -617,9 +620,10 @@ async fn test_slash_loop_no_arg_opens_dialog() {
 #[tokio::test]
 async fn test_help_lists_loop_command() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-help".to_string());
+    app.session.session_id = Some("sess-help".to_string());
     app.execute_slash_command("/help").await;
     let text = app
+        .session
         .messages
         .last()
         .map(|m| m.text_content())
@@ -643,7 +647,8 @@ async fn test_slash_loop_one_shot_starts_loop() -> Result<()> {
         "one-shot /loop must not open the setup dialog"
     );
     assert!(
-        app.messages
+        app.session
+            .messages
             .iter()
             .any(|m| m.text_content().contains("[loop coder]")
                 && m.text_content().contains("fix the flaky login")),
@@ -671,6 +676,7 @@ async fn test_slash_loop_empty_goal_shows_error() -> Result<()> {
     let (mut app, captured) = make_scripted_app();
     app.execute_slash_command("/loop coder").await;
     let text = app
+        .session
         .messages
         .last()
         .map(|m| m.text_content())
@@ -710,7 +716,7 @@ async fn test_slash_loop_one_shot_starts_with_documented_defaults() -> Result<()
     });
     app.execute_slash_command("/loop coder list the files and stop")
         .await;
-    let session_id = app.session_id.clone().expect("session id");
+    let session_id = app.session.session_id.clone().expect("session id");
 
     // The spec appears as soon as the spawned task registers the loop; grab
     // it early because termination removes the entry from the map.
@@ -810,6 +816,7 @@ async fn test_slash_loop_help_shows_usage() {
     let (mut app, captured) = make_scripted_app();
     app.execute_slash_command("/loop help").await;
     let text = app
+        .session
         .messages
         .last()
         .map(|m| m.text_content())
@@ -944,7 +951,7 @@ async fn test_slash_loop_one_shot_flags_override_budgets() -> Result<()> {
         "/loop coder --max-steps 9 --cost_limit 12345 --timeout 60 fix the flaky login test",
     )
     .await;
-    let session_id = app.session_id.clone().expect("session id");
+    let session_id = app.session.session_id.clone().expect("session id");
 
     let spec = {
         let mut captured_spec = None;
@@ -1001,6 +1008,7 @@ async fn test_slash_loop_invalid_flag_value_does_not_start() -> Result<()> {
     app.execute_slash_command("/loop coder --max-steps abc fix it")
         .await;
     let text = app
+        .session
         .messages
         .last()
         .map(|m| m.text_content())

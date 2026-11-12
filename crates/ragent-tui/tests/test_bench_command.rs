@@ -44,7 +44,8 @@ fn enter_isolated_project_dir() -> (
 
 /// Return the text of the most recently appended message.
 fn last_message_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .expect("at least one message")
         .text_content()
@@ -67,8 +68,8 @@ fn wait_for_bench_completion(app: &mut App) {
 
 fn configured_app() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("bench-test-session".to_string());
-    app.selected_model = Some("anthropic/claude-sonnet-4-20250514".to_string());
+    app.session.session_id = Some("bench-test-session".to_string());
+    app.session.selected_model = Some("anthropic/claude-sonnet-4-20250514".to_string());
     app.bench_mock_outputs = Some(vec![
         "def solve():\n    return 'bench-output'".to_string(),
         "def solve():\n    return 'bench-output-2'".to_string(),
@@ -77,7 +78,8 @@ fn configured_app() -> App {
 }
 
 fn all_message_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .map(ragent_agent::message::Message::text_content)
         .collect::<Vec<_>>()
@@ -91,6 +93,7 @@ async fn test_bench_list_shows_suites_and_profiles() {
     app.execute_slash_command("/bench list").await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("bench list message")
@@ -120,6 +123,7 @@ async fn test_bench_help_shows_command_table_and_supported_languages() {
     app.execute_slash_command("/bench help").await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("bench help message")
@@ -191,6 +195,7 @@ async fn test_bench_init_verify_only_reports_existing_state() {
         .await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("bench verify-only message")
@@ -208,6 +213,7 @@ async fn test_bench_init_all_creates_every_suite_root() {
     app.execute_slash_command("/bench init all").await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("bench init all message")
@@ -229,6 +235,7 @@ async fn test_bench_init_full_reports_gated_support() {
     app.execute_slash_command("/bench init full").await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("bench init full message")
@@ -257,6 +264,7 @@ async fn test_bench_run_humaneval_creates_workbook() {
         "workbook should exist"
     );
     let text = app
+        .session
         .messages
         .last()
         .expect("bench run output")
@@ -286,6 +294,7 @@ async fn test_bench_run_all_creates_workbooks() {
         "all target should produce multiple workbooks"
     );
     let text = app
+        .session
         .messages
         .last()
         .expect("bench run all output")
@@ -405,6 +414,7 @@ async fn test_bench_open_last_shows_latest_workbook_paths() {
     app.execute_slash_command("/bench open last").await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("bench open last output")
@@ -442,6 +452,7 @@ async fn test_bench_run_missing_data_fails_fast_with_init_hint() {
     app.execute_slash_command("/bench run humaneval").await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("bench error message")

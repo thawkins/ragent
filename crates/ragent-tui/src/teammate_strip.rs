@@ -38,7 +38,7 @@ pub const HINT: &str = " Alt+^v:cycle ";
 /// True only while a team is active and has at least one member (FR-027); a team
 /// with no members reserves no line at all (FR-066).
 pub fn is_visible(app: &App) -> bool {
-    app.active_team.is_some() && !app.team_members.is_empty()
+    app.session.active_team.is_some() && !app.session.team_members.is_empty()
 }
 
 /// The glyph and colour used for one member status.
@@ -132,8 +132,8 @@ pub fn strip_line(app: &App, width: u16) -> Line<'static> {
         ));
     }
 
-    for member in &app.team_members {
-        let focused = app.focused_teammate.as_deref() == Some(member.agent_id.as_str());
+    for member in &app.session.team_members {
+        let focused = app.session.focused_teammate.as_deref() == Some(member.agent_id.as_str());
         let (pill_spans, pill_width) = pill(member, focused);
         if used + pill_width > budget {
             break;

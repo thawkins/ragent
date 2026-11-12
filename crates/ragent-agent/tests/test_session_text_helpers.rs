@@ -684,6 +684,7 @@ async fn test_permission_hardwired_info_tools_auto_approved() {
             120,
             false,
             false,
+            &std::env::current_dir().expect("cwd"),
         )
         .await
         .expect("permission check should succeed");
@@ -711,6 +712,7 @@ async fn test_permission_security_approved_satisfies_bare_ask() {
         120,
         true,
         false,
+        &std::env::current_dir().expect("cwd"),
     )
     .await
     .expect("permission check should succeed");
@@ -735,6 +737,7 @@ async fn test_permission_auto_approve_short_circuits() {
         120,
         false,
         false,
+        &std::env::current_dir().expect("cwd"),
     )
     .await
     .expect("permission check should succeed");
@@ -763,6 +766,7 @@ async fn test_permission_checkpoint_overrides_allow_then_denies_on_timeout() {
         0,
         false,
         false,
+        &std::env::current_dir().expect("cwd"),
     )
     .await
     .expect("permission check should succeed");

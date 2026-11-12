@@ -235,7 +235,7 @@ async fn plan_on_a_real_spec_starts_generation() {
         app.status,
         ragent_specs::SpecCommand::build_plan_status("sample")
     );
-    assert!(app.is_processing);
+    assert!(app.session.is_processing);
 }
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,8 @@ mod support;
 
 /// The text of every assistant message in the window, joined.
 fn window_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .filter(|message| message.role == ragent_types::message::Role::Assistant)
         .filter_map(|message| message.parts.first())
@@ -36,7 +37,7 @@ fn window_text(app: &App) -> String {
 /// An app with an active session, so appended messages reach the window.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app
 }
 

@@ -469,7 +469,7 @@ impl App {
             return;
         }
         // Session id: ensure_session() guarantees this is Some.
-        let session_id = self.session_id.clone().unwrap_or_default();
+        let session_id = self.session.session_id.clone().unwrap_or_default();
 
         match cmd {
             // FUNC-043: `Help` is handled above; a no-op here avoids the
@@ -1018,6 +1018,7 @@ impl App {
                             return;
                         }
                         let model_ref = self
+                            .session
                             .selected_model
                             .as_deref()
                             .and_then(|s| s.split_once('/'))
@@ -1036,7 +1037,7 @@ impl App {
                         let context_window = self
                             .selected_model_context_window()
                             .unwrap_or(ragent_research::DEFAULT_CONTEXT_WINDOW_TOKENS);
-                        let model_label = self.selected_model.clone().unwrap_or_default();
+                        let model_label = self.session.selected_model.clone().unwrap_or_default();
 
                         let Some(live) = self.claim_research_run("cluster", &name) else {
                             return;
@@ -1216,7 +1217,7 @@ impl App {
     /// defaults - but the user is told, so research settings that silently
     /// stopped applying do not go unnoticed.
     fn load_research_config(&mut self) -> Option<ragent_agent::Config> {
-        match ragent_agent::Config::load() {
+        match ragent_agent::Config::load_for(&self.cwd_path) {
             Ok(config) => Some(config),
             Err(error) => {
                 self.push_log_no_agent(
@@ -1247,7 +1248,7 @@ impl App {
             storage: self.storage.clone(),
             config: self.load_research_config().map(Arc::new),
             provider_registry: self.provider_registry.clone(),
-            active_model: self.agent_info.model.clone(),
+            active_model: self.session.agent_info.model.clone(),
         }
     }
 
@@ -1259,7 +1260,7 @@ impl App {
     /// selected" and is not an error: the deck then falls back to the
     /// deterministic enrichment.
     fn deck_model(&mut self) -> Option<Arc<dyn ragent_research::deck_enrich::DeckModel>> {
-        let (provider_id, model_id) = self.selected_model.as_deref()?.split_once('/')?;
+        let (provider_id, model_id) = self.session.selected_model.as_deref()?.split_once('/')?;
         let registry = self.provider_registry.clone();
         let provider_id = provider_id.to_string();
         let model_id = model_id.to_string();
@@ -1296,7 +1297,7 @@ impl App {
         options: ragent_research::deck::DeckRunOptions,
         model: Option<Arc<dyn ragent_research::deck_enrich::DeckModel>>,
     ) {
-        let Some(session_id) = self.session_id.clone() else {
+        let Some(session_id) = self.session.session_id.clone() else {
             self.status = "research: no active session".to_string();
             return;
         };

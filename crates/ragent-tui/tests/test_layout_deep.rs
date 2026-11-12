@@ -361,7 +361,7 @@ fn setup_done_with_and_without_model() {
 #[test]
 fn setup_select_agent_custom_and_current_marker() {
     let mut app = support::make_app();
-    app.current_agent_index = 1;
+    app.session.current_agent_index = 1;
     app.provider_setup = Some(ProviderSetupStep::SelectAgent {
         agents: vec![
             ("general".to_string(), "General helper".to_string(), false),
@@ -645,21 +645,22 @@ fn setup_select_azure_resource_entries_and_empty_states() {
 #[test]
 fn render_messages_covers_all_part_and_status_arms() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-abcdefgh-1234".to_string());
-    app.messages
+    app.session.session_id = Some("sess-abcdefgh-1234".to_string());
+    app.session
+        .messages
         .push(Message::user_text("s1", "first line\nsecond line"));
-    app.messages.push(Message::assistant_text(
+    app.session.messages.push(Message::assistant_text(
         "s1",
         "Agent Notice: switched model",
     ));
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "s1",
         Role::Compaction,
         vec![MessagePart::Text {
             text: "## Objective\nsummarised".to_string(),
         }],
     ));
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "s1",
         Role::Assistant,
         vec![
@@ -800,8 +801,9 @@ fn render_messages_covers_all_part_and_status_arms() {
 #[test]
 fn output_view_overlay_session_target_with_empty_and_filled_transcripts() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-live".to_string());
-    app.messages
+    app.session.session_id = Some("sess-live".to_string());
+    app.session
+        .messages
         .push(Message::assistant_text("sess-live", "live transcript line"));
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::Session {
@@ -860,7 +862,7 @@ fn output_view_overlay_team_member_resolves_session_and_builds_step_map() {
     let mut member = TeamMember::new("reviewer", "tm-001", "general");
     member.session_id = Some(sid.to_string());
     member.status = MemberStatus::Working;
-    app.team_members.push(member);
+    app.session.team_members.push(member);
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::TeamMember {
             team_name: "alpha".to_string(),
@@ -1029,7 +1031,7 @@ fn history_picker_truncates_long_entries_and_scrolls() {
 #[test]
 fn file_menu_empty_matches_and_directory_titles() {
     let mut app = support::make_app();
-    app.input = "@nothing".to_string();
+    app.session.input = "@nothing".to_string();
     app.file_menu = Some(FileMenuState {
         matches: Vec::new(),
         selected: 0,
@@ -1042,7 +1044,7 @@ fn file_menu_empty_matches_and_directory_titles() {
 
     // A directory listing with hidden files enabled and a selected directory.
     let mut app = support::make_app();
-    app.input = "@/src".to_string();
+    app.session.input = "@/src".to_string();
     app.file_menu_show_hidden = true;
     app.file_menu = Some(FileMenuState {
         matches: vec![
@@ -1071,7 +1073,7 @@ fn file_menu_empty_matches_and_directory_titles() {
 #[test]
 fn file_menu_many_matches_and_selected_file() {
     let mut app = support::make_app();
-    app.input = "@/".to_string();
+    app.session.input = "@/".to_string();
     app.file_menu = Some(FileMenuState {
         matches: (0..20)
             .map(|i| FileMenuEntry {
@@ -1432,8 +1434,8 @@ fn tasks_panel_no_tasks_placeholder() {
     let mut app = support::make_app();
     app.show_tasks_panel = true;
     app.show_log = false;
-    app.session_id = Some("layout-deep-tasks".to_string());
-    app.tasks_cache_dirty = true;
+    app.session.session_id = Some("layout-deep-tasks".to_string());
+    app.session.tasks_cache_dirty = true;
     let terminal = render(&mut app, 120, 40);
     assert!(painted(&terminal).contains("No tasks"));
 }
@@ -1443,7 +1445,7 @@ fn tasks_panel_rows_statuses_owner_blocked_and_overflow() {
     let mut app = support::make_app();
     app.show_tasks_panel = true;
     app.show_log = false;
-    app.session_id = Some("layout-deep-tasks-2".to_string());
+    app.session.session_id = Some("layout-deep-tasks-2".to_string());
     app.storage
         .create_session("layout-deep-tasks-2", ".")
         .expect("create session");
@@ -1501,7 +1503,7 @@ fn tasks_panel_rows_statuses_owner_blocked_and_overflow() {
             )
             .expect("create task");
     }
-    app.tasks_cache_dirty = true;
+    app.session.tasks_cache_dirty = true;
     app.tasks_scroll_offset = u16::MAX;
     let terminal = render(&mut app, 160, 40);
     let text = painted(&terminal);
@@ -1518,10 +1520,10 @@ fn tasks_panel_rows_statuses_owner_blocked_and_overflow() {
 #[test]
 fn input_kb_selection_multiline_and_queue_counter() {
     let mut app = support::make_app();
-    app.input = "hello world\nsecond line here".to_string();
-    app.input_cursor = 3;
-    app.kb_select_anchor = Some(20);
-    app.input_queue.push_back(QueuedInput {
+    app.session.input = "hello world\nsecond line here".to_string();
+    app.session.input_cursor = 3;
+    app.session.kb_select_anchor = Some(20);
+    app.session.input_queue.push_back(QueuedInput {
         text: "queued prompt".to_string(),
         image_paths: Vec::new(),
     });
@@ -1538,9 +1540,9 @@ fn input_empty_placeholder_and_selection_across_wrap() {
     assert!(painted(&terminal).contains("Type @ to mention files"));
 
     let mut app = support::make_app();
-    app.input = "0123456789012345678901234567890123456789".to_string();
-    app.input_cursor = 38;
-    app.kb_select_anchor = Some(1);
+    app.session.input = "0123456789012345678901234567890123456789".to_string();
+    app.session.input_cursor = 38;
+    app.session.kb_select_anchor = Some(1);
     // A narrow pane forces the selection to span several display rows.
     let terminal = render(&mut app, 60, 20);
     assert!(painted(&terminal).contains("0123456789"));
@@ -1553,8 +1555,8 @@ fn input_empty_placeholder_and_selection_across_wrap() {
 #[test]
 fn teammate_strip_renders_every_status_icon() {
     let mut app = support::make_app();
-    app.session_id = Some("s-lead".to_string());
-    app.active_team = Some(TeamConfig::new("alpha", "s-lead"));
+    app.session.session_id = Some("s-lead".to_string());
+    app.session.active_team = Some(TeamConfig::new("alpha", "s-lead"));
     let statuses = [
         MemberStatus::Working,
         MemberStatus::Idle,
@@ -1573,9 +1575,9 @@ fn teammate_strip_renders_every_status_icon() {
             "general",
         );
         member.status = status;
-        app.team_members.push(member);
+        app.session.team_members.push(member);
     }
-    app.focused_teammate = Some("tm-001".to_string());
+    app.session.focused_teammate = Some("tm-001".to_string());
     let terminal = render(&mut app, 120, 40);
     let text = painted(&terminal);
     assert!(text.contains("[team]"));
@@ -1601,12 +1603,16 @@ fn teammate_strip_renders_every_status_icon() {
 #[test]
 fn teams_window_renders_all_member_statuses_and_buttons() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-lead-0001".to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("alpha", "sess-lead-0001"));
+    app.session.session_id = Some("sess-lead-0001".to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("alpha", "sess-lead-0001"));
     app.show_teams_window = true;
-    app.team_message_counts.insert("tm-001".to_string(), (3, 2));
-    app.team_message_counts.insert("lead".to_string(), (1, 1));
+    app.session
+        .team_message_counts
+        .insert("tm-001".to_string(), (3, 2));
+    app.session
+        .team_message_counts
+        .insert("lead".to_string(), (1, 1));
     let statuses = [
         MemberStatus::Working,
         MemberStatus::Suspended,
@@ -1624,14 +1630,14 @@ fn teams_window_renders_all_member_statuses_and_buttons() {
                 model_id: "claude-sonnet-4-20250514".to_string(),
             });
         }
-        app.team_members.push(member);
+        app.session.team_members.push(member);
     }
-    app.focused_teammate = Some("tm-000".to_string());
+    app.session.focused_teammate = Some("tm-000".to_string());
     // More members than rows, so the subpanel scrollbar renders.
     for i in 0..20 {
         let mut member = TeamMember::new(format!("filler-{i}"), format!("tm-1{i:02}"), "general");
         member.status = MemberStatus::Idle;
-        app.team_members.push(member);
+        app.session.team_members.push(member);
     }
     app.teams_scroll_offset = 1;
     let terminal = render(&mut app, 160, 40);
@@ -1644,7 +1650,7 @@ fn teams_window_renders_all_member_statuses_and_buttons() {
 #[test]
 fn teams_window_with_no_members_shows_hint() {
     let mut app = support::make_app();
-    app.active_team = Some(TeamConfig::new("empty-team", "s1"));
+    app.session.active_team = Some(TeamConfig::new("empty-team", "s1"));
     app.show_teams_window = true;
     let terminal = render(&mut app, 140, 40);
     assert!(painted(&terminal).contains("no teammates yet"));
@@ -1653,7 +1659,7 @@ fn teams_window_with_no_members_shows_hint() {
 #[test]
 fn active_agents_window_covers_nesting_statuses_and_bg_tasks() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-primary".to_string());
+    app.session.session_id = Some("sess-primary".to_string());
     app.show_agents_window = true;
     // A primary-agent child and a grandchild exercise the recursion.
     app.active_tasks.push(task_entry(
@@ -1709,7 +1715,7 @@ fn active_agents_window_covers_nesting_statuses_and_bg_tasks() {
     let mut member = TeamMember::new("reviewer", "tm-001", "general");
     member.session_id = Some("sess-child-1".to_string());
     member.status = MemberStatus::Working;
-    app.team_members.push(member);
+    app.session.team_members.push(member);
     app.bg_tasks.push(BgTaskView {
         id: "bg-1".to_string(),
         session_id: "sess-primary".to_string(),
@@ -1745,7 +1751,7 @@ fn active_agents_window_covers_nesting_statuses_and_bg_tasks() {
 #[test]
 fn active_agents_window_scrolled_and_empty() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-primary".to_string());
+    app.session.session_id = Some("sess-primary".to_string());
     app.show_agents_window = true;
     for i in 0..30 {
         app.active_tasks.push(task_entry(
@@ -1772,17 +1778,18 @@ fn status_bar_full_width_with_all_indicators() {
     app.cwd = "/home/user/projects/ragent".to_string();
     app.git_branch = Some("feature/deep-coverage".to_string());
     app.status = "Processing request".to_string();
-    app.last_prompt = "a very long prompt that should be truncated by the status bar".repeat(2);
-    app.active_backend = "docker".to_string();
-    app.compact_in_progress = true;
-    app.compress_in_progress = true;
+    app.session.last_prompt =
+        "a very long prompt that should be truncated by the status bar".repeat(2);
+    app.session.active_backend = "docker".to_string();
+    app.session.compact_in_progress = true;
+    app.session.compress_in_progress = true;
     app.code_index_busy = true;
     app.code_index_graph_busy = true;
     app.code_index_enabled = true;
-    app.autopilot_enabled = true;
+    app.session.autopilot_enabled = true;
     app.quota_percent = Some(96.0);
-    app.selected_thinking_level = Some(ThinkingLevel::High);
-    app.selected_model = Some("anthropic/claude".to_string());
+    app.session.selected_thinking_level = Some(ThinkingLevel::High);
+    app.session.selected_model = Some("anthropic/claude".to_string());
     let terminal = render(&mut app, 200, 30);
     let text = painted(&terminal);
     assert!(text.contains("ragent"));
@@ -1798,7 +1805,7 @@ fn status_bar_full_width_with_all_indicators() {
 fn status_bar_backend_segment_is_full_name_in_cyan() {
     let mut app = support::make_app();
     app.cwd = "/home/user/projects/ragent".to_string();
-    app.active_backend = "podman".to_string();
+    app.session.active_backend = "podman".to_string();
     let terminal = render(&mut app, 160, 24);
     let buffer = terminal.backend().buffer();
 
@@ -1838,8 +1845,8 @@ fn status_bar_ready_state_web_deadline_and_quota_bands() {
         Some(std::time::Instant::now() + std::time::Duration::from_secs(125));
     app.research_progress.push(progress);
     app.quota_percent = Some(85.0);
-    app.compact_in_progress = true;
-    app.active_backend = "local".to_string();
+    app.session.compact_in_progress = true;
+    app.session.active_backend = "local".to_string();
     let terminal = render(&mut app, 160, 30);
     let text = painted(&terminal);
     assert!(text.contains("web:2:"));
@@ -1847,8 +1854,8 @@ fn status_bar_ready_state_web_deadline_and_quota_bands() {
     assert!(text.contains("compacting"));
 
     app.quota_percent = Some(5.0);
-    app.compact_in_progress = false;
-    app.compress_in_progress = true;
+    app.session.compact_in_progress = false;
+    app.session.compress_in_progress = true;
     let terminal = render(&mut app, 160, 30);
     let text = painted(&terminal);
     assert!(text.contains("compressing"));
@@ -1860,9 +1867,9 @@ fn status_bar_compact_and_minimal_modes() {
     let mut app = support::make_app();
     app.cwd = "/very/long/path/to/a/deeply/nested/project/directory".to_string();
     app.git_branch = Some("main".to_string());
-    app.compact_in_progress = true;
-    app.selected_thinking_level = Some(ThinkingLevel::Medium);
-    app.selected_model = Some("openai/gpt-4o".to_string());
+    app.session.compact_in_progress = true;
+    app.session.selected_thinking_level = Some(ThinkingLevel::Medium);
+    app.session.selected_model = Some("openai/gpt-4o".to_string());
     app.quota_percent = Some(42.0);
 
     let terminal = render(&mut app, 100, 24);
@@ -1880,9 +1887,9 @@ fn status_bar_compact_and_minimal_modes() {
 fn status_bar_no_prompt_no_branch_no_model() {
     let mut app = support::make_app();
     app.git_branch = None;
-    app.last_prompt = String::new();
-    app.selected_model = None;
-    app.selected_thinking_level = None;
+    app.session.last_prompt = String::new();
+    app.session.selected_model = None;
+    app.session.selected_thinking_level = None;
     app.quota_percent = None;
     let terminal = render(&mut app, 120, 24);
     assert!(painted(&terminal).contains("Ready"));
@@ -2129,7 +2136,7 @@ fn permission_dialog_without_patterns_renders_empty_details() {
 #[test]
 fn permission_dialog_through_app_queue() {
     let mut app = support::make_app();
-    app.permission_queue.push_back(permission_request());
+    app.session.permission_queue.push_back(permission_request());
     let terminal = render(&mut app, 120, 50);
     let text = painted(&terminal);
     assert!(text.contains("Permission Required"));

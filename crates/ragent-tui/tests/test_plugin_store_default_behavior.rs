@@ -402,7 +402,7 @@ async fn enter_installs_the_default_sourced_entry_for_both_stores() {
             .with_index(kind.default_url(), index_bytes(kind.token(), entries));
 
         let mut app = app_with_seam(kind, fetcher, Some(temp.clone()));
-        app.session_id = Some("s1".to_string());
+        app.session.session_id = Some("s1".to_string());
         drive_fetch(&mut app, kind, &PluginStoresConfig::default()).await;
 
         // The result set is sorted alphabetically by id (FR-050), so the
@@ -431,6 +431,7 @@ async fn enter_installs_the_default_sourced_entry_for_both_stores() {
             kind.token()
         );
         let report = app
+            .session
             .messages
             .last()
             .map(|m| m.text_content())

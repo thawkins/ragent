@@ -2,6 +2,60 @@
 
 ## [Unreleased]
 
+### Added - multiple sessions and a session sidebar
+
+- The TUI holds several sessions at once. A session keeps running while
+  another is focused, and its permission requests and questions wait on
+  that session instead of opening over the one you are reading.
+- A left-hand sidebar lists every session under its project (the git work
+  tree of its directory), with a `Pinned` section, a `+ New session` row,
+  markers for waiting (`!`), running (`*`), failed (`x`) and unread (`o`),
+  and a relative age. It can be filtered (`/`), collapsed per project,
+  resized by dragging, and toggled with `Alt+S`; it hides below 100
+  columns.
+- Keys: `Ctrl+N` new session, `Ctrl+Up`/`Ctrl+Down` previous/next
+  session, `Alt+R` most recent session.
+- `/session [list] | new [path] | switch <id-or-title> | close | rename |
+  pin | archive | unarchive | list --all | list --archived`.
+- `ragent` reopens the sessions that were open at exit (up to 8); `ragent
+  --new` starts a fresh one.
+- Each session works in its own directory: switching moves the TUI's
+  working directory, git branch and project-scoped commands there. A
+  session whose directory has its own `.ragent/ragent.json` runs under
+  that config. `/session new <path>` accepts a directory inside the launch
+  directory or a `dirs.allowed_roots` entry.
+- Untitled sessions are titled from their first prompt when the first
+  reply finishes.
+- New `on_notification` hook trigger (Claude: `Notification`) fires when a
+  background session starts waiting on you, finishes, or fails, with
+  `RAGENT_NOTIFICATION_KIND`, `RAGENT_NOTIFICATION_MESSAGE` and
+  `RAGENT_SESSION_ID`. A `N need you` badge shows in the status bar.
+- Storage schema 4: sessions record their project and a pinned flag;
+  existing sessions are backfilled on first open.
+- Storage schema 5: sessions record what created them (`kind`:
+  `interactive`, `subagent`, `teammate`, `skill`, `automation`).
+  Sub-agent, teammate and forked-skill sessions record the session that
+  started them as `parent_id`. The link is kept even if that parent row is
+  gone. Archiving or unarchiving a session takes its whole tree of children
+  with it, and the sidebar and `/session list --all` show only interactive
+  top-level sessions. Before this, every agent run was stored as an
+  unlinked top-level session and flooded the session list.
+- Per-project services: a session in another project uses that project's
+  code index (opened on first focus when its config enables indexing and it
+  has a `.ragent` directory, released when its last session closes), specs,
+  custom agents and plugin commands.
+- Per-project MCP: each other project gets its own MCP client (user-global
+  and plugin servers, stdio servers started in the project root) and its
+  own tool list, so a session only sees and calls its own project's MCP
+  tools. `/mcp` lists the focused project's servers. Connector-bridged
+  servers stay with the launch project.
+
+### Fixed - `file:read` auto-grant judged against the session directory
+
+- The permission auto-grant for reads compared paths with the process
+  working directory. It now uses the calling session's working directory,
+  and resolves relative paths against it, as the tools do.
+
 ### Fixed - Gemini token totals and cost counted once per response
 
 - Gemini repeats `usageMetadata` on every stream chunk as running totals,

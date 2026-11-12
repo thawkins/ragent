@@ -29,8 +29,6 @@ use ragent_plugins::{
     subcommand_of,
 };
 
-use crate::app::helpers::current_working_dir;
-
 /// Dispatch a `/plugins <args>` invocation.
 ///
 /// Returns `Some(report)` for a management report to print in the message
@@ -95,7 +93,7 @@ pub(super) fn handle_plugins_command(app: &mut crate::app::App, args: &str) -> O
         return Some(render_help(sub));
     }
 
-    let workdir = current_working_dir();
+    let workdir = app.cwd_path.clone();
     // A plugin's `mcpServers` entry is a separate process, so the number of tools
     // it exposes is only known after it connects - never derivable from the
     // manifest. `--mcp` is meaningful on `list` only: gate on the subcommand
@@ -261,7 +259,7 @@ pub(crate) fn toggle_plugin_enabled(
     plugin_id: &str,
     currently_enabled: bool,
 ) -> String {
-    let workdir = current_working_dir();
+    let workdir = app.cwd_path.clone();
     if !store_and_config(&workdir).1.is_enabled() {
         return "[x] plugin subsystem is disabled (plugins.enabled = false)".to_string();
     }

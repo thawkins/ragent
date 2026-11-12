@@ -149,8 +149,8 @@ fn text_of(app: &mut App, area: Rect) -> String {
 /// An app with one running sub-agent and the Agents window open.
 fn app_with_task() -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks
         .push(task("a1b2c3d4", "explore", TaskStatus::Running));
     app.show_agents_window = true;
@@ -162,10 +162,11 @@ fn app_with_task() -> App {
 /// open.
 fn app_with_team(app_status: MemberStatus) -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", app_status));
     app.show_teams_window = true;
     app.needs_redraw = false;
@@ -314,8 +315,8 @@ async fn esc_dismisses_the_dialog() {
 #[tokio::test]
 async fn other_keys_are_swallowed_while_the_dialog_is_open() {
     let mut app = app_with_task();
-    app.input = "hello".to_string();
-    app.input_cursor = 5;
+    app.session.input = "hello".to_string();
+    app.session.input_cursor = 5;
     app.open_row_action(RowAction::KillSubagent {
         task_id: "a1b2c3d4".to_string(),
         agent_name: "explore".to_string(),
@@ -333,7 +334,7 @@ async fn other_keys_are_swallowed_while_the_dialog_is_open() {
         "an unrelated key must not dismiss the dialog"
     );
     assert_eq!(
-        app.input, "hello",
+        app.session.input, "hello",
         "modal keys must not leak into the input buffer (FR-055 style gate)"
     );
 }
@@ -612,7 +613,7 @@ async fn teammate_keyboard_keys_consume_the_key_either_way() {
         "the dialog stays open while it is being answered"
     );
     assert_eq!(
-        app.input, "",
+        app.session.input, "",
         "the consumed key must not leak into the input buffer"
     );
 }
@@ -779,11 +780,13 @@ async fn every_row_action_dialog_carries_the_footer_hints() {
 #[tokio::test]
 async fn shared_yes_no_dialog_footer_states_the_outcomes() {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.input_queue.push_back(ragent_tui::app::QueuedInput {
-        text: "queued".to_string(),
-        image_paths: Vec::new(),
-    });
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session
+        .input_queue
+        .push_back(ragent_tui::app::QueuedInput {
+            text: "queued".to_string(),
+            image_paths: Vec::new(),
+        });
     app.queue_menu_open = true;
     app.queue_menu_select_clear();
     assert!(

@@ -69,21 +69,22 @@ fn test_max_input_queue_is_32() {
 fn test_new_app_starts_with_empty_queue() {
     let app = support::make_app();
     assert_eq!(app.input_queue_len(), 0);
-    assert!(app.input_queue.is_empty());
+    assert!(app.session.input_queue.is_empty());
 }
 
 #[test]
 fn test_input_queue_preserves_fifo_order() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("first"));
-    app.input_queue.push_back(entry("second"));
-    app.input_queue.push_back(entry("third"));
+    app.session.input_queue.push_back(entry("first"));
+    app.session.input_queue.push_back(entry("second"));
+    app.session.input_queue.push_back(entry("third"));
     assert_eq!(app.input_queue_len(), 3);
 
     // Oldest first: popping the front yields the entries in submission order.
     let popped: Vec<String> = (0..3)
         .map(|_| {
-            app.input_queue
+            app.session
+                .input_queue
                 .pop_front()
                 .expect("queue should have entries")
                 .text
@@ -97,39 +98,41 @@ fn test_input_queue_preserves_fifo_order() {
 fn test_input_queue_can_hold_up_to_capacity() {
     let mut app = support::make_app();
     for i in 0..MAX_INPUT_QUEUE {
-        app.input_queue.push_back(entry(&format!("message-{i}")));
+        app.session
+            .input_queue
+            .push_back(entry(&format!("message-{i}")));
     }
     assert_eq!(app.input_queue_len(), MAX_INPUT_QUEUE);
     // The head is still the oldest entry; eviction from the front is O(1).
     assert_eq!(
-        app.input_queue.front().map(|q| q.text.as_str()),
+        app.session.input_queue.front().map(|q| q.text.as_str()),
         Some("message-0")
     );
-    app.input_queue.pop_front();
+    app.session.input_queue.pop_front();
     assert_eq!(app.input_queue_len(), MAX_INPUT_QUEUE - 1);
 }
 
 #[test]
 fn test_clear_input_queue_empties_the_queue() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
-    app.input_queue.push_back(entry("b"));
+    app.session.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("b"));
     app.clear_input_queue();
     assert_eq!(app.input_queue_len(), 0);
-    assert!(app.input_queue.is_empty());
+    assert!(app.session.input_queue.is_empty());
 }
 
 #[test]
 fn test_queued_input_preserves_image_attachments() {
     let mut app = support::make_app();
-    app.input_queue.push_back(QueuedInput {
+    app.session.input_queue.push_back(QueuedInput {
         text: "describe this image".to_string(),
         image_paths: vec![
             std::path::PathBuf::from("/tmp/one.png"),
             std::path::PathBuf::from("/tmp/two.jpg"),
         ],
     });
-    let head = app.input_queue.front().expect("entry queued");
+    let head = app.session.input_queue.front().expect("entry queued");
     assert_eq!(head.text, "describe this image");
     assert_eq!(head.image_paths.len(), 2);
 }
@@ -144,7 +147,8 @@ fn test_load_session_clears_the_input_queue() {
         .create_session(dir)
         .expect("create session");
 
-    app.input_queue
+    app.session
+        .input_queue
         .push_back(entry("must not survive a session switch"));
     assert_eq!(app.input_queue_len(), 1);
 
@@ -173,7 +177,7 @@ fn test_prompt_is_bare_when_queue_is_empty() {
 #[test]
 fn test_counter_is_shown_when_queue_is_non_empty() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("one"));
+    app.session.input_queue.push_back(entry("one"));
 
     let row = input_row_text(&mut app);
 
@@ -187,7 +191,7 @@ fn test_counter_is_shown_when_queue_is_non_empty() {
 fn test_counter_is_two_digits_zero_padded() {
     let mut app = support::make_app();
     for i in 0..3 {
-        app.input_queue.push_back(entry(&format!("m{i}")));
+        app.session.input_queue.push_back(entry(&format!("m{i}")));
     }
 
     let row = input_row_text(&mut app);
@@ -201,10 +205,10 @@ fn test_counter_is_two_digits_zero_padded() {
 #[test]
 fn test_counter_is_rendered_before_typed_text() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("one"));
-    app.input_queue.push_back(entry("two"));
-    app.input = "hello".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input_queue.push_back(entry("one"));
+    app.session.input_queue.push_back(entry("two"));
+    app.session.input = "hello".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
 
     let row = input_row_text(&mut app);
 
@@ -220,7 +224,7 @@ fn test_counter_is_clamped_to_two_digits() {
     // Push directly past the cap to exercise the clamp (the render never
     // depends on the enqueue path enforcing the bound).
     for i in 0..120 {
-        app.input_queue.push_back(entry(&format!("m{i}")));
+        app.session.input_queue.push_back(entry(&format!("m{i}")));
     }
 
     let row = input_row_text(&mut app);
@@ -234,10 +238,10 @@ fn test_counter_is_clamped_to_two_digits() {
 #[test]
 fn test_prompt_reverts_when_queue_empties() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("one"));
+    app.session.input_queue.push_back(entry("one"));
     assert!(input_row_text(&mut app).starts_with("01> "));
 
-    app.input_queue.pop_front();
+    app.session.input_queue.pop_front();
 
     let row = input_row_text(&mut app);
     assert!(
@@ -251,7 +255,7 @@ fn test_render_reflects_enqueue_on_next_frame() {
     let mut app = support::make_app();
     assert!(input_row_text(&mut app).starts_with("> "));
 
-    app.input_queue.push_back(entry("one"));
+    app.session.input_queue.push_back(entry("one"));
 
     assert!(
         input_row_text(&mut app).starts_with("01> "),
@@ -263,13 +267,13 @@ fn test_render_reflects_enqueue_on_next_frame() {
 fn test_input_render_cache_tracks_queue_len() {
     let mut app = support::make_app();
     let _ = input_row_text(&mut app);
-    assert_eq!(app.input_render_cache.queue_len, 0);
+    assert_eq!(app.session.input_render_cache.queue_len, 0);
 
-    app.input_queue.push_back(entry("one"));
+    app.session.input_queue.push_back(entry("one"));
     let _ = input_row_text(&mut app);
 
     assert_eq!(
-        app.input_render_cache.queue_len, 1,
+        app.session.input_render_cache.queue_len, 1,
         "the render cache must rebuild when the counter width changes (NFR-002)"
     );
 }
@@ -277,7 +281,7 @@ fn test_input_render_cache_tracks_queue_len() {
 #[test]
 fn test_clear_input_queue_sets_redraw_flag() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("one"));
+    app.session.input_queue.push_back(entry("one"));
     app.needs_redraw = false;
 
     app.clear_input_queue();

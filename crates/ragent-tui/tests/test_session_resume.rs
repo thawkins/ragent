@@ -41,6 +41,8 @@ fn make_app_with_manager() -> (App, Arc<SessionManager>) {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
@@ -106,9 +108,9 @@ fn test_load_session_restores_messages() {
     // Load the session
     app.load_session(&session.id).unwrap();
 
-    assert_eq!(app.messages.len(), 2, "should load 2 messages");
-    assert_eq!(app.messages[0].text_content(), "Hello");
-    assert_eq!(app.messages[1].text_content(), "World");
+    assert_eq!(app.session.messages.len(), 2, "should load 2 messages");
+    assert_eq!(app.session.messages[0].text_content(), "Hello");
+    assert_eq!(app.session.messages[1].text_content(), "World");
 }
 
 #[test]
@@ -117,10 +119,10 @@ fn test_load_session_sets_session_id() {
     let dir = std::env::current_dir().unwrap_or_default();
     let session = mgr.create_session(dir).expect("create session");
 
-    assert!(app.session_id.is_none());
+    assert!(app.session.session_id.is_none());
     app.load_session(&session.id).unwrap();
 
-    assert_eq!(app.session_id.as_deref(), Some(session.id.as_str()));
+    assert_eq!(app.session.session_id.as_deref(), Some(session.id.as_str()));
 }
 
 #[test]
@@ -192,7 +194,10 @@ fn test_load_session_empty_history() {
 
     app.load_session(&session.id).unwrap();
 
-    assert!(app.messages.is_empty(), "no messages in a fresh session");
+    assert!(
+        app.session.messages.is_empty(),
+        "no messages in a fresh session"
+    );
     assert!(app.status.contains("0 messages"));
 }
 
@@ -213,11 +218,11 @@ fn test_load_session_preserves_agent() {
     let dir = std::env::current_dir().unwrap_or_default();
     let session = mgr.create_session(dir).expect("create session");
 
-    let original_agent = app.agent_name.clone();
+    let original_agent = app.session.agent_name.clone();
     app.load_session(&session.id).unwrap();
 
     assert_eq!(
-        app.agent_name, original_agent,
+        app.session.agent_name, original_agent,
         "agent should not change on resume"
     );
 }

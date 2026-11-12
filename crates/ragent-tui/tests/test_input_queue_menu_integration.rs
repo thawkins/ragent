@@ -60,7 +60,7 @@ fn entry(text: &str) -> QueuedInput {
 /// Build an app with an active session so the dispatch paths have a session.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
@@ -85,7 +85,11 @@ async fn message_end(app: &mut App, reason: FinishReason) {
 
 /// Count user messages in the conversation.
 fn user_message_count(app: &App) -> usize {
-    app.messages.iter().filter(|m| m.role == Role::User).count()
+    app.session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::User)
+        .count()
 }
 
 /// Render one frame and return the terminal so the painted buffer can be read.
@@ -133,31 +137,35 @@ async fn test_alt_q_opens_a_menu_with_exactly_the_four_options() {
 #[tokio::test]
 async fn test_alt_q_opens_without_disturbing_the_draft_or_running_turn() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
-    app.input = "INTEG-DRAFT".to_string();
-    app.input_cursor = app.input_len_chars();
-    app.pending_attachments
+    app.session.cancel_flag = Some(flag.clone());
+    app.session.input = "INTEG-DRAFT".to_string();
+    app.session.input_cursor = app.input_len_chars();
+    app.session
+        .pending_attachments
         .push(PathBuf::from("/tmp/probe.png"));
 
     open_menu_with_alt_q(&mut app).await;
 
     assert_eq!(
-        app.input, "INTEG-DRAFT",
+        app.session.input, "INTEG-DRAFT",
         "FR-022/FR-031: opening the menu must not touch the input buffer"
     );
     assert_eq!(
-        app.input_cursor,
+        app.session.input_cursor,
         app.input_len_chars(),
         "the cursor is unmoved"
     );
     assert_eq!(
-        app.pending_attachments.len(),
+        app.session.pending_attachments.len(),
         1,
         "FR-022: staged attachments are preserved"
     );
-    assert!(app.is_processing, "FR-022: the running turn is untouched");
+    assert!(
+        app.session.is_processing,
+        "FR-022: the running turn is untouched"
+    );
     assert!(
         !flag.load(Ordering::Relaxed),
         "FR-022: opening the menu must not cancel the running turn"
@@ -187,7 +195,7 @@ async fn test_next_row_selectability_tracks_the_queue_end_to_end() {
     );
 
     // Enqueue one entry while the menu is open; `Next` becomes selectable.
-    app.input_queue.push_back(entry("VISIBLE-1"));
+    app.session.input_queue.push_back(entry("VISIBLE-1"));
     let filled = render(&mut app, 120, 40);
     let filled_next = menu_row(&filled, &app, "Next");
     assert!(
@@ -203,8 +211,8 @@ async fn test_next_row_selectability_tracks_the_queue_end_to_end() {
 #[tokio::test]
 async fn test_alt_q_next_dispatches_oldest_entry_and_preserves_fifo() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("INTEG-QUEUE-1"));
-    app.input_queue.push_back(entry("INTEG-QUEUE-2"));
+    app.session.input_queue.push_back(entry("INTEG-QUEUE-1"));
+    app.session.input_queue.push_back(entry("INTEG-QUEUE-2"));
 
     open_menu_with_alt_q(&mut app).await;
     app.queue_menu_select_next().await;
@@ -214,7 +222,7 @@ async fn test_alt_q_next_dispatches_oldest_entry_and_preserves_fifo() {
         "the menu closes after the `Next` action"
     );
     assert_eq!(
-        app.last_prompt, "INTEG-QUEUE-1",
+        app.session.last_prompt, "INTEG-QUEUE-1",
         "FR-024: the oldest queued entry is dispatched first"
     );
     assert_eq!(
@@ -227,7 +235,7 @@ async fn test_alt_q_next_dispatches_oldest_entry_and_preserves_fifo() {
     app.queue_menu_select_next().await;
 
     assert_eq!(
-        app.last_prompt, "INTEG-QUEUE-2",
+        app.session.last_prompt, "INTEG-QUEUE-2",
         "FR-019: FIFO order is preserved across selections"
     );
     assert_eq!(
@@ -240,10 +248,12 @@ async fn test_alt_q_next_dispatches_oldest_entry_and_preserves_fifo() {
 #[tokio::test]
 async fn test_alt_q_next_stops_running_turn_then_dispatches_at_the_boundary() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
-    app.input_queue.push_back(entry("INTEG-STOP-THEN-RUN"));
+    app.session.cancel_flag = Some(flag.clone());
+    app.session
+        .input_queue
+        .push_back(entry("INTEG-STOP-THEN-RUN"));
 
     open_menu_with_alt_q(&mut app).await;
     app.queue_menu_select_next().await;
@@ -253,7 +263,7 @@ async fn test_alt_q_next_stops_running_turn_then_dispatches_at_the_boundary() {
         "FR-024: selecting `Next` halts the running turn"
     );
     assert!(
-        app.queue_next_pending,
+        app.session.queue_next_pending,
         "FR-029/FR-030: the dispatch is deferred to the turn boundary the cancel opens"
     );
     assert_eq!(
@@ -271,12 +281,12 @@ async fn test_alt_q_next_stops_running_turn_then_dispatches_at_the_boundary() {
     message_end(&mut app, FinishReason::Cancelled).await;
 
     assert_eq!(
-        app.last_prompt, "INTEG-STOP-THEN-RUN",
+        app.session.last_prompt, "INTEG-STOP-THEN-RUN",
         "FR-024: the deferred entry runs at the boundary the cancel opened"
     );
     assert_eq!(app.input_queue_len(), 0);
     assert!(
-        !app.queue_next_pending,
+        !app.session.queue_next_pending,
         "FR-030: the pending flag is consumed exactly once"
     );
 }
@@ -288,11 +298,11 @@ async fn test_alt_q_next_stops_running_turn_then_dispatches_at_the_boundary() {
 #[tokio::test]
 async fn test_alt_q_stop_halts_without_advancing_the_queue() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
-    app.input_queue.push_back(entry("STOP-A"));
-    app.input_queue.push_back(entry("STOP-B"));
+    app.session.cancel_flag = Some(flag.clone());
+    app.session.input_queue.push_back(entry("STOP-A"));
+    app.session.input_queue.push_back(entry("STOP-B"));
     let before = user_message_count(&app);
 
     open_menu_with_alt_q(&mut app).await;
@@ -322,7 +332,7 @@ async fn test_alt_q_stop_halts_without_advancing_the_queue() {
         "FR-029: `Stop` must not dispatch any queued entry"
     );
     assert!(
-        !app.queue_next_pending,
+        !app.session.queue_next_pending,
         "FR-029: `Stop` must not arm a deferred dispatch"
     );
 }
@@ -334,9 +344,9 @@ async fn test_alt_q_stop_halts_without_advancing_the_queue() {
 #[tokio::test]
 async fn test_alt_q_halt_row_reads_resume_and_resumes_after_a_stop() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
-    app.input_queue.push_back(entry("RESUME-A"));
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+    app.session.input_queue.push_back(entry("RESUME-A"));
 
     // Stop the turn through the menu, then let the cancel settle.
     open_menu_with_alt_q(&mut app).await;
@@ -349,11 +359,11 @@ async fn test_alt_q_halt_row_reads_resume_and_resumes_after_a_stop() {
     message_end(&mut app, FinishReason::Cancelled).await;
 
     assert!(
-        !app.is_processing,
+        !app.session.is_processing,
         "precondition: the cancelled turn stopped"
     );
     assert!(
-        app.agent_halted,
+        app.session.agent_halted,
         "precondition: the cancelled turn marked the agent halted"
     );
 
@@ -368,7 +378,7 @@ async fn test_alt_q_halt_row_reads_resume_and_resumes_after_a_stop() {
     app.queue_menu_select_halt();
 
     assert!(
-        !app.agent_halted,
+        !app.session.agent_halted,
         "FR-027: selecting `Resume` clears the halted flag"
     );
     assert!(
@@ -393,8 +403,8 @@ async fn test_alt_q_halt_row_reads_resume_and_resumes_after_a_stop() {
 #[tokio::test]
 async fn test_alt_q_clear_opens_the_confirmation_dialog_without_emptying() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("CLEAR-A"));
-    app.input_queue.push_back(entry("CLEAR-B"));
+    app.session.input_queue.push_back(entry("CLEAR-A"));
+    app.session.input_queue.push_back(entry("CLEAR-B"));
 
     open_menu_with_alt_q(&mut app).await;
     assert_eq!(
@@ -430,30 +440,31 @@ async fn test_alt_q_clear_opens_the_confirmation_dialog_without_emptying() {
 #[tokio::test]
 async fn test_alt_q_esc_dismisses_without_mutating_input_or_queue() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
-    app.input = "INTEG-ESC-DRAFT".to_string();
-    app.input_cursor = app.input_len_chars();
-    app.pending_attachments
+    app.session.is_processing = true;
+    app.session.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
+    app.session.input = "INTEG-ESC-DRAFT".to_string();
+    app.session.input_cursor = app.input_len_chars();
+    app.session
+        .pending_attachments
         .push(PathBuf::from("/tmp/probe.png"));
-    app.input_queue.push_back(entry("KEEP-A"));
-    app.input_queue.push_back(entry("KEEP-B"));
+    app.session.input_queue.push_back(entry("KEEP-A"));
+    app.session.input_queue.push_back(entry("KEEP-B"));
 
     open_menu_with_alt_q(&mut app).await;
     app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(!app.queue_menu_open, "FR-032: Esc dismisses the menu");
     assert_eq!(
-        app.input, "INTEG-ESC-DRAFT",
+        app.session.input, "INTEG-ESC-DRAFT",
         "FR-031: dismissing the menu must not mutate the input buffer"
     );
     assert_eq!(
-        app.input_cursor,
+        app.session.input_cursor,
         app.input_len_chars(),
         "the cursor is unmoved"
     );
     assert_eq!(
-        app.pending_attachments.len(),
+        app.session.pending_attachments.len(),
         1,
         "FR-031: staged attachments are preserved"
     );
@@ -462,7 +473,10 @@ async fn test_alt_q_esc_dismisses_without_mutating_input_or_queue() {
         2,
         "FR-032: dismissing the menu must leave the queue unchanged"
     );
-    assert!(app.is_processing, "FR-032: the running turn continues");
+    assert!(
+        app.session.is_processing,
+        "FR-032: the running turn continues"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -472,27 +486,31 @@ async fn test_alt_q_esc_dismisses_without_mutating_input_or_queue() {
 #[tokio::test]
 async fn test_next_row_never_mutates_the_live_draft() {
     let mut app = app_with_session();
-    app.input = "unfinished draft".to_string();
-    app.input_cursor = 5;
-    app.pending_attachments
+    app.session.input = "unfinished draft".to_string();
+    app.session.input_cursor = 5;
+    app.session
+        .pending_attachments
         .push(PathBuf::from("/tmp/diagram.png"));
-    app.input_queue.push_back(entry("RUN-ME"));
+    app.session.input_queue.push_back(entry("RUN-ME"));
 
     open_menu_with_alt_q(&mut app).await;
     app.queue_menu_select_next().await;
 
     assert_eq!(
-        app.input, "unfinished draft",
+        app.session.input, "unfinished draft",
         "FR-031: the `Next` row must not mutate the editable input buffer"
     );
-    assert_eq!(app.input_cursor, 5, "the cursor position is unchanged");
     assert_eq!(
-        app.pending_attachments.len(),
+        app.session.input_cursor, 5,
+        "the cursor position is unchanged"
+    );
+    assert_eq!(
+        app.session.pending_attachments.len(),
         1,
         "FR-031: staging is untouched by the menu action"
     );
     assert_eq!(
-        app.last_prompt, "RUN-ME",
+        app.session.last_prompt, "RUN-ME",
         "precondition: the queued entry was still dispatched"
     );
 }

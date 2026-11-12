@@ -168,7 +168,7 @@ fn test_window_scroll_agents_wheel_does_not_scroll_the_pane_beneath() {
     let (col, row) = centre(app.active_agents_area);
 
     app.handle_mouse_event(wheel_up(col, row));
-    assert_eq!(app.scroll_offset, 0, "the popup absorbs the wheel");
+    assert_eq!(app.session.scroll_offset, 0, "the popup absorbs the wheel");
     assert_eq!(app.active_agents_scroll_offset, STEP);
 }
 
@@ -221,7 +221,7 @@ fn test_window_scroll_teams_wheel_does_not_scroll_the_pane_beneath() {
     let (col, row) = centre(app.teams_area);
 
     app.handle_mouse_event(wheel_up(col, row));
-    assert_eq!(app.scroll_offset, 0, "the popup absorbs the wheel");
+    assert_eq!(app.session.scroll_offset, 0, "the popup absorbs the wheel");
     assert_eq!(app.teams_scroll_offset, STEP);
 }
 
@@ -278,8 +278,8 @@ fn test_window_scroll_wheel_without_a_popup_leaves_the_offsets_alone() {
 #[test]
 fn test_window_scroll_wheel_scrolls_the_rendered_agents_table_end_to_end() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-session-0001".to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some("lead-session-0001".to_string());
+    app.session.agent_name = "general".to_string();
     for i in 0..12 {
         let id = format!("task-{i:02}");
         app.active_tasks
@@ -340,8 +340,8 @@ fn test_window_scroll_wheel_scrolls_the_rendered_agents_table_end_to_end() {
 
     // A full render with a short list paints no scrollbar.
     let mut small = support::make_app();
-    small.session_id = Some("lead-session-0001".to_string());
-    small.agent_name = "general".to_string();
+    small.session.session_id = Some("lead-session-0001".to_string());
+    small.session.agent_name = "general".to_string();
     let small_buffer = render_agents(&mut small, 160, 44);
     let small_area = small.active_agents_area;
     let small_bar_x = small_area.x + small_area.width - 1;
@@ -365,9 +365,9 @@ fn test_window_scroll_wheel_scrolls_the_rendered_agents_table_end_to_end() {
 #[test]
 fn test_window_scroll_wheel_scrolls_the_rendered_teams_table_end_to_end() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-session-0001".to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(ragent_agent::team::TeamConfig::new(
+    app.session.session_id = Some("lead-session-0001".to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(ragent_agent::team::TeamConfig::new(
         "wheel-scroll-teams",
         "lead-session-0001",
     ));
@@ -379,7 +379,7 @@ fn test_window_scroll_wheel_scrolls_the_rendered_teams_table_end_to_end() {
         );
         member.status = ragent_agent::team::MemberStatus::Working;
         member.session_id = Some(format!("tm-{i:03}-session"));
-        app.team_members.push(member);
+        app.session.team_members.push(member);
     }
 
     let pre = render_teams(&mut app, 170, 14);
@@ -562,8 +562,8 @@ async fn test_agents_page_keys_move_the_cursor_one_page_and_clamp() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = support::make_app();
-    app.session_id = Some("lead-session-0001".to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some("lead-session-0001".to_string());
+    app.session.agent_name = "general".to_string();
     for i in 0..12 {
         let id = format!("task-{i:02}");
         app.active_tasks
@@ -610,9 +610,9 @@ async fn test_teams_page_keys_move_the_cursor_one_page_and_clamp() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = support::make_app();
-    app.session_id = Some("lead-session-0001".to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(ragent_agent::team::TeamConfig::new(
+    app.session.session_id = Some("lead-session-0001".to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(ragent_agent::team::TeamConfig::new(
         "page-keys-teams",
         "lead-session-0001",
     ));
@@ -624,7 +624,7 @@ async fn test_teams_page_keys_move_the_cursor_one_page_and_clamp() {
         );
         member.status = ragent_agent::team::MemberStatus::Working;
         member.session_id = Some(format!("tm-{i:03}-session"));
-        app.team_members.push(member);
+        app.session.team_members.push(member);
     }
     let _ = render_teams(&mut app, 170, 14);
 

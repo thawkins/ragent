@@ -76,7 +76,7 @@ fn entry(id: &str, source: &str) -> StoreEntry {
 fn open_with_entries(cwd: std::path::PathBuf, entries: Vec<StoreEntry>) -> App {
     let mut app = support::make_app();
     app.cwd_path = cwd;
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.open_plugin_store(StoreKind::Codex, "", false);
     app.plugin_store
         .as_mut()
@@ -86,7 +86,8 @@ fn open_with_entries(cwd: std::path::PathBuf, entries: Vec<StoreEntry>) -> App {
 }
 
 fn last_message(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(|m| m.text_content())
         .unwrap_or_default()
@@ -262,7 +263,7 @@ async fn a_missing_source_is_reported_as_a_failure() {
 #[test]
 fn a_success_result_re_colours_and_clears_the_installing_notice() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.open_plugin_store(StoreKind::Codex, "", false);
     app.plugin_store.as_mut().expect("panel open").last_install =
         Some("installing codex-weather...".to_string());
@@ -295,7 +296,7 @@ fn a_success_result_re_colours_and_clears_the_installing_notice() {
 #[test]
 fn a_result_for_a_closed_panel_still_reports_but_touches_nothing() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     // No panel open.
     if let Ok(mut slot) = app.plugin_store_install_result.lock() {
         *slot = Some(PluginStoreInstallResult {
@@ -320,7 +321,7 @@ fn a_result_for_a_closed_panel_still_reports_but_touches_nothing() {
 #[test]
 fn a_foreign_store_result_never_fills_another_stores_panel() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.open_plugin_store(StoreKind::Codex, "", false);
 
     // A result tagged for the Claude store arrives while the Codex panel is
@@ -380,7 +381,7 @@ async fn typing_and_moving_never_spawn_an_install() {
 #[tokio::test]
 async fn enter_with_no_result_highlighted_records_a_neutral_notice_and_installs_nothing() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.open_plugin_store(StoreKind::Codex, "", false);
     assert_eq!(
         app.plugin_store.as_ref().expect("panel").status,
@@ -406,7 +407,7 @@ async fn enter_with_no_result_highlighted_records_a_neutral_notice_and_installs_
 fn polling_with_nothing_pending_is_a_noop() {
     let mut app = support::make_app();
     app.poll_plugin_store_install_result();
-    assert!(app.messages.is_empty());
+    assert!(app.session.messages.is_empty());
 }
 
 #[test]

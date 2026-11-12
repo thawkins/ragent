@@ -64,6 +64,8 @@ pub fn test_state(token: &str) -> AppState {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         stream_config: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         auto_approve: false,

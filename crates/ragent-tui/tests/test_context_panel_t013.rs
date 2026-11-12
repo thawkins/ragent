@@ -13,10 +13,10 @@ async fn test_schedule_refresh_is_idempotent_while_inflight() {
     let mut app = support::make_app();
     app.show_context_panel = true;
     app.schedule_context_snapshot_refresh();
-    let inflight_before = app.context_refresh_inflight;
+    let inflight_before = app.session.context_refresh_inflight;
     app.schedule_context_snapshot_refresh();
     assert_eq!(
-        app.context_refresh_inflight, inflight_before,
+        app.session.context_refresh_inflight, inflight_before,
         "refresh scheduling must not stack while a task is in flight"
     );
     // Give the blocking task a real chance to deposit its snapshot instead
@@ -24,13 +24,13 @@ async fn test_schedule_refresh_is_idempotent_while_inflight() {
     // (blocking tasks run on the shared blocking pool).
     for _ in 0..100 {
         app.poll_context_snapshot_refresh();
-        if !app.context_refresh_inflight && app.context_snapshot_cache.is_some() {
+        if !app.session.context_refresh_inflight && app.session.context_snapshot_cache.is_some() {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     assert!(
-        app.context_snapshot_cache.is_some(),
+        app.session.context_snapshot_cache.is_some(),
         "blocking task must deposit a snapshot"
     );
 }
@@ -41,11 +41,12 @@ fn test_poll_adopts_refresh_result_and_clears_inflight() {
     // channel; the UI-thread poll adopts it, clears the in-flight latch and
     // flags the panel for redraw.
     let mut app = support::make_app();
-    app.context_refresh_inflight = true;
+    app.session.context_refresh_inflight = true;
 
     let snapshot = app.context_partition_snapshot();
     {
         let mut guard = app
+            .session
             .context_snapshot_result
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -55,11 +56,11 @@ fn test_poll_adopts_refresh_result_and_clears_inflight() {
     app.poll_context_snapshot_refresh();
 
     assert!(
-        !app.context_refresh_inflight,
+        !app.session.context_refresh_inflight,
         "in-flight latch must clear after adoption"
     );
     assert_eq!(
-        app.context_snapshot_cache,
+        app.session.context_snapshot_cache,
         Some(snapshot),
         "poll must adopt the deposited snapshot"
     );
@@ -76,9 +77,9 @@ fn test_cache_refreshes_after_history_change() {
 
     // Seed the cache with a stale snapshot (empty history).
     let stale = app.context_partition_snapshot();
-    app.context_snapshot_cache = Some(stale);
+    app.session.context_snapshot_cache = Some(stale);
 
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "session-1",
         Role::User,
         vec![MessagePart::Text {
@@ -91,16 +92,17 @@ fn test_cache_refreshes_after_history_change() {
     assert!(fresh.history_tokens > stale.history_tokens);
     {
         let mut guard = app
+            .session
             .context_snapshot_result
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = Some(fresh);
     }
-    app.context_refresh_inflight = true;
+    app.session.context_refresh_inflight = true;
     app.poll_context_snapshot_refresh();
 
-    assert_eq!(app.context_snapshot_cache, Some(fresh));
-    assert_ne!(app.context_snapshot_cache, Some(stale));
+    assert_eq!(app.session.context_snapshot_cache, Some(fresh));
+    assert_ne!(app.session.context_snapshot_cache, Some(stale));
 }
 
 #[test]
@@ -115,7 +117,7 @@ fn test_effective_snapshot_prefers_cache() {
 
     let mut cached_value = direct;
     cached_value.system_prompt_tokens += 1;
-    app.context_snapshot_cache = Some(cached_value);
+    app.session.context_snapshot_cache = Some(cached_value);
     assert_eq!(
         app.context_effective_snapshot(),
         cached_value,

@@ -39,6 +39,8 @@ pub(crate) fn test_app() -> App {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
@@ -560,6 +562,7 @@ async fn test_tool_call_batch_applies_pending_args_when_start_dropped() {
     .await;
 
     let part = app
+        .session
         .messages
         .iter()
         .flat_map(|m| &m.parts)
@@ -622,6 +625,7 @@ async fn test_tool_call_batch_does_not_overwrite_existing_input() {
     .await;
 
     let part = app
+        .session
         .messages
         .iter()
         .flat_map(|m| &m.parts)

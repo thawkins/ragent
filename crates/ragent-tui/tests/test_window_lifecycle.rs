@@ -102,8 +102,8 @@ fn bg_task(id: &str) -> ragent_tui::app::BgTaskView {
 /// given sub-agent rows.
 fn app_with_window(tasks: Vec<TaskEntry>) -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks = tasks;
     app.show_agents_window = true;
     app.needs_redraw = false;
@@ -113,13 +113,13 @@ fn app_with_window(tasks: Vec<TaskEntry>) -> App {
 /// An app with an active two-member team.
 fn app_with_team() -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
     let mut member = TeamMember::new("reviewer", "tm-001", "general");
     member.status = ragent_agent::team::MemberStatus::Working;
     member.session_id = Some("tm-001-session".to_string());
-    app.team_members.push(member);
+    app.session.team_members.push(member);
     app.show_teams_window = true;
     app.needs_redraw = false;
     app
@@ -325,7 +325,7 @@ fn an_already_closed_or_occupied_window_is_untouched_by_the_auto_close() {
 #[tokio::test]
 async fn window_actions_stay_serviceable_during_a_running_turn() {
     let mut app = app_with_window(vec![task("a1b2c3d4", "explore", TaskStatus::Running)]);
-    app.is_processing = true;
+    app.session.is_processing = true;
     render(&mut app);
 
     // Step 1: the Agents button opens the window mid-turn.
@@ -373,7 +373,7 @@ async fn window_actions_stay_serviceable_during_a_running_turn() {
 
     // The streaming state is untouched by every panel action above.
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "panel operations must not disturb the running turn (FR-061)"
     );
 }
@@ -383,7 +383,7 @@ async fn window_actions_stay_serviceable_during_a_running_turn() {
 #[tokio::test]
 async fn keyboard_actions_stay_serviceable_during_a_running_turn() {
     let mut app = app_with_window(vec![task("a1b2c3d4", "explore", TaskStatus::Running)]);
-    app.is_processing = true;
+    app.session.is_processing = true;
     render(&mut app);
     app.agents_cursor_subagent = Some(0);
 
@@ -400,7 +400,7 @@ async fn keyboard_actions_stay_serviceable_during_a_running_turn() {
         "a mid-turn Space dispatches the suspend (FR-061)"
     );
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "the keyboard path must not disturb the running turn"
     );
 }
@@ -411,7 +411,7 @@ async fn keyboard_actions_stay_serviceable_during_a_running_turn() {
 #[test]
 fn teams_window_stays_serviceable_during_a_running_turn() {
     let mut app = app_with_team();
-    app.is_processing = true;
+    app.session.is_processing = true;
     render(&mut app);
 
     // The Teams button is reachable mid-turn: it toggles, so the click closes
@@ -433,12 +433,12 @@ fn teams_window_stays_serviceable_during_a_running_turn() {
     app.move_teams_cursor(1);
     app.teams_cursor_focus();
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "a teammate focus stays serviced mid-turn (FR-061)"
     );
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "the panel actions must not disturb the running turn"
     );
 }
@@ -454,7 +454,7 @@ fn teams_window_stays_serviceable_during_a_running_turn() {
 #[tokio::test]
 async fn cursor_reports_to_the_status_line_during_a_running_turn() {
     let mut app = app_with_window(vec![task("a1b2c3d4", "explore", TaskStatus::Running)]);
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     app.handle_key_event(crossterm::event::KeyEvent::new(
         KeyCode::Char(' '), // no cursor yet: consumed no-op with its status text
@@ -478,7 +478,7 @@ async fn cursor_reports_to_the_status_line_during_a_running_turn() {
         app.status
     );
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "the keyboard path must not disturb the running turn"
     );
 }
@@ -493,7 +493,7 @@ async fn focus_transitions_report_to_the_status_line() {
     app.cycle_focused_teammate(true);
 
     assert_eq!(
-        app.focused_teammate.as_deref(),
+        app.session.focused_teammate.as_deref(),
         Some("tm-001"),
         "the first cycle focuses the only member (FR-046)"
     );
@@ -504,7 +504,7 @@ async fn focus_transitions_report_to_the_status_line() {
 
     // Cycling past the end clears the focus and reports it (FR-064).
     app.cycle_focused_teammate(true);
-    assert!(app.focused_teammate.is_none());
+    assert!(app.session.focused_teammate.is_none());
     assert_eq!(
         app.status, "team: focus cleared",
         "the focus-cleared notice reports to the status line (FR-064)"

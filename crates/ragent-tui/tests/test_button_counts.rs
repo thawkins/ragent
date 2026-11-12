@@ -123,16 +123,16 @@ fn test_agents_button_area_fits_counted_label() {
 #[test]
 fn test_teams_button_counts_active_members() {
     let mut app = make_app();
-    app.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
+    app.session.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
     let mut writer = ragent_agent::team::TeamMember::new("writer", "tm-001", "general");
     writer.status = ragent_agent::team::MemberStatus::Working;
     let mut helper = ragent_agent::team::TeamMember::new("helper", "tm-002", "general");
     helper.status = ragent_agent::team::MemberStatus::Stopped;
     let mut third = ragent_agent::team::TeamMember::new("third", "tm-003", "general");
     third.status = ragent_agent::team::MemberStatus::Failed;
-    app.team_members.push(writer);
-    app.team_members.push(helper);
-    app.team_members.push(third);
+    app.session.team_members.push(writer);
+    app.session.team_members.push(helper);
+    app.session.team_members.push(third);
     let text = render_button_bar(&mut app);
     assert!(text.contains("Teams (1)"), "buffer: {text:?}");
 }
@@ -140,10 +140,12 @@ fn test_teams_button_counts_active_members() {
 #[test]
 fn test_teams_button_spawning_members_counted() {
     let mut app = make_app();
-    app.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
-    app.team_members.push(ragent_agent::team::TeamMember::new(
-        "writer", "tm-001", "general",
-    ));
+    app.session.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
+    app.session
+        .team_members
+        .push(ragent_agent::team::TeamMember::new(
+            "writer", "tm-001", "general",
+        ));
     let text = render_button_bar(&mut app);
     assert!(text.contains("Teams (1)"), "buffer: {text:?}");
 }
@@ -153,13 +155,13 @@ fn test_teams_button_spawning_members_counted() {
 #[test]
 fn test_teams_button_excludes_shutting_down_members() {
     let mut app = make_app();
-    app.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
+    app.session.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
     let mut leaving = ragent_agent::team::TeamMember::new("leaving", "tm-001", "general");
     leaving.status = ragent_agent::team::MemberStatus::ShuttingDown;
     let mut working = ragent_agent::team::TeamMember::new("working", "tm-002", "general");
     working.status = ragent_agent::team::MemberStatus::Working;
-    app.team_members.push(leaving);
-    app.team_members.push(working);
+    app.session.team_members.push(leaving);
+    app.session.team_members.push(working);
 
     let text = render_button_bar(&mut app);
     assert!(
@@ -173,13 +175,13 @@ fn test_teams_button_excludes_shutting_down_members() {
 #[test]
 fn test_teams_button_terminal_members_show_bare_label() {
     let mut app = make_app();
-    app.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
+    app.session.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
     let mut stopped = ragent_agent::team::TeamMember::new("stopped", "tm-001", "general");
     stopped.status = ragent_agent::team::MemberStatus::Stopped;
     let mut failed = ragent_agent::team::TeamMember::new("failed", "tm-002", "general");
     failed.status = ragent_agent::team::MemberStatus::Failed;
-    app.team_members.push(stopped);
-    app.team_members.push(failed);
+    app.session.team_members.push(stopped);
+    app.session.team_members.push(failed);
 
     let text = render_button_bar(&mut app);
     assert!(text.contains("Teams"), "buffer: {text:?}");
@@ -259,7 +261,7 @@ fn test_both_buttons_dimmed_when_subjects_absent() {
 fn test_enabled_buttons_render_white_text() {
     let mut app = make_app();
     app.active_tasks.push(running_task("t1", "s1", "c1"));
-    app.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
+    app.session.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
     let buffer = render_buffer(&mut app);
 
     for (area, label) in [
@@ -285,10 +287,12 @@ fn test_enabled_buttons_render_white_text() {
 #[test]
 fn test_open_teams_window_paints_active_button() {
     let mut app = make_app();
-    app.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
-    app.team_members.push(ragent_agent::team::TeamMember::new(
-        "writer", "tm-001", "general",
-    ));
+    app.session.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
+    app.session
+        .team_members
+        .push(ragent_agent::team::TeamMember::new(
+            "writer", "tm-001", "general",
+        ));
     app.show_teams_window = true;
     let buffer = render_buffer(&mut app);
 
@@ -311,7 +315,7 @@ fn test_button_areas_stay_inside_the_column_and_never_overlap() {
         app.active_tasks
             .push(running_task(&format!("t{i}"), "s1", &format!("c{i}")));
     }
-    app.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
+    app.session.active_team = Some(ragent_agent::team::TeamConfig::new("alpha", "lead"));
 
     for width in [40u16, 60, 80, 100, 120, 200] {
         let backend = TestBackend::new(width, 30);

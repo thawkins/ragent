@@ -13,7 +13,7 @@ mod support;
 #[tokio::test]
 async fn test_hook_warning_current_session_sets_transient_status_and_logs() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::HookWarning {
         session_id: "s1".to_string(),
@@ -65,7 +65,7 @@ async fn test_hook_warning_current_session_sets_transient_status_and_logs() {
 #[tokio::test]
 async fn test_hook_warning_long_stderr_is_truncated_safely_in_status() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     let long_reason = "a".repeat(200);
 
     app.handle_event(Event::HookWarning {
@@ -92,7 +92,7 @@ async fn test_hook_warning_long_stderr_is_truncated_safely_in_status() {
 #[tokio::test]
 async fn test_hook_warning_other_session_is_ignored() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.status = "ready".to_string();
 
     app.handle_event(Event::HookWarning {
@@ -114,7 +114,7 @@ async fn test_hook_warning_other_session_is_ignored() {
 #[tokio::test]
 async fn test_hook_warning_transient_status_expires_to_ready() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::HookWarning {
         session_id: "s1".to_string(),
@@ -141,7 +141,7 @@ async fn test_hook_warning_transient_status_expires_to_ready() {
 #[tokio::test]
 async fn test_tool_result_flagged_current_session_logs_marker_and_sets_status() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::ToolResultFlagged {
         session_id: "s1".to_string(),
@@ -189,7 +189,7 @@ async fn test_tool_result_flagged_current_session_logs_marker_and_sets_status() 
 #[tokio::test]
 async fn test_tool_result_flagged_other_session_is_ignored() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.status = "ready".to_string();
 
     app.handle_event(Event::ToolResultFlagged {

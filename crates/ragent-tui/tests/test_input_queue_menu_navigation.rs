@@ -42,7 +42,9 @@ fn entry(text: &str) -> QueuedInput {
 async fn menu_open(queue_len: usize) -> App {
     let mut app = support::make_app();
     for i in 0..queue_len {
-        app.input_queue.push_back(entry(&format!("entry-{i}")));
+        app.session
+            .input_queue
+            .push_back(entry(&format!("entry-{i}")));
     }
     // `handle_key_event` builds a large future; box it so this helper's own
     // future stays small and does not trip `clippy::large_futures` at each of
@@ -163,9 +165,9 @@ async fn test_up_reaches_next_once_an_entry_is_queued() {
 #[tokio::test]
 async fn test_enter_on_the_halt_row_halts_the_running_turn() {
     let mut app = menu_open(1).await;
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
+    app.session.cancel_flag = Some(flag.clone());
     app.queue_menu_selected = QUEUE_MENU_ROW_HALT;
 
     app.handle_key_event(key(KeyCode::Enter)).await;
@@ -212,7 +214,7 @@ async fn test_enter_on_the_show_row_opens_the_queue_entry_panel() {
 async fn test_enter_on_the_non_selectable_next_row_is_a_noop() {
     let mut app = menu_open(0).await;
     app.queue_menu_selected = QUEUE_MENU_ROW_NEXT;
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     app.handle_key_event(key(KeyCode::Enter)).await;
 
@@ -220,10 +222,13 @@ async fn test_enter_on_the_non_selectable_next_row_is_a_noop() {
         app.queue_menu_open,
         "FR-023: Enter on the dead `Next` row must not act"
     );
-    assert!(app.is_processing, "the running turn must be untouched");
+    assert!(
+        app.session.is_processing,
+        "the running turn must be untouched"
+    );
     assert_eq!(app.input_queue_len(), 0, "no entry may be enqueued");
     assert!(
-        app.messages.is_empty(),
+        app.session.messages.is_empty(),
         "no turn may be dispatched from the dead row"
     );
 }
@@ -235,19 +240,23 @@ async fn test_enter_on_the_non_selectable_next_row_is_a_noop() {
 #[tokio::test]
 async fn test_navigation_keys_do_not_mutate_the_input_buffer() {
     let mut app = menu_open(2).await;
-    app.input = "KEEP".to_string();
-    app.input_cursor = app.input_len_chars();
-    app.pending_attachments
+    app.session.input = "KEEP".to_string();
+    app.session.input_cursor = app.input_len_chars();
+    app.session
+        .pending_attachments
         .push(std::path::PathBuf::from("/tmp/keep.png"));
 
     app.handle_key_event(key(KeyCode::Down)).await;
     app.handle_key_event(key(KeyCode::Up)).await;
     app.handle_key_event(key(KeyCode::Down)).await;
 
-    assert_eq!(app.input, "KEEP", "FR-031: navigation must not edit input");
-    assert_eq!(app.input_cursor, app.input_len_chars());
     assert_eq!(
-        app.pending_attachments,
+        app.session.input, "KEEP",
+        "FR-031: navigation must not edit input"
+    );
+    assert_eq!(app.session.input_cursor, app.input_len_chars());
+    assert_eq!(
+        app.session.pending_attachments,
         vec![std::path::PathBuf::from("/tmp/keep.png")],
         "FR-031: navigation must not touch staged attachments"
     );

@@ -282,11 +282,10 @@ impl AutomationService {
 
         // Create the run's child session and confine its turn to the selected
         // backend before the first tool call is dispatched (FR-033).
-        let child = match self
-            .processor
-            .session_manager
-            .create_session(self.working_dir.clone())
-        {
+        let child = match self.processor.session_manager.create_session_of_kind(
+            self.working_dir.clone(),
+            ragent_storage::SessionKind::Automation,
+        ) {
             Ok(child) => child,
             Err(e) => {
                 self.running.lock().remove(&run.automation_id);

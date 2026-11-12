@@ -24,14 +24,14 @@ fn key(code: KeyCode) -> KeyEvent {
 /// Build an app with an active session so dispatch can run.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
 /// Simulate the user typing `text` and pressing Enter.
 async fn type_and_submit(app: &mut App, text: &str) {
-    app.input = text.to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = text.to_string();
+    app.session.input_cursor = app.input_len_chars();
     app.handle_key_event(key(KeyCode::Enter)).await;
 }
 
@@ -42,7 +42,7 @@ async fn type_and_submit(app: &mut App, text: &str) {
 #[tokio::test]
 async fn test_slash_command_is_enqueued_while_processing() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     type_and_submit(&mut app, "/status").await;
 
@@ -51,9 +51,9 @@ async fn test_slash_command_is_enqueued_while_processing() {
         1,
         "FR-017 amendment: Enter must enqueue a slash command while busy"
     );
-    assert_eq!(app.input_queue[0].text, "/status");
+    assert_eq!(app.session.input_queue[0].text, "/status");
     assert!(
-        app.input.is_empty(),
+        app.session.input.is_empty(),
         "the input field is cleared after enqueueing"
     );
 }
@@ -61,7 +61,7 @@ async fn test_slash_command_is_enqueued_while_processing() {
 #[tokio::test]
 async fn test_slash_command_is_not_refused_while_processing() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     type_and_submit(&mut app, "/status").await;
 
@@ -87,7 +87,7 @@ async fn test_slash_command_dispatches_immediately_when_idle() {
 #[tokio::test]
 async fn test_bang_command_still_refused_while_processing() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     type_and_submit(&mut app, "! ls").await;
 
@@ -102,7 +102,7 @@ async fn test_bang_command_still_refused_while_processing() {
 #[tokio::test]
 async fn test_slash_command_enqueue_respects_capacity() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
     app.input_queue_capacity = 1;
 
     type_and_submit(&mut app, "/status").await;
@@ -112,7 +112,7 @@ async fn test_slash_command_enqueue_respects_capacity() {
 
     assert_eq!(app.input_queue_len(), 1, "FR-004: the cap is enforced");
     assert_eq!(
-        app.input, "/about",
+        app.session.input, "/about",
         "FR-004/FR-018: the rejected command is restored, not lost"
     );
     assert!(
@@ -125,13 +125,13 @@ async fn test_slash_command_enqueue_respects_capacity() {
 #[tokio::test]
 async fn test_slash_command_enqueue_clears_slash_menu() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
     // A visible completion menu must not linger over a cleared field.
     app.update_slash_menu();
-    app.input = "/st".to_string();
+    app.session.input = "/st".to_string();
     app.update_slash_menu();
-    app.input = "/status".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = "/status".to_string();
+    app.session.input_cursor = app.input_len_chars();
 
     app.handle_key_event(key(KeyCode::Enter)).await;
 
@@ -149,14 +149,16 @@ async fn test_slash_command_enqueue_clears_slash_menu() {
 #[tokio::test]
 async fn test_queued_slash_command_drains_at_the_boundary() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(ragent_tui::app::QueuedInput {
-        text: "/status".to_string(),
-        image_paths: Vec::new(),
-    });
+    app.session.is_processing = true;
+    app.session
+        .input_queue
+        .push_back(ragent_tui::app::QueuedInput {
+            text: "/status".to_string(),
+            image_paths: Vec::new(),
+        });
 
     // The turn ends: the queued slash command runs and leaves the queue empty.
-    app.is_processing = false;
+    app.session.is_processing = false;
     app.advance_input_queue().await;
 
     assert_eq!(
@@ -165,7 +167,7 @@ async fn test_queued_slash_command_drains_at_the_boundary() {
         "FR-017 amendment: the queued slash command is drained at the boundary"
     );
     assert_eq!(
-        app.last_prompt, "/status",
+        app.session.last_prompt, "/status",
         "the slash command is recorded as the last prompt"
     );
 }
@@ -174,10 +176,12 @@ async fn test_queued_slash_command_drains_at_the_boundary() {
 async fn test_consecutive_queued_slash_commands_all_drain() {
     let mut app = app_with_session();
     for text in ["/status", "/about", "/queue list"] {
-        app.input_queue.push_back(ragent_tui::app::QueuedInput {
-            text: text.to_string(),
-            image_paths: Vec::new(),
-        });
+        app.session
+            .input_queue
+            .push_back(ragent_tui::app::QueuedInput {
+                text: text.to_string(),
+                image_paths: Vec::new(),
+            });
     }
 
     // Synchronous slash commands leave the boundary free, so a single drain
@@ -194,11 +198,13 @@ async fn test_consecutive_queued_slash_commands_all_drain() {
 #[tokio::test]
 async fn test_queued_slash_command_defers_while_processing() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(ragent_tui::app::QueuedInput {
-        text: "/status".to_string(),
-        image_paths: Vec::new(),
-    });
+    app.session.is_processing = true;
+    app.session
+        .input_queue
+        .push_back(ragent_tui::app::QueuedInput {
+            text: "/status".to_string(),
+            image_paths: Vec::new(),
+        });
 
     app.advance_input_queue().await;
 

@@ -34,15 +34,15 @@ impl App {
     /// any user message queued behind an auto-compaction-before-send.
     pub fn poll_compaction_result(&mut self) {
         let outcome = {
-            let mut guard = recover_poisoned(self.compact_result.lock(), "compact_result");
+            let mut guard = recover_poisoned(self.session.compact_result.lock(), "compact_result");
             guard.take()
         };
         let Some(outcome) = outcome else {
             return;
         };
-        self.compact_in_progress = false;
+        self.session.compact_in_progress = false;
         self.needs_redraw = true;
-        let was_auto_compaction = self.auto_compact_in_progress;
+        let was_auto_compaction = self.session.auto_compact_in_progress;
         match outcome {
             Ok(new_messages) => {
                 self.apply_compaction_messages(new_messages);
@@ -52,7 +52,7 @@ impl App {
                 // history rather than the old, larger one.
                 self.schedule_context_snapshot_refresh();
                 if was_auto_compaction {
-                    self.auto_compact_in_progress = false;
+                    self.session.auto_compact_in_progress = false;
                     self.push_log_no_agent(LogLevel::Info, "Auto-compaction completed".to_string());
                 }
                 self.status = "ready".to_string();
@@ -60,9 +60,9 @@ impl App {
             }
             Err(err) => {
                 if was_auto_compaction {
-                    self.auto_compact_in_progress = false;
-                    self.auto_compact_failed = true;
-                    self.pending_send_after_compact = None;
+                    self.session.auto_compact_in_progress = false;
+                    self.session.auto_compact_failed = true;
+                    self.session.pending_send_after_compact = None;
                     self.push_log_no_agent(
                         LogLevel::Warn,
                         "Auto-compaction failed; send blocked for this turn".to_string(),
@@ -75,7 +75,7 @@ impl App {
 
         // FR-012-style chaining: once compaction fully completed, send the
         // message the user typed before auto-compaction was triggered.
-        if let Some((queued_text, queued_images)) = self.pending_send_after_compact.take() {
+        if let Some((queued_text, queued_images)) = self.session.pending_send_after_compact.take() {
             self.dispatch_user_message(queued_text, queued_images);
         }
     }
@@ -86,6 +86,7 @@ impl App {
         auto_triggered: bool,
     ) -> bool {
         let resolved_model = self
+            .session
             .selected_model
             .as_deref()
             .and_then(|s| s.split_once('/'))
@@ -93,17 +94,17 @@ impl App {
                 provider_id: p.to_string(),
                 model_id: m.to_string(),
             })
-            .or_else(|| self.agent_info.model.clone());
+            .or_else(|| self.session.agent_info.model.clone());
         let Some(model_ref) = resolved_model else {
             self.status = "[warn] No model selected - use /model to choose".to_string();
             return false;
         };
 
-        self.auto_compact_in_progress = auto_triggered;
-        self.compact_in_progress = true;
+        self.session.auto_compact_in_progress = auto_triggered;
+        self.session.compact_in_progress = true;
         self.needs_redraw = true;
         if auto_triggered {
-            self.auto_compact_failed = false;
+            self.session.auto_compact_failed = false;
             self.status = "compacting before send...".to_string();
             self.push_log_no_agent(LogLevel::Warn, "Auto-compaction triggered".to_string());
         } else {
@@ -112,7 +113,7 @@ impl App {
         }
 
         let processor = self.session_processor.clone();
-        let compact_result = Arc::clone(&self.compact_result);
+        let compact_result = Arc::clone(&self.session.compact_result);
         let sid = session_id.to_string();
         let reason = if auto_triggered { "auto" } else { "manual" };
         let cancel = Arc::new(AtomicBool::new(false));
@@ -141,7 +142,7 @@ impl App {
         let summary_present = new_messages
             .iter()
             .any(|m| m.role == Role::Compaction || m.role == Role::Assistant);
-        self.messages = new_messages;
+        self.session.messages = new_messages;
         // Structural change: the cache must be rebuilt from scratch because
         // the whole timeline was replaced by the summary message.  Resetting
         // the cache also clears the staleness watermark so the next render

@@ -24,7 +24,7 @@ fn test_gcf_registered_in_slash_commands() {
 #[test]
 fn test_gcf_suggestions_offer_on_off_show_help() {
     let mut app = make_app();
-    app.input = "/gcf".to_string();
+    app.session.input = "/gcf".to_string();
     app.update_slash_menu();
     let menu = app
         .slash_menu
@@ -58,7 +58,7 @@ fn test_gcf_slash_menu_matches_gcf_prefix() {
     // Typing the bare `/g` prefix must surface the gcf trigger in the menu
     // (prefix match path of `update_slash_menu`).
     let mut app = make_app();
-    app.input = "/g".to_string();
+    app.session.input = "/g".to_string();
     app.update_slash_menu();
     let menu = app
         .slash_menu

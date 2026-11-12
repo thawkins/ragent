@@ -32,13 +32,17 @@ fn entry(text: &str) -> QueuedInput {
 /// Build an app with an active session.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
 /// Count user messages in the conversation.
 fn user_message_count(app: &App) -> usize {
-    app.messages.iter().filter(|m| m.role == Role::User).count()
+    app.session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::User)
+        .count()
 }
 
 // ---------------------------------------------------------------------------
@@ -99,8 +103,8 @@ async fn test_dialog_opens_even_with_an_empty_queue() {
 #[tokio::test]
 async fn test_clear_row_does_not_empty_the_queue() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("first"));
-    app.input_queue.push_back(entry("second"));
+    app.session.input_queue.push_back(entry("first"));
+    app.session.input_queue.push_back(entry("second"));
 
     app.queue_menu_select_clear();
 
@@ -114,7 +118,7 @@ async fn test_clear_row_does_not_empty_the_queue() {
 #[tokio::test]
 async fn test_clear_row_does_not_dispatch_any_entry() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("first"));
+    app.session.input_queue.push_back(entry("first"));
     let before = user_message_count(&app);
 
     app.queue_menu_select_clear();
@@ -133,18 +137,18 @@ async fn test_clear_row_does_not_dispatch_any_entry() {
 #[tokio::test]
 async fn test_clear_row_leaves_input_buffer_and_attachments_untouched() {
     let mut app = app_with_session();
-    app.input = "DRAFT".to_string();
-    app.input_cursor = app.input_len_chars();
-    app.pending_attachments = vec![std::path::PathBuf::from("/tmp/a.png")];
+    app.session.input = "DRAFT".to_string();
+    app.session.input_cursor = app.input_len_chars();
+    app.session.pending_attachments = vec![std::path::PathBuf::from("/tmp/a.png")];
 
     app.queue_menu_select_clear();
 
     assert_eq!(
-        app.input, "DRAFT",
+        app.session.input, "DRAFT",
         "the Clear row must not mutate the input buffer"
     );
     assert_eq!(
-        app.pending_attachments,
+        app.session.pending_attachments,
         vec![std::path::PathBuf::from("/tmp/a.png")],
         "the Clear row must not touch staged attachments"
     );
@@ -153,15 +157,15 @@ async fn test_clear_row_leaves_input_buffer_and_attachments_untouched() {
 #[tokio::test]
 async fn test_clear_row_leaves_the_running_turn_untouched() {
     let mut app = app_with_session();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
+    app.session.cancel_flag = Some(flag.clone());
     let status_before = app.status.clone();
 
     app.queue_menu_select_clear();
 
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "the currently executing turn must be unaffected by selecting Clear"
     );
     assert!(

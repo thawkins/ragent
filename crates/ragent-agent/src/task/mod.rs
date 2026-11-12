@@ -563,10 +563,11 @@ impl AgentManager {
         let task_id = make_task_id(agent_name);
         let start = Instant::now();
         // Create isolated session
-        let child_session = self
-            .processor
-            .session_manager
-            .create_session(working_dir.to_path_buf())?;
+        let child_session = self.processor.session_manager.create_child_session(
+            working_dir.to_path_buf(),
+            parent_session_id,
+            ragent_storage::SessionKind::Subagent,
+        )?;
         let child_sid = child_session.id.clone();
 
         // Register task entry
@@ -850,10 +851,11 @@ impl AgentManager {
         let task_id = make_task_id(agent_name);
 
         // Create isolated session
-        let child_session = self
-            .processor
-            .session_manager
-            .create_session(working_dir.to_path_buf())?;
+        let child_session = self.processor.session_manager.create_child_session(
+            working_dir.to_path_buf(),
+            parent_session_id,
+            ragent_storage::SessionKind::Subagent,
+        )?;
         let child_sid = child_session.id.clone();
         // The child session's own directory is the project root this
         // sub-agent actually runs in, so `log/subagents/` must be resolved

@@ -16,13 +16,14 @@ use ragent_tui::App;
 /// messages.
 fn app() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("slash-info".to_string());
+    app.session.session_id = Some("slash-info".to_string());
     app
 }
 
 /// Text of the most recent message in the message window.
 fn last_message(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(ragent_types::message::Message::text_content)
         .unwrap_or_default()
@@ -94,7 +95,7 @@ async fn mode_help_renders_table() {
 #[tokio::test]
 async fn mode_status_reports_normal() {
     let mut app = app();
-    app.role_mode = None;
+    app.session.role_mode = None;
     app.execute_slash_command("/mode status").await;
     assert!(last_message(&app).contains("normal"));
 }
@@ -103,11 +104,14 @@ async fn mode_status_reports_normal() {
 async fn mode_sets_role_and_clears_it() {
     let mut app = app();
     app.execute_slash_command("/mode architect").await;
-    assert!(app.role_mode.is_some(), "role mode should be set");
+    assert!(app.session.role_mode.is_some(), "role mode should be set");
     assert!(app.status.contains("architect"));
 
     app.execute_slash_command("/mode off").await;
-    assert!(app.role_mode.is_none(), "role mode should be cleared");
+    assert!(
+        app.session.role_mode.is_none(),
+        "role mode should be cleared"
+    );
     assert_eq!(app.status, "mode: normal");
 }
 
@@ -137,10 +141,11 @@ async fn yolo_help_renders_help() {
 #[tokio::test]
 async fn clear_empties_messages() {
     let mut app = app();
-    app.messages
+    app.session
+        .messages
         .push(ragent_agent::message::Message::user_text("s", "hi"));
     app.execute_slash_command("/clear").await;
-    assert!(app.messages.is_empty());
+    assert!(app.session.messages.is_empty());
     assert_eq!(app.status, "messages cleared");
 }
 
@@ -157,7 +162,7 @@ async fn cancel_help_and_missing_id() {
 #[tokio::test]
 async fn clip_empty_window_reports_nothing_to_copy() {
     let mut app = app();
-    app.message_content_lines.clear();
+    app.session.message_content_lines.clear();
     app.execute_slash_command("/clip").await;
     assert_eq!(app.status, "clip: nothing to copy");
 }
@@ -165,7 +170,7 @@ async fn clip_empty_window_reports_nothing_to_copy() {
 #[tokio::test]
 async fn cost_without_samples_is_unavailable() {
     let mut app = app();
-    app.llm_request_stats.clear();
+    app.session.llm_request_stats.clear();
     app.execute_slash_command("/cost").await;
     assert_eq!(app.status, "cost unavailable");
 }
@@ -420,7 +425,7 @@ async fn resume_help_and_nothing_to_resume() {
     app.execute_slash_command("/resume help").await;
     assert_eq!(app.status, "resume: help");
 
-    app.agent_halted = false;
+    app.session.agent_halted = false;
     app.execute_slash_command("/resume").await;
     assert!(app.status.contains("Nothing to resume"));
 }
@@ -502,8 +507,8 @@ async fn model_and_provider_help() {
 #[tokio::test]
 async fn thinking_without_model_warns() {
     let mut app = app();
-    app.selected_model = None;
-    app.agent_info.model = None;
+    app.session.selected_model = None;
+    app.session.agent_info.model = None;
     app.execute_slash_command("/thinking").await;
     assert!(app.status.contains("No model selected"));
 }

@@ -1812,10 +1812,9 @@ impl Config {
         let xdg = read_env("XDG_CONFIG_HOME").map(std::ffi::OsString::from);
 
         if env_overrides {
-            return Self::load_uncached();
+            return Self::load_uncached_in(Path::new(""));
         }
 
-        let cache = Self::load_cache_slot();
         // The project config path (`.ragent/ragent.json`) is relative to the
         // current working directory, which can change (e.g. in tests); include
         // it in the cache key so a stale entry is never returned.
@@ -1831,11 +1830,58 @@ impl Config {
                     error = %e,
                     "cannot determine current directory; bypassing the config load cache"
                 );
-                return Self::load_uncached();
+                return Self::load_uncached_in(Path::new(""));
             }
         };
+        // The relative base keeps `config_paths` and the default-file write
+        // relative to the process cwd, exactly as before multi-session.
+        Self::load_cached_in(cwd, Path::new(""), xdg)
+    }
+
+    /// Loads the configuration a session working in `directory` runs under
+    /// (spec MULTISESSION M6): when the directory has its own
+    /// `.ragent/ragent.json`, the global config overlaid with it (same
+    /// project-local guard and mtime-keyed cache as [`Config::load`]);
+    /// otherwise the launch configuration, exactly [`Config::load`]. The
+    /// agent loop resolves a session's config by the same rule, so every
+    /// reader agrees on what the session runs under.
+    ///
+    /// # Arguments
+    ///
+    /// * `directory` - the session's working directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a config file cannot be read or contains invalid
+    /// JSON.
+    pub fn load_for(directory: &Path) -> anyhow::Result<Self> {
+        let canonical = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        let is_cwd =
+            std::env::current_dir().is_ok_and(|cwd| canonical(&cwd) == canonical(directory));
+        let own_config = directory.join(".ragent").join("ragent.json").is_file();
+        if is_cwd || !own_config {
+            return Self::load();
+        }
+        if read_env("RAGENT_CONFIG").is_some() || read_env("RAGENT_CONFIG_CONTENT").is_some() {
+            return Self::load_uncached_in(directory);
+        }
+        let xdg = read_env("XDG_CONFIG_HOME").map(std::ffi::OsString::from);
+        Self::load_cached_in(directory.to_path_buf(), directory, xdg)
+    }
+
+    /// The M-025 cached load for one directory.
+    ///
+    /// `key` identifies the cache entry (the directory the config is for);
+    /// `base` prefixes the project config path (empty for the process cwd).
+    fn load_cached_in(
+        key: PathBuf,
+        base: &Path,
+        xdg: Option<std::ffi::OsString>,
+    ) -> anyhow::Result<Self> {
+        let cache = Self::load_cache_slot();
+        let cwd = key;
         let global_path = Self::global_config_path();
-        let project_path = PathBuf::from(".ragent").join("ragent.json");
+        let project_path = base.join(".ragent").join("ragent.json");
         let candidates: Vec<PathBuf> = [global_path.clone(), Some(project_path.clone())]
             .into_iter()
             .flatten()
@@ -1849,7 +1895,7 @@ impl Config {
             let guard = cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(cached) = guard.as_ref()
+            if let Some(cached) = guard.get(&cwd)
                 && cached.cwd == cwd
                 && cached.xdg == xdg
                 && cached.mtimes.iter().all(|(path, mt, size)| {
@@ -1864,7 +1910,7 @@ impl Config {
 
         // Cache miss / invalid: load, then snapshot the candidate mtimes AFTER
         // the load (see comment below) so the new entry keys the fast path.
-        let cfg = Self::load_uncached();
+        let cfg = Self::load_uncached_in(base);
         if let Ok(cfg) = &cfg {
             // Re-snapshot AFTER load_uncached: a first-time load in a fresh
             // directory creates the default project config (load_uncached
@@ -1877,12 +1923,15 @@ impl Config {
             let mut guard = cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            *guard = Some(CachedConfigFile {
-                config: cfg.clone(),
-                mtimes,
-                cwd,
-                xdg,
-            });
+            guard.insert(
+                cwd.clone(),
+                CachedConfigFile {
+                    config: cfg.clone(),
+                    mtimes,
+                    cwd,
+                    xdg,
+                },
+            );
         }
         cfg
     }
@@ -1902,17 +1951,27 @@ impl Config {
             .collect()
     }
 
-    /// The shared M-025 cache slot used by both [`Config::load`] and
-    /// [`Config::invalidate_load_cache`]. A single static guarantees that an
-    /// invalidation clears exactly the cache `load` consults.
-    fn load_cache_slot() -> &'static std::sync::Mutex<Option<CachedConfigFile>> {
+    /// The shared M-025 cache used by [`Config::load`], [`Config::load_for`]
+    /// and [`Config::invalidate_load_cache`], one entry per directory. A
+    /// single static guarantees that an invalidation clears exactly the cache
+    /// the loaders consult.
+    fn load_cache_slot()
+    -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, CachedConfigFile>> {
         use std::sync::OnceLock;
-        static CACHE: OnceLock<std::sync::Mutex<Option<CachedConfigFile>>> = OnceLock::new();
-        CACHE.get_or_init(|| std::sync::Mutex::new(None))
+        static CACHE: OnceLock<
+            std::sync::Mutex<std::collections::HashMap<PathBuf, CachedConfigFile>>,
+        > = OnceLock::new();
+        CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
     }
 
-    /// The uncached config loader (the real work behind [`Config::load`]).
-    fn load_uncached() -> anyhow::Result<Self> {
+    /// The uncached config loader (the real work behind [`Config::load`] and
+    /// [`Config::load_for`]). The project config is read from
+    /// `<base>/.ragent/ragent.json`; an empty `base` means the process cwd.
+    ///
+    /// The first-run default `ragent.json` is written only for the process
+    /// cwd (empty `base`): opening a session in another directory must never
+    /// create files in that project.
+    fn load_uncached_in(base: &Path) -> anyhow::Result<Self> {
         // `Config::default()` implements the same defaults as the serde field
         // attributes (`default_agent == "general"`, `activity_log == true`), so
         // no load-time patch is needed here (ANTIPAT M-7).
@@ -1934,7 +1993,7 @@ impl Config {
         // untrusted - merge it with the project-local guard so it cannot
         // enable YOLO, widen allow-lists/roots, weaken deny rules, redirect
         // telemetry, or inject hooks.
-        let project_path = PathBuf::from(".ragent").join("ragent.json");
+        let project_path = base.join(".ragent").join("ragent.json");
         if project_path.exists() {
             let overlay = Self::load_file(&project_path)?;
             config = Self::merge_project(config, overlay);
@@ -1942,9 +2001,10 @@ impl Config {
             loaded = true;
         }
         // If neither global nor project config exists, create a default
-        // project-level config so the user has a starting point.
-        if !loaded {
-            let ragent_dir = PathBuf::from(".ragent");
+        // project-level config so the user has a starting point - in the
+        // launch directory only (see above).
+        if !loaded && base.as_os_str().is_empty() {
+            let ragent_dir = base.join(".ragent");
             std::fs::create_dir_all(&ragent_dir).map_err(|e| {
                 anyhow::anyhow!(
                     "Failed to create project config directory '{}': {}",
@@ -2227,7 +2287,7 @@ impl Config {
         let mut guard = cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *guard = None;
+        guard.clear();
     }
 
     /// Resolve the global config directory (`<config_dir>/ragent`) using the

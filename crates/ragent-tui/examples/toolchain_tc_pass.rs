@@ -15,7 +15,8 @@ use support::make_app;
 
 async fn last_output_after(app: &mut ragent_tui::App, input: &str) -> String {
     app.execute_slash_command(input).await;
-    app.messages
+    app.session
+        .messages
         .last()
         .map(|m| m.text_content())
         .unwrap_or_default()
@@ -351,14 +352,14 @@ async fn run() {
 
     // -- TC-014: autocomplete -------------------------------------------
     let mut app = make_app();
-    app.input = "/tool".to_string();
+    app.session.input = "/tool".to_string();
     app.update_slash_menu();
     let menu_ok = app
         .slash_menu
         .as_ref()
         .map(|m| m.matches.iter().any(|e| e.trigger == "toolchain"))
         .unwrap_or(false);
-    app.input = "/toolchain".to_string();
+    app.session.input = "/toolchain".to_string();
     app.update_slash_menu();
     let subs_ok = app
         .slash_menu

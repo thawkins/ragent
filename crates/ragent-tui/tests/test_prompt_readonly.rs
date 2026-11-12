@@ -33,7 +33,8 @@ fn prompt_report(input: &str) -> String {
         .block_on(async move {
             let mut app = make_app();
             app.execute_slash_command(input).await;
-            app.messages
+            app.session
+                .messages
                 .last()
                 .map(|m| m.text_content())
                 .unwrap_or_default()
@@ -49,16 +50,16 @@ fn test_prompt_no_llm_request_token_usage_unchanged() {
         .block_on(async move {
             let mut app = make_app();
             app.execute_slash_command("/prompt help").await; // creates the session via the shared gate
-            let before = app.token_usage;
+            let before = app.session.token_usage;
             app.execute_slash_command("/prompt general").await;
             app.execute_slash_command("/prompt subagent general").await;
             app.execute_slash_command("/prompt primary general").await;
             assert_eq!(
-                app.token_usage, before,
+                app.session.token_usage, before,
                 "FR-012: /prompt must make no LLM request (token usage unchanged)"
             );
             assert_eq!(
-                app.token_usage,
+                app.session.token_usage,
                 (0, 0),
                 "FR-012: token counters must be untouched by /prompt"
             );
@@ -75,6 +76,7 @@ fn test_prompt_persists_nothing_to_session_history() {
             let mut app = make_app();
             app.execute_slash_command("/prompt help").await; // creates the session via the shared gate
             let sid = app
+                .session
                 .session_id
                 .clone()
                 .expect("session created by the slash-command gate");

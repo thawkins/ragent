@@ -882,6 +882,8 @@ fn create_test_processor() -> ragent_agent::session::processor::SessionProcessor
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         bg_service: std::sync::OnceLock::new(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),

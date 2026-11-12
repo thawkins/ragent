@@ -52,7 +52,7 @@ async fn press_alt_c(app: &mut App) {
 async fn drain_snapshot_polling(app: &mut App) {
     for _ in 0..100 {
         app.poll_context_snapshot_refresh();
-        if !app.context_refresh_inflight {
+        if !app.session.context_refresh_inflight {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -132,7 +132,7 @@ async fn tc002_system_prompt_row_and_model_capacity() {
     let models = registry_models(&app);
     assert!(!models.is_empty(), "registry advertises at least one model");
     let (prov, model, window) = models[0].clone();
-    app.selected_model = Some(format!("{prov}/{model}"));
+    app.session.selected_model = Some(format!("{prov}/{model}"));
     app.show_context_panel = true;
     drain_snapshot_polling(&mut app).await;
     let text = rendered_text(&draw(&mut app, 100, 40));
@@ -154,9 +154,9 @@ async fn tc002_system_prompt_row_and_model_capacity() {
     // paths (selected_model, agent_info.model, selected_model_ctx_window
     // fallback) to miss.
     let mut app = support::make_app();
-    app.agent_info.model = None;
-    app.selected_model = Some("no-such-provider/no-such-model".to_string());
-    app.selected_model_ctx_window = None;
+    app.session.agent_info.model = None;
+    app.session.selected_model = Some("no-such-provider/no-such-model".to_string());
+    app.session.selected_model_ctx_window = None;
     assert!(app.active_context_window_tokens().is_none());
     app.show_context_panel = true;
     drain_snapshot_polling(&mut app).await;
@@ -202,12 +202,12 @@ async fn tc004_history_updated_after_chat() {
     // Steps 2-3: a user message, then the assistant reply. A live LLM turn is
     // not available headlessly, so the turn is injected at the same layer the
     // event handler commits it; FR-013's refresh trigger is issued explicitly.
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "t016-tc004",
         Role::User,
         vec![MessagePart::Text { text: "hi".into() }],
     ));
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "t016-tc004",
         Role::Assistant,
         vec![MessagePart::Text {
@@ -237,8 +237,8 @@ async fn tc005_total_and_headroom_arithmetic() {
     let mut app = support::make_app();
     let models = registry_models(&app);
     let (prov, model, window) = models[0].clone();
-    app.selected_model = Some(format!("{prov}/{model}"));
-    app.messages.push(Message::new(
+    app.session.selected_model = Some(format!("{prov}/{model}"));
+    app.session.messages.push(Message::new(
         "t016-tc005",
         Role::User,
         vec![MessagePart::Text {
@@ -303,7 +303,7 @@ async fn tc007_refresh_after_model_switch() {
         .map(|(p, m, w)| (p.clone(), m.clone(), *w))
         .expect("a second model with a different advertised window");
 
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "t016-tc007",
         Role::User,
         vec![MessagePart::Text {
@@ -312,7 +312,7 @@ async fn tc007_refresh_after_model_switch() {
     ));
 
     // Step 1: note the capacity for the current model.
-    app.selected_model = Some(format!("{p1}/{m1}"));
+    app.session.selected_model = Some(format!("{p1}/{m1}"));
     app.show_context_panel = true;
     drain_snapshot_polling(&mut app).await;
     let _ = draw(&mut app, 100, 40);
@@ -321,7 +321,7 @@ async fn tc007_refresh_after_model_switch() {
 
     // Step 2: switch models (the state the model picker commits, followed by
     // FR-013's refresh after the change).
-    app.selected_model = Some(format!("{p2}/{m2}"));
+    app.session.selected_model = Some(format!("{p2}/{m2}"));
     app.schedule_context_snapshot_refresh();
     drain_snapshot_polling(&mut app).await;
     let _ = draw(&mut app, 100, 40);

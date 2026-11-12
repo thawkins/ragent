@@ -72,7 +72,7 @@ const fn wheel_down(col: u16, row: u16) -> MouseEvent {
 /// An app with the output overlay open on a primary session.
 fn app_with_output_view() -> AppT {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::Session {
             session_id: "s1".to_string(),
@@ -180,7 +180,7 @@ fn test_output_view_footer_names_escape_and_no_close_button_paints() {
 #[tokio::test]
 async fn test_output_view_escape_closes_the_overlay() {
     let mut app = app_with_output_view();
-    app.selected_agent_session_id = Some("s1".to_string());
+    app.session.selected_agent_session_id = Some("s1".to_string());
     app.selected_agent_index = Some(0);
     render_overlay_over_agents(&mut app, 160, 44);
 
@@ -189,7 +189,7 @@ async fn test_output_view_escape_closes_the_overlay() {
 
     assert!(app.output_view.is_none(), "Esc closes the view");
     assert!(
-        app.selected_agent_session_id.is_none(),
+        app.session.selected_agent_session_id.is_none(),
         "the selection identity clears with the view (FR-075)"
     );
     assert!(

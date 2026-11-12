@@ -179,14 +179,14 @@ fn stored_status(store_dir: &PathBuf) -> Option<MemberStatus> {
 #[tokio::test]
 async fn space_on_a_running_agent_row_requests_suspension() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
+    app.session.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
     app.active_tasks
         .push(task("d4e5f6a7", "explore", TaskStatus::Running));
     app.agents_cursor_subagent = Some(0); // the first sub-agent row
     render(&mut app);
-    app.input = "draft".to_string();
-    app.input_cursor = 5;
+    app.session.input = "draft".to_string();
+    app.session.input_cursor = 5;
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;
@@ -201,10 +201,13 @@ async fn space_on_a_running_agent_row_requests_suspension() {
         "the suspend request must be attributed to the child session (NFR-008)"
     );
     assert_eq!(
-        app.input, "draft",
+        app.session.input, "draft",
         "the consumed Space must not reach the input buffer (FR-055)"
     );
-    assert_eq!(app.input_cursor, 5, "the cursor must not advance either");
+    assert_eq!(
+        app.session.input_cursor, 5,
+        "the cursor must not advance either"
+    );
     assert!(app.needs_redraw, "the request line repaints (NFR-005)");
 }
 
@@ -213,13 +216,13 @@ async fn space_on_a_running_agent_row_requests_suspension() {
 #[tokio::test]
 async fn space_on_a_suspended_agent_row_requests_resumption() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
+    app.session.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
     app.active_tasks
         .push(task("e5f6a7b8", "explore", TaskStatus::Suspended));
     app.agents_cursor_subagent = Some(0);
     render(&mut app);
-    let baseline_input = app.input.clone();
+    let baseline_input = app.session.input.clone();
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;
@@ -233,7 +236,7 @@ async fn space_on_a_suspended_agent_row_requests_resumption() {
         "the resume request must be attributed to the child session (NFR-008)"
     );
     assert_eq!(
-        app.input, baseline_input,
+        app.session.input, baseline_input,
         "the consumed Space must not reach the input buffer (FR-055)"
     );
 }
@@ -249,7 +252,7 @@ async fn space_on_a_suspended_agent_row_requests_resumption() {
 #[tokio::test]
 async fn the_cursor_range_never_reaches_the_primary_row() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
+    app.session.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
     app.active_tasks = vec![
         task("a1b2c3d4", "explore", TaskStatus::Running),
@@ -294,7 +297,7 @@ async fn the_cursor_range_never_reaches_the_primary_row() {
 async fn the_keyboard_path_dispatches_only_for_the_cursor_row() {
     let mut app = support::make_app();
     app.show_agents_window = true;
-    app.session_id = Some(LEAD_SESSION.to_string());
+    app.session.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
     app.active_tasks = vec![
         task("a1b2c3d4", "explore", TaskStatus::Running),
@@ -362,14 +365,14 @@ async fn the_keyboard_path_dispatches_only_for_the_cursor_row() {
 #[tokio::test]
 async fn shift_k_on_a_selected_agent_row_arms_the_kill_dialog() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
+    app.session.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
     app.active_tasks
         .push(task("c3d4e5f6", "rust-coder", TaskStatus::Running));
     app.agents_cursor_subagent = Some(0);
     render(&mut app);
-    app.input = "typed".to_string();
-    app.input_cursor = 5;
+    app.session.input = "typed".to_string();
+    app.session.input_cursor = 5;
 
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
@@ -386,7 +389,7 @@ async fn shift_k_on_a_selected_agent_row_arms_the_kill_dialog() {
         other => panic!("expected KillSubagent, got {other:?}"),
     }
     assert_eq!(
-        app.input, "typed",
+        app.session.input, "typed",
         "no `k` reaches the input buffer (FR-055)"
     );
 
@@ -406,7 +409,7 @@ async fn shift_k_on_a_selected_agent_row_arms_the_kill_dialog() {
 #[tokio::test]
 async fn confirmed_keyboard_kill_terminates_through_the_manager() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
+    app.session.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
     app.active_tasks
         .push(task("f6a7b8c9", "rust-coder", TaskStatus::Running));
@@ -468,16 +471,17 @@ async fn confirmed_keyboard_kill_terminates_through_the_manager() {
 #[tokio::test]
 async fn space_on_a_cursor_teammate_arms_the_suspend_dialog() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     app.show_teams_window = true;
     app.teams_cursor_teammate = Some(0);
-    app.input = "draft".to_string();
+    app.session.input = "draft".to_string();
     render(&mut app);
     render(&mut app);
-    app.input_cursor = 5;
+    app.session.input_cursor = 5;
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;
@@ -490,7 +494,10 @@ async fn space_on_a_cursor_teammate_arms_the_suspend_dialog() {
         }
         other => panic!("expected SuspendTeammate from Space, got {other:?}"),
     }
-    assert_eq!(app.input, "draft", "no space reaches the buffer (FR-055)");
+    assert_eq!(
+        app.session.input, "draft",
+        "no space reaches the buffer (FR-055)"
+    );
 }
 
 /// The confirmed suspend answer drives the real `TeamManager` - the on-disk
@@ -498,9 +505,10 @@ async fn space_on_a_cursor_teammate_arms_the_suspend_dialog() {
 #[tokio::test]
 async fn confirmed_keyboard_suspend_suspends_through_the_manager() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     app.show_teams_window = true;
     let store_dir = bind_team_manager(&mut app, MemberStatus::Working);
@@ -536,16 +544,17 @@ async fn confirmed_keyboard_suspend_suspends_through_the_manager() {
 #[tokio::test]
 async fn del_on_a_cursor_teammate_shuts_it_down_through_the_manager() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     app.show_teams_window = true;
     let store_dir = bind_team_manager(&mut app, MemberStatus::Working);
     app.teams_cursor_teammate = Some(0);
     render(&mut app);
-    app.input = "draft".to_string();
-    app.input_cursor = 5;
+    app.session.input = "draft".to_string();
+    app.session.input_cursor = 5;
 
     app.handle_key_event(key(KeyCode::Delete, KeyModifiers::NONE))
         .await;
@@ -558,7 +567,10 @@ async fn del_on_a_cursor_teammate_shuts_it_down_through_the_manager() {
         }
         other => panic!("expected ShutdownTeammate from Del, got {other:?}"),
     }
-    assert_eq!(app.input, "draft", "no key reaches the buffer (FR-055)");
+    assert_eq!(
+        app.session.input, "draft",
+        "no key reaches the buffer (FR-055)"
+    );
 
     app.handle_key_event(key(KeyCode::Left, KeyModifiers::NONE))
         .await;
@@ -586,9 +598,10 @@ async fn del_on_a_cursor_teammate_shuts_it_down_through_the_manager() {
 #[tokio::test]
 async fn shift_k_on_a_cursor_teammate_arms_the_shutdown_dialog() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     app.show_teams_window = true;
     app.teams_cursor_teammate = Some(0);
@@ -614,7 +627,10 @@ async fn shift_k_on_a_cursor_teammate_arms_the_shutdown_dialog() {
         app.row_action_confirm_open(),
         "the open dialog absorbs the repeat Shift+K"
     );
-    assert_eq!(app.input, "", "nothing reaches the input buffer (FR-055)");
+    assert_eq!(
+        app.session.input, "",
+        "nothing reaches the input buffer (FR-055)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -627,9 +643,10 @@ async fn shift_k_on_a_cursor_teammate_arms_the_shutdown_dialog() {
 #[tokio::test]
 async fn teams_keys_without_a_live_cursor_are_consumed_no_ops() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     app.show_teams_window = true;
     app.teams_cursor_teammate = Some(3); // beyond the live rows
@@ -644,7 +661,10 @@ async fn teams_keys_without_a_live_cursor_are_consumed_no_ops() {
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
     assert!(!app.row_action_confirm_open());
-    assert_eq!(app.input, "", "neither key leaks a character (FR-055)");
+    assert_eq!(
+        app.session.input, "",
+        "neither key leaks a character (FR-055)"
+    );
 }
 
 /// With the Agents window open and no cursor yet, `Space` and `Shift+K` are
@@ -653,13 +673,13 @@ async fn teams_keys_without_a_live_cursor_are_consumed_no_ops() {
 #[tokio::test]
 async fn agent_window_keys_with_no_selection_never_touch_the_input() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
+    app.session.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
     app.active_tasks
         .push(task("a1b2c3d4", "explore", TaskStatus::Running));
     app.agents_cursor_subagent = None;
-    app.input = "draft".to_string();
-    app.input_cursor = 5;
+    app.session.input = "draft".to_string();
+    app.session.input_cursor = 5;
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;
@@ -668,10 +688,10 @@ async fn agent_window_keys_with_no_selection_never_touch_the_input() {
 
     assert!(!app.row_action_confirm_open(), "no cursor arms nothing");
     assert_eq!(
-        app.input, "draft",
+        app.session.input, "draft",
         "Space and Shift+K must be consumed while the window is open (FR-055)"
     );
-    assert_eq!(app.input_cursor, 5);
+    assert_eq!(app.session.input_cursor, 5);
 }
 
 /// A cursor beyond the live rows is a consumed no-op and dispatches nothing
@@ -679,20 +699,23 @@ async fn agent_window_keys_with_no_selection_never_touch_the_input() {
 #[tokio::test]
 async fn an_out_of_range_cursor_is_consumed_harmlessly() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
+    app.session.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
     app.active_tasks
         .push(task("a1b2c3d4", "explore", TaskStatus::Running));
     app.agents_cursor_subagent = Some(9); // beyond the live rows
-    app.input = "draft".to_string();
-    app.input_cursor = 5;
+    app.session.input = "draft".to_string();
+    app.session.input_cursor = 5;
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
 
-    assert_eq!(app.input, "draft", "the stale cursor consumes both keys");
+    assert_eq!(
+        app.session.input, "draft",
+        "the stale cursor consumes both keys"
+    );
     assert!(
         !app.log_entries
             .iter()
@@ -711,9 +734,10 @@ async fn an_out_of_range_cursor_is_consumed_harmlessly() {
 #[tokio::test]
 async fn teammate_keys_never_target_the_lead() {
     let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session
+        .team_members
         .push(member("lead", "general", MemberStatus::Idle));
     app.show_teams_window = true;
 
@@ -746,7 +770,7 @@ async fn teammate_keys_never_target_the_lead() {
         Some(other) => panic!("expected SuspendTeammate, got {other:?}"),
     }
     assert_eq!(
-        app.input, "",
+        app.session.input, "",
         "no key leaks a character into the buffer (FR-055)"
     );
 }

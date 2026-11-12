@@ -26,9 +26,9 @@ use support::make_app;
 /// A team with the given members attached and nothing else populated.
 fn team_app(members: Vec<TeamMember>) -> App {
     let mut app = make_app();
-    app.session_id = Some("sess-lead".to_string());
-    app.active_team = Some(TeamConfig::new("alpha", "sess-lead"));
-    app.team_members = members;
+    app.session.session_id = Some("sess-lead".to_string());
+    app.session.active_team = Some(TeamConfig::new("alpha", "sess-lead"));
+    app.session.team_members = members;
     app
 }
 
@@ -94,13 +94,14 @@ fn strip_is_visible_only_with_a_team_that_has_members() {
         "no team at all must not show the strip"
     );
 
-    app.active_team = Some(TeamConfig::new("alpha", "sess-lead"));
+    app.session.active_team = Some(TeamConfig::new("alpha", "sess-lead"));
     assert!(
         !teammate_strip::is_visible(&app),
         "a team with no members must not show the strip (FR-066)"
     );
 
-    app.team_members
+    app.session
+        .team_members
         .push(member("reviewer", "tm-001", MemberStatus::Idle));
     assert!(
         teammate_strip::is_visible(&app),
@@ -308,7 +309,7 @@ fn focused_teammate_has_a_distinct_background() {
         member("alpha", "tm-001", MemberStatus::Working),
         member("bravo", "tm-002", MemberStatus::Idle),
     ]);
-    focused.focused_teammate = Some("tm-002".to_string());
+    focused.session.focused_teammate = Some("tm-002".to_string());
 
     let plain = render_strip(&plain, 100);
     let highlighted = render_strip(&focused, 100);
@@ -332,7 +333,7 @@ fn only_the_focused_pill_is_highlighted() {
         member("alpha", "tm-001", MemberStatus::Working),
         member("bravo", "tm-002", MemberStatus::Idle),
     ]);
-    app.focused_teammate = Some("tm-001".to_string());
+    app.session.focused_teammate = Some("tm-001".to_string());
     let buffer = render_strip(&app, 100);
 
     let alpha = column_of(&buffer, 0, "alpha");
@@ -345,7 +346,7 @@ fn only_the_focused_pill_is_highlighted() {
 #[test]
 fn stale_focus_id_highlights_nobody() {
     let mut app = team_app(vec![member("alpha", "tm-001", MemberStatus::Idle)]);
-    app.focused_teammate = Some("tm-gone".to_string());
+    app.session.focused_teammate = Some("tm-gone".to_string());
     let buffer = render_strip(&app, 100);
 
     let alpha = column_of(&buffer, 0, "alpha");

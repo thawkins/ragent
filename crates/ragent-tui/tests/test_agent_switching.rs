@@ -38,6 +38,8 @@ fn make_app(event_bus: Arc<EventBus>) -> App {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
@@ -102,16 +104,19 @@ async fn test_agent_switch_cycles_through_agents() {
     let agent_count = app.cycleable_agents.len();
     assert!(agent_count > 1, "need at least two cycleable agents");
 
-    let first = app.agent_name.clone();
+    let first = app.session.agent_name.clone();
     press_tab(&mut app).await;
-    let second = app.agent_name.clone();
+    let second = app.session.agent_name.clone();
     assert_ne!(first, second, "agent should change on Tab");
 
     // Cycle back to the first agent
     for _ in 1..agent_count {
         press_tab(&mut app).await;
     }
-    assert_eq!(app.agent_name, first, "should wrap around to first agent");
+    assert_eq!(
+        app.session.agent_name, first,
+        "should wrap around to first agent"
+    );
 }
 
 #[tokio::test]
@@ -126,7 +131,7 @@ async fn test_agent_switch_updates_status_bar() {
         app.status
     );
     assert!(
-        app.status.contains(&app.agent_name),
+        app.status.contains(&app.session.agent_name),
         "status bar should contain the new agent name"
     );
 }
@@ -148,7 +153,7 @@ async fn test_agent_switch_pushes_log_entry() {
         entry.message
     );
     assert!(
-        entry.message.contains(&app.agent_name),
+        entry.message.contains(&app.session.agent_name),
         "log message should contain agent name"
     );
 }
@@ -160,11 +165,11 @@ async fn test_agent_switch_publishes_event_with_session() {
     let mut app = make_app(bus);
 
     // Set a session ID so the event gets published
-    app.session_id = Some("test-session-1".to_string());
+    app.session.session_id = Some("test-session-1".to_string());
 
-    let prev_name = app.agent_name.clone();
+    let prev_name = app.session.agent_name.clone();
     press_tab(&mut app).await;
-    let new_name = app.agent_name.clone();
+    let new_name = app.session.agent_name.clone();
 
     // Drain the event
     let event = rx.try_recv().expect("should receive AgentSwitched event");
@@ -189,7 +194,7 @@ async fn test_agent_switch_no_event_without_session() {
     let mut app = make_app(bus);
 
     // No session set - should not publish
-    assert!(app.session_id.is_none());
+    assert!(app.session.session_id.is_none());
     press_tab(&mut app).await;
 
     // No event should be received
@@ -204,15 +209,15 @@ async fn test_agent_switch_updates_agent_info() {
     let bus = Arc::new(EventBus::default());
     let mut app = make_app(bus);
 
-    let initial_agent = app.agent_info.clone();
+    let initial_agent = app.session.agent_info.clone();
     press_tab(&mut app).await;
 
     assert_ne!(
-        app.agent_info.name, initial_agent.name,
+        app.session.agent_info.name, initial_agent.name,
         "agent_info should change"
     );
     assert_eq!(
-        app.agent_info.name, app.agent_name,
+        app.session.agent_info.name, app.session.agent_name,
         "agent_info.name and agent_name should match"
     );
 }
@@ -222,12 +227,12 @@ async fn test_agent_switch_index_tracking() {
     let bus = Arc::new(EventBus::default());
     let mut app = make_app(bus);
 
-    let initial_index = app.current_agent_index;
+    let initial_index = app.session.current_agent_index;
     press_tab(&mut app).await;
 
     let expected = (initial_index + 1) % app.cycleable_agents.len();
     assert_eq!(
-        app.current_agent_index, expected,
+        app.session.current_agent_index, expected,
         "index should increment with wrap"
     );
 }
@@ -245,17 +250,17 @@ async fn test_agent_switch_full_cycle_names() {
         .collect();
 
     // Cycle through starting from current index
-    let start = app.current_agent_index;
+    let start = app.session.current_agent_index;
     let mut seen = Vec::new();
     for i in 0..count {
         let idx = (start + i) % count;
-        assert_eq!(app.agent_name, expected_names[idx]);
-        seen.push(app.agent_name.clone());
+        assert_eq!(app.session.agent_name, expected_names[idx]);
+        seen.push(app.session.agent_name.clone());
         press_tab(&mut app).await;
     }
 
     // After full cycle, back to start
-    assert_eq!(app.agent_name, expected_names[start]);
+    assert_eq!(app.session.agent_name, expected_names[start]);
     // All cycleable agents should have been visited
     for name in &expected_names {
         assert!(seen.contains(name), "agent '{name}' was not visited");

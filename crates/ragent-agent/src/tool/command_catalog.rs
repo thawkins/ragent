@@ -76,6 +76,17 @@ const CODEINDEX_SUBS: &[&str] = &["on", "off", "sync", "help"];
 const GCF_SUBS: &[&str] = &["on", "off", "show", "help"];
 const ON_OFF_HELP: &[&str] = &["on", "off", "help"];
 const WEBSEARCH_SUBS: &[&str] = &["show", "test", "search", "help"];
+const SESSION_SUBS: &[&str] = &[
+    "list",
+    "new",
+    "switch",
+    "close",
+    "rename",
+    "pin",
+    "archive",
+    "unarchive",
+    "help",
+];
 const HELP_ONLY: &[&str] = &["help"];
 const BACKEND_SUBS: &[&str] = &["show", "local", "docker", "podman", "remote", "help"];
 const AUTOMATION_SUBS: &[&str] = &["list", "runs", "run", "help"];
@@ -541,6 +552,12 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
         trigger: "router",
         description: "Model router management: /router on|off|status|tiers|weights|boundaries|test|reload|help",
         subcommands: ROUTER_SUBS,
+        flags: EMPTY,
+    },
+    CommandCatalogEntry {
+        trigger: "session",
+        description: "Sessions: /session [list] | new | switch | close | rename | pin | archive",
+        subcommands: SESSION_SUBS,
         flags: EMPTY,
     },
     CommandCatalogEntry {

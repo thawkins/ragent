@@ -188,7 +188,7 @@ fn render_profile_panel_enabled_and_disabled() {
 #[test]
 fn render_tasks_panel_with_rows() {
     let mut app = support::make_app();
-    app.session_id = Some("layout-tasks".to_string());
+    app.session.session_id = Some("layout-tasks".to_string());
     app.show_tasks_panel = true;
     app.show_log = false;
     app.storage
@@ -220,7 +220,7 @@ fn render_tasks_panel_with_rows() {
             &["t-1".to_string()],
         )
         .expect("create task");
-    app.tasks_cache_dirty = true;
+    app.session.tasks_cache_dirty = true;
     let _ = render(&mut app, 120, 40);
 }
 
@@ -251,25 +251,26 @@ fn render_context_panel_visible() {
 #[test]
 fn render_teammate_strip_and_focused_input() {
     let mut app = support::make_app();
-    app.active_team = Some(TeamConfig::new("alpha", "s1"));
+    app.session.active_team = Some(TeamConfig::new("alpha", "s1"));
     let mut member = TeamMember::new("reviewer", "tm-001", "general");
     member.status = ragent_agent::team::MemberStatus::Working;
-    app.team_members.push(member);
-    app.focused_teammate = Some("tm-001".to_string());
+    app.session.team_members.push(member);
+    app.session.focused_teammate = Some("tm-001".to_string());
     let _ = render(&mut app, 120, 40);
 }
 
 #[test]
 fn render_input_with_attachments_and_queue_counter() {
     let mut app = support::make_app();
-    app.pending_attachments
+    app.session
+        .pending_attachments
         .push(std::path::PathBuf::from("shot.png"));
-    app.input_queue.push_back(QueuedInput {
+    app.session.input_queue.push_back(QueuedInput {
         text: "queued".to_string(),
         image_paths: Vec::new(),
     });
-    app.input = "typed text".to_string();
-    app.input_cursor = 4;
+    app.session.input = "typed text".to_string();
+    app.session.input_cursor = 4;
     let _ = render(&mut app, 120, 40);
 }
 
@@ -287,7 +288,7 @@ fn render_input_locked_border() {
 #[test]
 fn render_run_cost_banner() {
     let mut app = support::make_app();
-    app.run_cost_banner = Some("* run complete - 10+20 tokens - $0.001 - 1.2s".to_string());
+    app.session.run_cost_banner = Some("* run complete - 10+20 tokens - $0.001 - 1.2s".to_string());
     let terminal = render(&mut app, 120, 30);
     assert!(painted(&terminal).contains("run complete"));
 }
@@ -296,7 +297,7 @@ fn render_run_cost_banner() {
 fn render_queue_menu_overlay() {
     let mut app = support::make_app();
     app.queue_menu_open = true;
-    app.input_queue.push_back(QueuedInput {
+    app.session.input_queue.push_back(QueuedInput {
         text: "one".to_string(),
         image_paths: Vec::new(),
     });
@@ -308,7 +309,7 @@ fn render_queue_show_panel_overlay() {
     let mut app = support::make_app();
     app.queue_show_open = true;
     for t in ["one", "two", "three"] {
-        app.input_queue.push_back(QueuedInput {
+        app.session.input_queue.push_back(QueuedInput {
             text: t.to_string(),
             image_paths: Vec::new(),
         });
@@ -362,7 +363,7 @@ fn render_context_menu_overlay() {
 #[test]
 fn render_force_cleanup_dialog_modals() {
     let mut app = support::make_app();
-    app.pending_forcecleanup = Some(PendingForceCleanup {
+    app.session.pending_forcecleanup = Some(PendingForceCleanup {
         team_name: "alpha".to_string(),
         active_members: vec!["alice".to_string(), "bob".to_string()],
     });
@@ -386,7 +387,7 @@ fn render_memory_delete_dialog() {
 #[test]
 fn render_stop_confirm_dialog() {
     let mut app = support::make_app();
-    app.pending_stop_confirm = true;
+    app.session.pending_stop_confirm = true;
     let _ = render(&mut app, 120, 40);
 }
 
@@ -421,8 +422,9 @@ fn render_agents_and_teams_windows() {
     let _ = render(&mut app, 120, 40);
     app.show_agents_window = false;
     app.show_teams_window = true;
-    app.active_team = Some(TeamConfig::new("alpha", "s1"));
-    app.team_members
+    app.session.active_team = Some(TeamConfig::new("alpha", "s1"));
+    app.session
+        .team_members
         .push(TeamMember::new("reviewer", "tm-001", "general"));
     let _ = render(&mut app, 120, 40);
 }
@@ -455,7 +457,8 @@ fn render_active_tasks_present() {
 #[test]
 fn render_text_selection_highlight() {
     let mut app = support::make_app();
-    app.messages
+    app.session
+        .messages
         .push(Message::user_text("s1", "selectable transcript line"));
     app.text_selection = Some(TextSelection {
         pane: SelectionPane::Messages,
@@ -728,7 +731,7 @@ fn render_config_save_picker_overlay() {
 #[test]
 fn render_slash_menu_overlay() {
     let mut app = support::make_app();
-    app.input = "/he".to_string();
+    app.session.input = "/he".to_string();
     app.slash_menu = Some(SlashMenuState {
         matches: (0..20)
             .map(|i| SlashMenuEntry {
@@ -748,7 +751,7 @@ fn render_slash_menu_overlay() {
 #[test]
 fn render_file_menu_overlay() {
     let mut app = support::make_app();
-    app.input = "@/src".to_string();
+    app.session.input = "@/src".to_string();
     app.file_menu = Some(FileMenuState {
         matches: (0..12)
             .map(|i| FileMenuEntry {
@@ -768,8 +771,9 @@ fn render_file_menu_overlay() {
 #[test]
 fn render_output_view_overlay() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-abc".to_string());
-    app.messages
+    app.session.session_id = Some("sess-abc".to_string());
+    app.session
+        .messages
         .push(Message::assistant_text("sess-abc", "assistant output line"));
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::Session {
@@ -941,7 +945,7 @@ fn render_backend_panel_overlay() {
 #[test]
 fn render_plan_approval_dialog() {
     let mut app = support::make_app();
-    app.plan_approval_pending = Some(PlanApprovalState {
+    app.session.plan_approval_pending = Some(PlanApprovalState {
         plan_text: "1. do a thing\n2. do another".to_string(),
         cursor_approve: true,
     });
@@ -951,7 +955,7 @@ fn render_plan_approval_dialog() {
 #[test]
 fn render_rollback_offer_banner() {
     let mut app = support::make_app();
-    app.pending_rollback = Some(RollbackOfferState {
+    app.session.pending_rollback = Some(RollbackOfferState {
         session_id: "s1".to_string(),
         status: "completed".to_string(),
         iterations: 3,
@@ -965,7 +969,7 @@ fn render_rollback_offer_banner() {
 fn render_question_dialog_multiple_choice_and_free_text() {
     use ragent_tui::app::QuestionRequest;
     let mut app = support::make_app();
-    app.question_queue.push_back(QuestionRequest {
+    app.session.question_queue.push_back(QuestionRequest {
         id: "q1".to_string(),
         session_id: "s1".to_string(),
         question: "Pick one".to_string(),
@@ -977,7 +981,7 @@ fn render_question_dialog_multiple_choice_and_free_text() {
     let _ = render(&mut app, 120, 40);
 
     let mut app = support::make_app();
-    app.question_queue.push_back(QuestionRequest {
+    app.session.question_queue.push_back(QuestionRequest {
         id: "q2".to_string(),
         session_id: "s1".to_string(),
         question: "Type something".to_string(),
@@ -986,14 +990,14 @@ fn render_question_dialog_multiple_choice_and_free_text() {
         expire_at_ms: None,
         secret: false,
     });
-    app.pending_question_input = "half typed".to_string();
+    app.session.pending_question_input = "half typed".to_string();
     let _ = render(&mut app, 120, 40);
 }
 
 #[test]
 fn render_permission_dialog() {
     let mut app = support::make_app();
-    app.permission_queue.push_back(PermissionRequest {
+    app.session.permission_queue.push_back(PermissionRequest {
         id: "p1".to_string(),
         session_id: "s1".to_string(),
         permission: "bash".to_string(),
@@ -1082,16 +1086,17 @@ fn markdown_to_lines_testable_more() {
 fn ensure_message_copy_lines_builds_cache() {
     use ragent_tui::app::MessageLineGroup;
     let mut app = support::make_app();
-    app.messages.push(Message::user_text(
+    app.session.messages.push(Message::user_text(
         "s1",
         "a message that is long enough to wrap in a narrow pane",
     ));
-    app.messages
+    app.session
+        .messages
         .push(Message::assistant_text("s1", "second message"));
-    app.message_cache_width = 20;
+    app.session.message_cache_width = 20;
     // Seed one stale cache group per message (edit_seq mismatch => re-render).
-    for _ in 0..app.messages.len() {
-        app.message_line_cache.push(MessageLineGroup {
+    for _ in 0..app.session.messages.len() {
+        app.session.message_line_cache.push(MessageLineGroup {
             lines: Vec::new(),
             wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
@@ -1099,17 +1104,20 @@ fn ensure_message_copy_lines_builds_cache() {
             edit_seq: u64::MAX,
         });
     }
-    app.message_content_lines_dirty = true;
+    app.session.message_content_lines_dirty = true;
     ragent_tui::layout::ensure_message_copy_lines(&mut app);
-    assert_ne!(app.message_content_lines, [] as [std::string::String; 0]);
-    assert!(!app.message_content_lines_dirty);
+    assert_ne!(
+        app.session.message_content_lines,
+        [] as [std::string::String; 0]
+    );
+    assert!(!app.session.message_content_lines_dirty);
 }
 
 #[test]
 fn render_messages_directly_with_overflow() {
     let mut app = support::make_app();
     for i in 0..30 {
-        app.messages.push(Message::new(
+        app.session.messages.push(Message::new(
             "s1",
             if i % 2 == 0 {
                 Role::User
@@ -1136,7 +1144,7 @@ fn render_messages_with_tool_calls_and_steps() {
     let mut map = HashMap::new();
     map.insert("call-1".to_string(), ("sid".to_string(), 1u32, 2u32));
     app.tool_step_map = map;
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "s1",
         Role::Assistant,
         vec![

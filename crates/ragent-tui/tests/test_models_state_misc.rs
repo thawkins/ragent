@@ -1337,8 +1337,8 @@ fn state_periodic_redraw_and_animation_latches() {
     app.code_index_graph_busy = false;
 
     // Autopilot pending-continue also drives it.
-    app.autopilot_enabled = true;
-    app.autopilot_pending_continue = Some("go".to_string());
+    app.session.autopilot_enabled = true;
+    app.session.autopilot_pending_continue = Some("go".to_string());
     assert!(app.periodic_animation_active());
 }
 
@@ -1395,7 +1395,7 @@ fn state_poll_question_expiry_answers_past_deadline() {
     // under one-binary-per-crate (AGENTS.md "Test Layout").
     let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
-    app.question_queue.push_back(QuestionRequest {
+    app.session.question_queue.push_back(QuestionRequest {
         id: "q1".to_string(),
         session_id: "s1".to_string(),
         question: "choose".to_string(),
@@ -1405,11 +1405,11 @@ fn state_poll_question_expiry_answers_past_deadline() {
         secret: false,
     });
     app.poll_question_expiry();
-    assert!(app.question_queue.is_empty());
-    assert_eq!(app.question_selected_index, 0);
+    assert!(app.session.question_queue.is_empty());
+    assert_eq!(app.session.question_selected_index, 0);
 
     // A request without a deadline is left untouched.
-    app.question_queue.push_back(QuestionRequest {
+    app.session.question_queue.push_back(QuestionRequest {
         id: "q2".to_string(),
         session_id: "s1".to_string(),
         question: "free text".to_string(),
@@ -1419,12 +1419,12 @@ fn state_poll_question_expiry_answers_past_deadline() {
         secret: false,
     });
     app.poll_question_expiry();
-    assert_eq!(app.question_queue.len(), 1);
+    assert_eq!(app.session.question_queue.len(), 1);
 
     // A deadline in the future leaves the request queued.
-    app.question_queue[0].expire_at_ms = Some(u64::MAX);
+    app.session.question_queue[0].expire_at_ms = Some(u64::MAX);
     app.poll_question_expiry();
-    assert_eq!(app.question_queue.len(), 1);
+    assert_eq!(app.session.question_queue.len(), 1);
 }
 
 #[test]
@@ -1435,16 +1435,17 @@ fn state_poll_run_cost_banner_expiry() {
     // under one-binary-per-crate (AGENTS.md "Test Layout").
     let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
-    app.run_cost_banner = Some("$1.23".to_string());
-    app.run_cost_banner_at = Some(now());
+    app.session.run_cost_banner = Some("$1.23".to_string());
+    app.session.run_cost_banner_at = Some(now());
     // Fresh banner is kept.
     app.poll_run_cost_banner_expiry();
-    assert!(app.run_cost_banner.is_some());
+    assert!(app.session.run_cost_banner.is_some());
 
-    app.run_cost_banner_at = Some(now().checked_sub(Duration::from_mins(1)).expect("clock"));
+    app.session.run_cost_banner_at =
+        Some(now().checked_sub(Duration::from_mins(1)).expect("clock"));
     app.poll_run_cost_banner_expiry();
-    assert!(app.run_cost_banner.is_none());
-    assert!(app.run_cost_banner_at.is_none());
+    assert!(app.session.run_cost_banner.is_none());
+    assert!(app.session.run_cost_banner_at.is_none());
 }
 
 #[test]
@@ -1868,11 +1869,13 @@ fn state_message_append_is_readable() {
     // under one-binary-per-crate (AGENTS.md "Test Layout").
     let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
-    app.session_id = Some("s".to_string());
-    app.messages
+    app.session.session_id = Some("s".to_string());
+    app.session
+        .messages
         .push(Message::user_text("s", "hello there".to_string()));
     assert!(
-        app.messages
+        app.session
+            .messages
             .last()
             .unwrap()
             .text_content()

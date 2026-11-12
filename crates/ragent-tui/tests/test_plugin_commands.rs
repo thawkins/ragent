@@ -30,7 +30,8 @@ fn inline_command(trigger: &str, name: &str) -> PluginCommand {
 }
 
 fn last_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(|m| m.text_content())
         .unwrap_or_default()
@@ -39,7 +40,7 @@ fn last_text(app: &App) -> String {
 #[tokio::test]
 async fn prompt_plugin_command_is_injected_as_a_user_turn() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     app.plugin_commands = vec![prompt_command(
         "commit",
         "commit",
@@ -65,7 +66,7 @@ async fn prompt_plugin_command_is_injected_as_a_user_turn() {
 #[tokio::test]
 async fn prompt_plugin_command_substitutes_arguments_and_uses_namespaced_trigger() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     // A namespaced trigger (a colliding bare name) is what the surface holds.
     app.plugin_commands = vec![prompt_command(
         "plugin:commit-commands:commit",
@@ -87,7 +88,7 @@ async fn prompt_plugin_command_substitutes_arguments_and_uses_namespaced_trigger
 #[tokio::test]
 async fn inline_plugin_command_reports_it_needs_the_plugin_host() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     app.plugin_commands = vec![inline_command("clean_gone", "clean_gone")];
 
     app.execute_slash_command("/clean_gone").await;
@@ -107,7 +108,7 @@ async fn inline_plugin_command_reports_it_needs_the_plugin_host() {
 #[tokio::test]
 async fn help_lists_plugin_commands() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     app.plugin_commands = vec![prompt_command("commit", "commit", "Commit.")];
 
     app.execute_slash_command("/help").await;

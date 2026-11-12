@@ -60,8 +60,8 @@ fn running_task(id: &str) -> TaskEntry {
 /// An app with an explicit redraw baseline of "clean".
 fn app() -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.needs_redraw = false;
     app
 }
@@ -69,7 +69,7 @@ fn app() -> App {
 /// Build an `App` with a live team, so the Teams window has a subject.
 fn app_with_team() -> App {
     let mut app = app();
-    app.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
+    app.session.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
     app
 }
 
@@ -239,17 +239,17 @@ async fn alt_a_and_alt_t_alternate_without_ever_showing_both() {
 #[tokio::test]
 async fn alt_t_does_not_insert_t_into_the_input() {
     let mut app = app_with_team();
-    app.input = "PROBE".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = "PROBE".to_string();
+    app.session.input_cursor = app.input_len_chars();
 
     app.handle_key_event(alt_t()).await;
 
     assert_eq!(
-        app.input, "PROBE",
+        app.session.input, "PROBE",
         "NFR-002: Alt+T must not leak the 't' into the input buffer"
     );
     assert_eq!(
-        app.input_cursor,
+        app.session.input_cursor,
         app.input_len_chars(),
         "the cursor must not move"
     );
@@ -264,7 +264,7 @@ async fn bare_t_still_types_t() {
         action.is_none(),
         "NFR-009: bare 't' is plain text, not the Teams chord"
     );
-    assert_eq!(app.input, "t", "NFR-009: bare 't' is still typed");
+    assert_eq!(app.session.input, "t", "NFR-009: bare 't' is still typed");
     assert!(
         !app.show_teams_window,
         "bare 't' must not open the Teams window"

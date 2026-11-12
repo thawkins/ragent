@@ -67,10 +67,10 @@ mod col {
 /// An app with the Teams window open on team `alpha`, holding `members`.
 fn open_teams(members: Vec<TeamMember>) -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
-    app.team_members = members;
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("alpha", LEAD_SESSION));
+    app.session.team_members = members;
     app.show_teams_window = true;
     app
 }
@@ -303,7 +303,7 @@ fn test_teams_teammate_rows_carry_connector_focus_marker_and_label() {
         member("reviewer", "tm-001", MemberStatus::Working),
         member("tester", "tm-002", MemberStatus::Idle),
     ]);
-    app.focused_teammate = Some("tm-001".to_string());
+    app.session.focused_teammate = Some("tm-001".to_string());
 
     let buffer = render(&mut app, 170, 44);
     let content = table_inner(app.teams_area);
@@ -486,7 +486,7 @@ fn test_teams_model_column_shows_override_or_inherited() {
         member("tester", "tm-002", MemberStatus::Idle),
     ]);
     // A different global model, so the override is genuinely its own.
-    app.selected_model = Some("openai/gpt-4o".to_string());
+    app.session.selected_model = Some("openai/gpt-4o".to_string());
 
     let buffer = render(&mut app, 170, 44);
     let content = table_inner(app.teams_area);
@@ -540,7 +540,7 @@ fn test_teams_model_column_suppresses_an_override_equal_to_the_global_model() {
         model_id: "claude-sonnet-4-20250514".to_string(),
     });
     let mut app = open_teams(vec![same]);
-    app.selected_model = Some("anthropic/claude-sonnet-4-20250514".to_string());
+    app.session.selected_model = Some("anthropic/claude-sonnet-4-20250514".to_string());
 
     let buffer = render(&mut app, 170, 44);
     let content = table_inner(app.teams_area);
@@ -572,8 +572,12 @@ fn test_teams_message_counters_render_dash_for_zero_and_colour_for_non_zero() {
         member("reviewer", "tm-001", MemberStatus::Working),
         member("tester", "tm-002", MemberStatus::Idle),
     ]);
-    app.team_message_counts.insert("tm-001".to_string(), (0, 0));
-    app.team_message_counts.insert("tm-002".to_string(), (4, 2));
+    app.session
+        .team_message_counts
+        .insert("tm-001".to_string(), (0, 0));
+    app.session
+        .team_message_counts
+        .insert("tm-002".to_string(), (4, 2));
 
     let buffer = render(&mut app, 170, 44);
     let content = table_inner(app.teams_area);
@@ -863,7 +867,7 @@ fn test_teams_suspended_row_paints_the_resume_glyph_in_place_of_stop() {
 fn test_teams_rows_truncate_multi_byte_text_on_character_boundaries() {
     let multibyte = "wörker-Ωmega-übermäßig-very-long-name";
     let mut app = open_teams(vec![member(multibyte, "tm-001", MemberStatus::Working)]);
-    app.agent_name = "gëneral-Ωmega-überlang".to_string();
+    app.session.agent_name = "gëneral-Ωmega-überlang".to_string();
 
     let buffer = render(&mut app, 170, 44);
     let content = table_inner(app.teams_area);

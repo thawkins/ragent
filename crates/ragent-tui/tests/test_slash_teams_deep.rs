@@ -51,7 +51,11 @@ async fn create_without_name_generates_slug_name() {
     let (_g, _e, _t, mut app) = team_app();
     app.execute_slash_command("/team create demo-blueprint")
         .await;
-    let team = app.active_team.as_ref().expect("active team must be set");
+    let team = app
+        .session
+        .active_team
+        .as_ref()
+        .expect("active team must be set");
     assert!(
         team.name.starts_with("demo-blueprint-"),
         "generated name should be slugified with a timestamp: {}",
@@ -65,7 +69,7 @@ async fn create_with_unsafe_name_is_rejected() {
     let (_g, _e, _t, mut app) = team_app();
     app.execute_slash_command("/team create bp1 ../escape")
         .await;
-    assert!(app.active_team.is_none(), "no team may be created");
+    assert!(app.session.active_team.is_none(), "no team may be created");
     assert_ne!(app.status, "ready", "status must name the rejection");
 }
 
@@ -84,14 +88,15 @@ async fn focus_without_active_team_is_refused() {
 async fn focus_unknown_teammate_reports_available() {
     let (_g, _e, _t, mut app) = team_app();
     create_team(&mut app, "focus-team").await;
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("alice", "tm-001", "general"));
 
     app.execute_slash_command("/team focus bob").await;
     let text = last_message(&app);
     assert!(text.contains("No teammate matching 'bob'"), "text: {text}");
     assert!(text.contains("alice"), "available list: {text}");
-    assert!(app.focused_teammate.is_none());
+    assert!(app.session.focused_teammate.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -100,10 +105,10 @@ async fn focus_single_match_focuses_teammate() {
     create_team(&mut app, "focus-team2").await;
     let mut alice = TeamMember::new("alice", "tm-001", "general");
     alice.status = MemberStatus::Working;
-    app.team_members.push(alice);
+    app.session.team_members.push(alice);
 
     app.execute_slash_command("/team focus alice").await;
-    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+    assert_eq!(app.session.focused_teammate.as_deref(), Some("tm-001"));
     let text = last_message(&app);
     assert!(text.contains("Focused on **alice**"), "text: {text}");
 }
@@ -112,13 +117,14 @@ async fn focus_single_match_focuses_teammate() {
 async fn focus_without_argument_clears_focus() {
     let (_g, _e, _t, mut app) = team_app();
     create_team(&mut app, "focus-team3").await;
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("alice", "tm-001", "general"));
-    app.focused_teammate = Some("tm-001".to_string());
+    app.session.focused_teammate = Some("tm-001".to_string());
 
     app.execute_slash_command("/team focus").await;
     assert_eq!(app.status, "team: focus cleared");
-    assert!(app.focused_teammate.is_none());
+    assert!(app.session.focused_teammate.is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +135,8 @@ async fn focus_without_argument_clears_focus() {
 async fn message_to_real_teammate_is_delivered() {
     let (_g, _e, _t, mut app) = team_app();
     create_team(&mut app, "msg-team").await;
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("alice", "tm-001", "general"));
 
     app.execute_slash_command("/team message alice please review")
@@ -154,11 +161,12 @@ async fn forcecleanup_without_confirm_opens_modal() {
     create_team(&mut app, "force-team").await;
     let mut alice = TeamMember::new("alice", "tm-001", "general");
     alice.status = MemberStatus::Working;
-    app.team_members.push(alice);
+    app.session.team_members.push(alice);
 
     app.execute_slash_command("/team forcecleanup").await;
     assert_eq!(app.status, "forcecleanup confirmation required");
     let pending = app
+        .session
         .pending_forcecleanup
         .as_ref()
         .expect("confirmation modal must be staged");
@@ -178,7 +186,7 @@ async fn forcecleanup_confirm_removes_team() {
     app.execute_slash_command("/team forcecleanup confirm")
         .await;
     assert_eq!(app.status, "team force cleaned up");
-    assert!(app.active_team.is_none());
+    assert!(app.session.active_team.is_none());
     assert!(!dir.exists(), "team dir must be removed");
     assert!(last_message(&app).contains("force cleaned up"));
 }
@@ -256,14 +264,18 @@ async fn inbox_help_renders_reference() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queue_list_with_entries_renders_rows() {
     let (_g, _e, _t, mut app) = team_app();
-    app.input_queue.push_back(ragent_tui::app::QueuedInput {
-        text: "first queued message".to_string(),
-        image_paths: Vec::new(),
-    });
-    app.input_queue.push_back(ragent_tui::app::QueuedInput {
-        text: "second queued message".to_string(),
-        image_paths: Vec::new(),
-    });
+    app.session
+        .input_queue
+        .push_back(ragent_tui::app::QueuedInput {
+            text: "first queued message".to_string(),
+            image_paths: Vec::new(),
+        });
+    app.session
+        .input_queue
+        .push_back(ragent_tui::app::QueuedInput {
+            text: "second queued message".to_string(),
+            image_paths: Vec::new(),
+        });
 
     app.execute_slash_command("/queue list").await;
     assert_eq!(app.status, "queue: 2 entries");
@@ -275,14 +287,16 @@ async fn queue_list_with_entries_renders_rows() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queue_clear_with_entries_empties_the_queue() {
     let (_g, _e, _t, mut app) = team_app();
-    app.input_queue.push_back(ragent_tui::app::QueuedInput {
-        text: "only entry".to_string(),
-        image_paths: Vec::new(),
-    });
+    app.session
+        .input_queue
+        .push_back(ragent_tui::app::QueuedInput {
+            text: "only entry".to_string(),
+            image_paths: Vec::new(),
+        });
 
     app.execute_slash_command("/queue clear").await;
     assert_eq!(app.status, "queue: cleared");
-    assert_eq!(app.input_queue.len(), 0);
+    assert_eq!(app.session.input_queue.len(), 0);
     assert!(last_message(&app).contains("Cleared 1 entry"));
 }
 
@@ -368,7 +382,7 @@ async fn config_help_show_list_and_usage() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn thinking_without_model_warns() {
     let (_g, _e, _t, mut app) = team_app();
-    app.selected_model = None;
+    app.session.selected_model = None;
     app.execute_slash_command("/thinking high").await;
     assert_eq!(
         app.status,

@@ -56,13 +56,13 @@ fn input_row_text(terminal: &Terminal<TestBackend>, app: &App) -> String {
 #[test]
 fn test_cursor_column_includes_prompt_prefix_without_counter() {
     let mut app = support::make_app();
-    app.input = "hi".to_string();
-    app.input_cursor = 2;
+    app.session.input = "hi".to_string();
+    app.session.input_cursor = 2;
 
     let _ = render(&mut app, 120, 40);
 
     assert_eq!(
-        app.input_render_cache.cursor_pos,
+        app.session.input_render_cache.cursor_pos,
         (0, 4),
         "`> ` (2) + `hi` (2) puts the cursor in column 4 (NFR-002)"
     );
@@ -71,14 +71,14 @@ fn test_cursor_column_includes_prompt_prefix_without_counter() {
 #[test]
 fn test_cursor_column_shifts_when_counter_is_shown() {
     let mut app = support::make_app();
-    app.input = "hi".to_string();
-    app.input_cursor = 2;
-    app.input_queue.push_back(entry("queued"));
+    app.session.input = "hi".to_string();
+    app.session.input_cursor = 2;
+    app.session.input_queue.push_back(entry("queued"));
 
     let terminal = render(&mut app, 120, 40);
 
     assert_eq!(
-        app.input_render_cache.cursor_pos,
+        app.session.input_render_cache.cursor_pos,
         (0, 6),
         "`01> ` (4) + `hi` (2) puts the cursor in column 6 (NFR-002)"
     );
@@ -92,16 +92,16 @@ fn test_cursor_column_shifts_when_counter_is_shown() {
 #[test]
 fn test_cursor_pos_matches_the_painted_counter_prefix() {
     let mut app = support::make_app();
-    app.input = "hi".to_string();
-    app.input_cursor = 2;
-    app.input_queue.push_back(entry("queued"));
+    app.session.input = "hi".to_string();
+    app.session.input_cursor = 2;
+    app.session.input_queue.push_back(entry("queued"));
 
     let terminal = render(&mut app, 120, 40);
 
     // The cursor column must land immediately after the last painted text
     // cell, so the character before it is the final input character.
     let area = app.input_area;
-    let (row, col) = app.input_render_cache.cursor_pos;
+    let (row, col) = app.session.input_render_cache.cursor_pos;
     assert_eq!(row, 0);
     let buffer = terminal.backend().buffer();
     let cursor_screen_col = area.x + 1 + col as u16;
@@ -115,9 +115,9 @@ fn test_cursor_pos_matches_the_painted_counter_prefix() {
 #[test]
 fn test_empty_input_cursor_sits_after_the_counter_prefix() {
     let mut app = support::make_app();
-    app.input.clear();
-    app.input_cursor = 0;
-    app.input_queue.push_back(entry("queued"));
+    app.session.input.clear();
+    app.session.input_cursor = 0;
+    app.session.input_queue.push_back(entry("queued"));
 
     let mut terminal = render(&mut app, 120, 40);
 
@@ -138,7 +138,7 @@ fn test_empty_input_cursor_sits_after_the_counter_prefix() {
 fn test_wrapped_height_accounts_for_the_wider_counter_prefix() {
     let mut app = support::make_app();
     // Render once with a placeholder to learn the resolved inner width.
-    app.input = "x".to_string();
+    app.session.input = "x".to_string();
     let _ = render(&mut app, 60, 40);
 
     let area = app.input_area;
@@ -149,15 +149,15 @@ fn test_wrapped_height_accounts_for_the_wider_counter_prefix() {
     // prefix but spills onto a second row once the four-column counter
     // prefix is present.
     let content_len = inner - 3;
-    app.input = "a".repeat(content_len);
-    app.input_cursor = content_len;
+    app.session.input = "a".repeat(content_len);
+    app.session.input_cursor = content_len;
 
     let _ = render(&mut app, 60, 40);
-    let height_without_counter = app.input_render_cache.height;
+    let height_without_counter = app.session.input_render_cache.height;
 
-    app.input_queue.push_back(entry("queued"));
+    app.session.input_queue.push_back(entry("queued"));
     let _ = render(&mut app, 60, 40);
-    let height_with_counter = app.input_render_cache.height;
+    let height_with_counter = app.session.input_render_cache.height;
 
     assert_eq!(
         height_with_counter,
@@ -169,15 +169,15 @@ fn test_wrapped_height_accounts_for_the_wider_counter_prefix() {
 #[test]
 fn test_render_cache_rebuilds_when_counter_appears() {
     let mut app = support::make_app();
-    app.input = "hello".to_string();
-    app.input_cursor = 5;
+    app.session.input = "hello".to_string();
+    app.session.input_cursor = 5;
 
     let _ = render(&mut app, 120, 40);
-    let pos_without_counter = app.input_render_cache.cursor_pos;
+    let pos_without_counter = app.session.input_render_cache.cursor_pos;
 
-    app.input_queue.push_back(entry("queued"));
+    app.session.input_queue.push_back(entry("queued"));
     let _ = render(&mut app, 120, 40);
-    let pos_with_counter = app.input_render_cache.cursor_pos;
+    let pos_with_counter = app.session.input_render_cache.cursor_pos;
 
     assert_ne!(
         pos_without_counter, pos_with_counter,
@@ -207,9 +207,9 @@ fn cut_menu() -> ContextMenuState {
 fn test_selection_maps_through_the_counter_prefix() {
     let mut app = support::make_app();
     app.input_area = Rect::new(0, 22, 40, 3);
-    app.input = "abcdef".to_string();
-    app.input_cursor = 6;
-    app.input_queue.push_back(entry("queued"));
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = 6;
+    app.session.input_queue.push_back(entry("queued"));
     // Painted first row is `01> abcdef`, so inner columns 6..8 are `c` and `d`.
     app.text_selection = Some(TextSelection {
         pane: SelectionPane::Input,
@@ -221,7 +221,7 @@ fn test_selection_maps_through_the_counter_prefix() {
     app.execute_context_action(ContextAction::Cut);
 
     assert_eq!(
-        app.input, "abef",
+        app.session.input, "abef",
         "cutting the counter-prefixed row must remove only `cd` (NFR-002)"
     );
 }
@@ -230,9 +230,9 @@ fn test_selection_maps_through_the_counter_prefix() {
 fn test_selection_over_counter_digits_is_not_message_content() {
     let mut app = support::make_app();
     app.input_area = Rect::new(0, 22, 40, 3);
-    app.input = "abcdef".to_string();
-    app.input_cursor = 6;
-    app.input_queue.push_back(entry("queued"));
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = 6;
+    app.session.input_queue.push_back(entry("queued"));
     // Select the entire `01> ` counter prefix (inner columns 0..4).
     app.text_selection = Some(TextSelection {
         pane: SelectionPane::Input,
@@ -244,7 +244,7 @@ fn test_selection_over_counter_digits_is_not_message_content() {
     app.execute_context_action(ContextAction::Cut);
 
     assert_eq!(
-        app.input, "abcdef",
+        app.session.input, "abcdef",
         "the queue counter is never selectable or cut as message content (FR-020)"
     );
 }

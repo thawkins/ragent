@@ -37,13 +37,13 @@ fn render_dialog_area(app: &mut ragent_tui::App) -> String {
 #[tokio::test]
 async fn test_alt_x_opens_stop_confirm_dialog_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
         .await;
 
     assert!(
-        app.pending_stop_confirm,
+        app.session.pending_stop_confirm,
         "Alt+X while processing should open the stop confirmation dialog"
     );
 
@@ -61,17 +61,17 @@ async fn test_alt_x_opens_stop_confirm_dialog_while_processing() {
 #[tokio::test]
 async fn test_alt_x_ignored_when_not_processing() {
     let mut app = support::make_app();
-    app.is_processing = false;
+    app.session.is_processing = false;
 
     app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
         .await;
 
     assert!(
-        !app.pending_stop_confirm,
+        !app.session.pending_stop_confirm,
         "Alt+X with no running turn should not open the dialog"
     );
     assert!(
-        !app.input.contains('x'),
+        !app.session.input.contains('x'),
         "Alt+X should never type an x into the input buffer"
     );
 }
@@ -79,19 +79,19 @@ async fn test_alt_x_ignored_when_not_processing() {
 #[tokio::test]
 async fn test_stop_confirm_yes_halts_agent() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    app.cancel_flag = Some(std::sync::Arc::clone(&cancel_flag));
+    app.session.cancel_flag = Some(std::sync::Arc::clone(&cancel_flag));
 
     app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
         .await;
-    assert!(app.pending_stop_confirm, "dialog open before Yes");
+    assert!(app.session.pending_stop_confirm, "dialog open before Yes");
 
     app.handle_key_event(key(KeyCode::Enter, KeyModifiers::NONE))
         .await;
 
     assert!(
-        !app.pending_stop_confirm,
+        !app.session.pending_stop_confirm,
         "the dialog should close after Yes"
     );
     assert!(
@@ -108,9 +108,9 @@ async fn test_stop_confirm_yes_halts_agent() {
 #[tokio::test]
 async fn test_stop_confirm_cancel_keeps_agent_running() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    app.cancel_flag = Some(std::sync::Arc::clone(&cancel_flag));
+    app.session.cancel_flag = Some(std::sync::Arc::clone(&cancel_flag));
 
     app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
         .await;
@@ -118,7 +118,7 @@ async fn test_stop_confirm_cancel_keeps_agent_running() {
         .await;
 
     assert!(
-        !app.pending_stop_confirm,
+        !app.session.pending_stop_confirm,
         "the dialog should close after Cancel"
     );
     assert!(
@@ -135,7 +135,7 @@ async fn test_stop_confirm_cancel_keeps_agent_running() {
 #[tokio::test]
 async fn test_stop_confirm_swallows_other_keys_until_resolved() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     app.handle_key_event(key(KeyCode::Char('x'), KeyModifiers::ALT))
         .await;
@@ -143,24 +143,27 @@ async fn test_stop_confirm_swallows_other_keys_until_resolved() {
     app.handle_key_event(key(KeyCode::Char('q'), KeyModifiers::NONE))
         .await;
     assert!(
-        app.pending_stop_confirm,
+        app.session.pending_stop_confirm,
         "an unrelated key must not dismiss or confirm the dialog"
     );
     assert!(
-        !app.input.contains('q'),
+        !app.session.input.contains('q'),
         "modal keys must not leak into the input buffer"
     );
 
     // Cancel closes it again.
     app.handle_key_event(key(KeyCode::Esc, KeyModifiers::NONE))
         .await;
-    assert!(!app.pending_stop_confirm, "Esc dismisses the dialog");
+    assert!(
+        !app.session.pending_stop_confirm,
+        "Esc dismisses the dialog"
+    );
 }
 
 #[tokio::test]
 async fn test_stop_confirm_not_opened_while_another_modal_is_up() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
     // The memory-delete modal outranks the stop dialog inside `handle_key`:
     // with the memory modal open, Alt+X must not clobber it.
     app.pending_memory_delete = Some(ragent_tui::app::PendingMemoryDelete {
@@ -172,7 +175,7 @@ async fn test_stop_confirm_not_opened_while_another_modal_is_up() {
         .await;
 
     assert!(
-        !app.pending_stop_confirm,
+        !app.session.pending_stop_confirm,
         "the stop dialog must not open on top of the memory delete modal"
     );
     assert!(

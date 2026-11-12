@@ -81,7 +81,7 @@ fn render_message_area(app: &mut App, area: Rect) -> Vec<String> {
 fn test_bottom_pinned_view_shows_last_message_with_wrapping() {
     let mut app = make_app();
     for msg in long_and_tail_messages() {
-        app.messages.push(msg);
+        app.session.messages.push(msg);
     }
 
     // Pane: 40 columns x 10 rows -> inner width 38, 8 visible rows.
@@ -91,14 +91,14 @@ fn test_bottom_pinned_view_shows_last_message_with_wrapping() {
     // The long word must have produced overflow so the pinned path is
     // actually exercised.
     assert!(
-        app.message_max_scroll > 0,
+        app.session.message_max_scroll > 0,
         "content should overflow the pane, max_scroll={}",
-        app.message_max_scroll
+        app.session.message_max_scroll
     );
 
     // With scroll_offset == 0 (bottom-pinned) the tail marker of the last
     // message must be visible in the rendered output.
-    app.scroll_offset = 0;
+    app.session.scroll_offset = 0;
     let rows = render_message_area(&mut app, area);
     let joined = rows.join("\n");
     assert!(
@@ -110,13 +110,13 @@ fn test_bottom_pinned_view_shows_last_message_with_wrapping() {
 #[test]
 fn test_wrapped_rows_never_exceed_inner_width() {
     let mut app = make_app();
-    app.messages = long_and_tail_messages();
+    app.session.messages = long_and_tail_messages();
 
     let area = Rect::new(0, 0, 40, 10);
     render_message_area(&mut app, area);
 
     let inner_width = (area.width - 2) as usize;
-    for (i, group) in app.message_line_cache.iter().enumerate() {
+    for (i, group) in app.session.message_line_cache.iter().enumerate() {
         for (j, row) in group.wrapped_lines.iter().enumerate() {
             let width: usize = row.spans.iter().map(|s| s.content.width()).sum();
             assert!(
@@ -135,14 +135,14 @@ fn test_wrapped_rows_never_exceed_inner_width() {
 #[test]
 fn test_scroll_to_top_still_reaches_first_message() {
     let mut app = make_app();
-    app.messages = long_and_tail_messages();
+    app.session.messages = long_and_tail_messages();
 
     let area = Rect::new(0, 0, 40, 10);
     render_message_area(&mut app, area);
 
-    let max_scroll = app.message_max_scroll;
+    let max_scroll = app.session.message_max_scroll;
     assert!(max_scroll > 0);
-    app.scroll_offset = max_scroll;
+    app.session.scroll_offset = max_scroll;
     let rows = render_message_area(&mut app, area);
     let joined = rows.join("\n");
     assert!(
@@ -154,20 +154,20 @@ fn test_scroll_to_top_still_reaches_first_message() {
 #[test]
 fn test_appended_message_becomes_visible_while_pinned() {
     let mut app = make_app();
-    app.messages = long_and_tail_messages();
+    app.session.messages = long_and_tail_messages();
 
     let area = Rect::new(0, 0, 40, 10);
     render_message_area(&mut app, area);
 
     // A new message arrives while the view is bottom-pinned.
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "session-pinning",
         Role::Assistant,
         vec![MessagePart::Text {
             text: "APPENDED-VISIBLE-MARKER".to_string(),
         }],
     ));
-    app.scroll_offset = 0;
+    app.session.scroll_offset = 0;
     let rows = render_message_area(&mut app, area);
     let joined = rows.join("\n");
     assert!(
@@ -205,7 +205,7 @@ fn test_wrap_row_counts_match_paragraph_line_count() {
 
     for sample in &samples {
         let mut app = make_app();
-        app.messages.push(Message::new(
+        app.session.messages.push(Message::new(
             "session-parity",
             Role::Assistant,
             vec![MessagePart::Text {
@@ -219,7 +219,7 @@ fn test_wrap_row_counts_match_paragraph_line_count() {
             let area = Rect::new(0, 0, pane_width, 400);
             render_message_area(&mut app, area);
 
-            let group = &app.message_line_cache[0];
+            let group = &app.session.message_line_cache[0];
             let para = ratatui::widgets::Paragraph::new(group.lines.clone())
                 .wrap(ratatui::widgets::Wrap { trim: false });
             let expected = para.line_count(pane_width - 2);
@@ -258,14 +258,14 @@ fn test_pinned_tail_not_shifted_by_whitespace_only_rows() {
         "intro\n  \ntrailing-spaces-line{}        \n  \nmid content A\n  \nmid content B\n  \nTAIL-MARKER",
         "x".repeat(30)
     );
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "session-pinning",
         Role::User,
         vec![MessagePart::Text {
             text: "question".to_string(),
         }],
     ));
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "session-pinning",
         Role::Assistant,
         vec![MessagePart::Text { text }],
@@ -274,7 +274,7 @@ fn test_pinned_tail_not_shifted_by_whitespace_only_rows() {
     // Pane: 40 columns x 10 rows -> inner width 38, 8 visible rows.
     let area = Rect::new(0, 0, 40, 10);
 
-    app.scroll_offset = 0;
+    app.session.scroll_offset = 0;
     let rows = render_message_area(&mut app, area);
     let joined = rows.join("\n");
     assert!(
@@ -288,6 +288,7 @@ fn test_pinned_tail_not_shifted_by_whitespace_only_rows() {
     // extra blank row and the bottom of the window lost the tail rows.
     let visible = (area.height - 2) as usize;
     let cached: Vec<String> = app
+        .session
         .message_line_cache
         .iter()
         .flat_map(|g| g.wrapped_lines.iter())
@@ -325,14 +326,14 @@ fn test_pinned_tail_not_shifted_by_whitespace_only_rows() {
     }
 
     // And appending a message while pinned must surface it immediately.
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "session-pinning",
         Role::Assistant,
         vec![MessagePart::Text {
             text: "APPENDED-VISIBLE-MARKER-2".to_string(),
         }],
     ));
-    app.scroll_offset = 0;
+    app.session.scroll_offset = 0;
     let rows = render_message_area(&mut app, area);
     let joined = rows.join("\n");
     assert!(

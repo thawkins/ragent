@@ -384,9 +384,12 @@ async fn select_thinking_level_enter_finalises_the_model() {
         ProviderSetupStep::Done { model_name, .. } => assert!(model_name.is_some()),
         other => panic!("expected Done, got {other:?}"),
     }
-    assert_eq!(app.selected_thinking_level, Some(ThinkingLevel::High));
     assert_eq!(
-        app.selected_model.as_deref(),
+        app.session.selected_thinking_level,
+        Some(ThinkingLevel::High)
+    );
+    assert_eq!(
+        app.session.selected_model.as_deref(),
         Some("anthropic/claude-x"),
         "the selected model is persisted"
     );
@@ -947,24 +950,27 @@ async fn input_ladder_history_recall_walks_the_entries() {
     app.input_history = vec!["first".to_string(), "second".to_string()];
 
     app.handle_key_event(key(KeyCode::Up)).await;
-    assert_eq!(app.input, "second");
-    assert_eq!(app.history_index, Some(1));
+    assert_eq!(app.session.input, "second");
+    assert_eq!(app.session.history_index, Some(1));
 
     app.handle_key_event(key(KeyCode::Up)).await;
-    assert_eq!(app.input, "first");
-    assert_eq!(app.history_index, Some(0));
+    assert_eq!(app.session.input, "first");
+    assert_eq!(app.session.history_index, Some(0));
 
     app.handle_key_event(key(KeyCode::Up)).await;
-    assert_eq!(app.input, "first", "Up at the oldest entry is a no-op");
+    assert_eq!(
+        app.session.input, "first",
+        "Up at the oldest entry is a no-op"
+    );
 
     app.handle_key_event(key(KeyCode::Down)).await;
-    assert_eq!(app.input, "second");
+    assert_eq!(app.session.input, "second");
     app.handle_key_event(key(KeyCode::Down)).await;
     assert_eq!(
-        app.history_index, None,
+        app.session.history_index, None,
         "past the newest entry restores the draft"
     );
-    assert_eq!(app.input.len(), 0);
+    assert_eq!(app.session.input.len(), 0);
 }
 
 #[tokio::test]
@@ -983,19 +989,19 @@ async fn input_ladder_page_and_delete_keys_map_to_actions() {
         Some(InputAction::LogScrollUp)
     ));
     // Delete is applied in place (no InputAction) rather than dispatched.
-    app.input = "abc".to_string();
-    app.input_cursor = 0;
+    app.session.input = "abc".to_string();
+    app.session.input_cursor = 0;
     assert!(handle_key(&mut app, key(KeyCode::Delete)).await.is_none());
     assert_eq!(
-        app.input, "bc",
+        app.session.input, "bc",
         "Delete removes the character at the cursor"
     );
     assert!(matches!(
         handle_key(&mut app, key(KeyCode::Tab)).await,
         Some(InputAction::SwitchAgent)
     ));
-    app.input.clear();
-    app.input_cursor = 0;
+    app.session.input.clear();
+    app.session.input_cursor = 0;
     assert!(
         handle_key(&mut app, key(KeyCode::Enter)).await.is_none(),
         "Enter on an empty buffer sends nothing"
@@ -1005,16 +1011,16 @@ async fn input_ladder_page_and_delete_keys_map_to_actions() {
 #[tokio::test]
 async fn input_ladder_slash_and_bang_prefixes_select_the_action() {
     let mut app = support::make_app();
-    app.input = "/help".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "/help".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     assert!(matches!(
         handle_key(&mut app, key(KeyCode::Enter)).await,
         Some(InputAction::SlashCommand(_))
     ));
 
     let mut app = support::make_app();
-    app.input = "! ls".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "! ls".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     assert!(matches!(
         handle_key(&mut app, key(KeyCode::Enter)).await,
         Some(InputAction::BangCommand(_))
@@ -1030,9 +1036,9 @@ fn mouse_wheel_scrolls_the_messages_pane() {
     let mut app = support::make_app();
     app.message_area = Rect::new(0, 1, 80, 20);
     app.handle_mouse_event(mouse(MouseEventKind::ScrollUp, 5, 5));
-    assert_eq!(app.scroll_offset, 3);
+    assert_eq!(app.session.scroll_offset, 3);
     app.handle_mouse_event(mouse(MouseEventKind::ScrollDown, 5, 5));
-    assert_eq!(app.scroll_offset, 0);
+    assert_eq!(app.session.scroll_offset, 0);
 }
 
 #[test]
@@ -1065,7 +1071,10 @@ fn mouse_wheel_scrolls_every_side_panel() {
         app.handle_mouse_event(mouse(MouseEventKind::ScrollUp, column, row));
         app.handle_mouse_event(mouse(MouseEventKind::ScrollDown, column, row));
     }
-    assert_eq!(app.scroll_offset, 0, "the message pane never scrolled");
+    assert_eq!(
+        app.session.scroll_offset, 0,
+        "the message pane never scrolled"
+    );
 }
 
 #[test]
@@ -1074,7 +1083,7 @@ fn mouse_wheel_over_the_input_pane_is_a_noop() {
     app.input_area = Rect::new(0, 40, 80, 3);
     app.handle_mouse_event(mouse(MouseEventKind::ScrollUp, 5, 41));
     app.handle_mouse_event(mouse(MouseEventKind::ScrollDown, 5, 41));
-    assert_eq!(app.scroll_offset, 0);
+    assert_eq!(app.session.scroll_offset, 0);
 }
 
 // ===========================================================================
@@ -1175,8 +1184,8 @@ fn context_menu_copy_row_copies_the_selected_log_text() {
 fn context_menu_cut_row_from_the_input_pane_removes_the_range() {
     let mut app = support::make_app();
     app.input_area = Rect::new(0, 40, 40, 3);
-    app.input = "abcdef".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     // Inner origin is (1, 41); the painted prefix is "> ", so columns 5..6
     // address "cd".
     app.text_selection = Some(TextSelection {
@@ -1194,7 +1203,7 @@ fn context_menu_cut_row_from_the_input_pane_removes_the_range() {
 
     app.handle_mouse_event(mouse(MouseEventKind::Down(MouseButton::Left), 3, 3));
     assert!(app.context_menu.is_none());
-    assert_eq!(app.input, "abef");
+    assert_eq!(app.session.input, "abef");
     assert!(app.text_selection.is_none(), "Cut consumes the selection");
 }
 

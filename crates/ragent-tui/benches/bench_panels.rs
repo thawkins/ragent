@@ -144,10 +144,10 @@ fn bench_message_list(c: &mut Criterion) {
             let messages = build_messages(n, session_id);
             b.iter(|| {
                 let mut app = make_app();
-                app.session_id = Some(session_id.to_string());
-                app.messages = messages.clone();
-                app.message_line_cache.clear();
-                app.message_cache_width = 0; // force re-wrap
+                app.session.session_id = Some(session_id.to_string());
+                app.session.messages = messages.clone();
+                app.session.message_line_cache.clear();
+                app.session.message_cache_width = 0; // force re-wrap
 
                 let backend = TestBackend::new(120, 40);
                 let mut terminal = Terminal::new(backend).expect("test terminal");
@@ -164,8 +164,8 @@ fn bench_message_list(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("warm", count), &count, |b, &n| {
             let messages = build_messages(n, session_id);
             let mut app = make_app();
-            app.session_id = Some(session_id.to_string());
-            app.messages = messages;
+            app.session.session_id = Some(session_id.to_string());
+            app.session.messages = messages;
 
             // Prime the cache with one render.
             {
@@ -208,7 +208,7 @@ fn bench_active_agents(c: &mut Criterion) {
             let tasks = build_active_tasks(n, session_id);
             b.iter(|| {
                 let mut app = make_app();
-                app.session_id = Some(session_id.to_string());
+                app.session.session_id = Some(session_id.to_string());
                 app.active_tasks = tasks.clone();
                 // Invalidate caches so they are rebuilt.
                 app.active_agents_custom_names_version = usize::MAX;
@@ -229,7 +229,7 @@ fn bench_active_agents(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("warm", count), &count, |b, &n| {
             let tasks = build_active_tasks(n, session_id);
             let mut app = make_app();
-            app.session_id = Some(session_id.to_string());
+            app.session.session_id = Some(session_id.to_string());
             app.active_tasks = tasks;
 
             // Prime the caches with one render.
@@ -273,11 +273,11 @@ fn bench_teams_panel(c: &mut Criterion) {
             let members = build_team_members(n);
             b.iter(|| {
                 let mut app = make_app();
-                app.session_id = Some(session_id.to_string());
-                app.active_team = Some(TeamConfig::new("bench-team", session_id));
-                app.team_members = members.clone();
-                app.team_task_counts_dirty = true;
-                app.lead_session_created_at = Some(chrono::Utc::now());
+                app.session.session_id = Some(session_id.to_string());
+                app.session.active_team = Some(TeamConfig::new("bench-team", session_id));
+                app.session.team_members = members.clone();
+                app.session.team_task_counts_dirty = true;
+                app.session.lead_session_created_at = Some(chrono::Utc::now());
 
                 let backend = TestBackend::new(160, 24);
                 let mut terminal = Terminal::new(backend).expect("test terminal");
@@ -295,10 +295,10 @@ fn bench_teams_panel(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("warm", count), &count, |b, &n| {
             let members = build_team_members(n);
             let mut app = make_app();
-            app.session_id = Some(session_id.to_string());
-            app.active_team = Some(TeamConfig::new("bench-team", session_id));
-            app.team_members = members;
-            app.lead_session_created_at = Some(chrono::Utc::now());
+            app.session.session_id = Some(session_id.to_string());
+            app.session.active_team = Some(TeamConfig::new("bench-team", session_id));
+            app.session.team_members = members;
+            app.session.lead_session_created_at = Some(chrono::Utc::now());
 
             // Prime caches with one render.
             {
@@ -341,8 +341,8 @@ fn bench_idle_render(c: &mut Criterion) {
     let mut decision_group = c.benchmark_group("idle_should_render");
     {
         let mut app = make_app();
-        app.session_id = Some(session_id.to_string());
-        app.messages = build_messages(500, session_id);
+        app.session.session_id = Some(session_id.to_string());
+        app.session.messages = build_messages(500, session_id);
         app.needs_redraw = false;
         let last_draw = std::time::Instant::now();
         decision_group.bench_function("idle_500", |b| {
@@ -360,10 +360,10 @@ fn bench_idle_render(c: &mut Criterion) {
     let mut render_group = c.benchmark_group("idle_full_frame");
     for &count in &[100, 500] {
         let mut app = make_app();
-        app.session_id = Some(session_id.to_string());
-        app.messages = build_messages(count, session_id);
-        app.input = "a long-ish draft prompt that stays unchanged".to_string();
-        app.input_cursor = app.input.chars().count();
+        app.session.session_id = Some(session_id.to_string());
+        app.session.messages = build_messages(count, session_id);
+        app.session.input = "a long-ish draft prompt that stays unchanged".to_string();
+        app.session.input_cursor = app.session.input.chars().count();
 
         // Prime every cache (messages, input, status bar).
         {

@@ -395,7 +395,7 @@ async fn printable_keys_edit_the_query_while_the_navigator_is_focused() {
 #[tokio::test]
 async fn the_panel_keys_never_touch_the_message_input_or_the_queue() {
     let mut app = open();
-    app.input = "draft".to_string();
+    app.session.input = "draft".to_string();
 
     for code in [
         KeyCode::Tab,
@@ -409,5 +409,5 @@ async fn the_panel_keys_never_touch_the_message_input_or_the_queue() {
 
     // The input buffer and the panel state are disjoint: no panel key reaches the
     // message input (FR-007, FR-024).
-    assert_eq!(app.input, "draft", "the draft is untouched");
+    assert_eq!(app.session.input, "draft", "the draft is untouched");
 }

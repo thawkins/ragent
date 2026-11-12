@@ -138,7 +138,7 @@ fn test_statusbar_hides_indicators_when_idle() {
 #[test]
 fn test_poll_codeindex_bg_result_drains_completion() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.code_index_graph_spawned = true;
     app.status = "[wait] codeindex: building graph…".to_string();
 
@@ -160,7 +160,7 @@ fn test_poll_codeindex_bg_result_drains_completion() {
     );
     // The rendered message window is repopulated on each render pass.
     let _frame = render_app_to_string(&mut app);
-    let window = app.message_content_lines.join("\n");
+    let window = app.session.message_content_lines.join("\n");
     assert!(
         window.contains("Graph built: 42 edges"),
         "message window must show the completion message; got: {window}"
@@ -170,7 +170,7 @@ fn test_poll_codeindex_bg_result_drains_completion() {
 #[test]
 fn test_poll_codeindex_bg_result_reports_error() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.code_index_reindex_spawned = true;
     {
         let mut guard = app.code_index_bg_result.lock().unwrap();
@@ -187,7 +187,7 @@ fn test_poll_codeindex_bg_result_reports_error() {
     );
     // The rendered message window is repopulated on each render pass.
     let _frame = render_app_to_string(&mut app);
-    let window = app.message_content_lines.join("\n");
+    let window = app.session.message_content_lines.join("\n");
     assert!(
         window.contains("Re-index failed"),
         "message window must show the error; got: {window}"
