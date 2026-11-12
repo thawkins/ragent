@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed - clarification gate ignores markers inside code
+
+- The `approved` gate no longer counts `[NEEDS CLARIFICATION: ...]` text
+  inside inline code spans or fenced code blocks. A spec that quotes the
+  marker syntax as an example can now be approved. `reqeng` is now
+  `implemented` (#63).
+
 ### Changed - spec statuses match finished work
 
 - 47 specs whose PLAN tasks are all `completed` moved from `draft` to
@@ -9,8 +16,6 @@
   (`in_review`, `approved`, `in_progress`, `implemented`) is in the spec's
   audit trail. The Phase -1 gate was off for this backfill: it guards the
   start of implementation, and this work was already finished (SPEC-01).
-- `reqeng` stays at `in_review`: the clarification gate counts the
-  `[NEEDS CLARIFICATION]` syntax its own spec documents as an open marker.
 
 ### Fixed - research per-phase models are used
 

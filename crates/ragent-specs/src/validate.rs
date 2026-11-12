@@ -528,7 +528,10 @@ pub struct ClarificationMarker {
 /// Detect all `[NEEDS CLARIFICATION: <question>]` markers in SPEC.md content.
 ///
 /// Matching is case-insensitive. Each marker is returned with its 1-based
-/// line number and the captured question text. Markers are **not** reported
+/// line number and the captured question text. Text inside Markdown code -
+/// fenced blocks (```` ``` ```` / `~~~`) and inline code spans - is skipped,
+/// so a spec can quote the marker syntax as an example without blocking its
+/// own approval (#63). Markers are **not** reported
 /// as validation errors by this function - callers (e.g. T-008) decide
 /// whether to add them to the [`Report`].
 ///
@@ -544,15 +547,136 @@ pub struct ClarificationMarker {
 /// ```
 pub fn detect_clarification_markers(content: &str) -> Vec<ClarificationMarker> {
     let mut markers = Vec::new();
+    // Open fence as (fence char, run length); a closing fence uses the same
+    // char with at least the same length and nothing but whitespace after it
+    // (CommonMark).
+    let mut fence: Option<(u8, usize)> = None;
+    // Lines of the current paragraph as (1-based line number, text). Inline
+    // code spans may continue across soft line breaks, so spans are computed
+    // over the whole paragraph rather than line by line.
+    let mut paragraph: Vec<(usize, &str)> = Vec::new();
     for (i, line) in content.lines().enumerate() {
-        for caps in RE_NEEDS_CLARIFICATION.captures_iter(line) {
+        if let Some((open_ch, open_len)) = fence {
+            if let Some((ch, len, rest)) = fence_run(line)
+                && ch == open_ch
+                && len >= open_len
+                && rest.trim().is_empty()
+            {
+                fence = None;
+            }
+            continue;
+        }
+        if let Some((ch, len, rest)) = fence_run(line)
+            && (ch == b'~' || !rest.contains('`'))
+        {
+            scan_paragraph(&paragraph, &mut markers);
+            paragraph.clear();
+            fence = Some((ch, len));
+            continue;
+        }
+        if line.trim().is_empty() {
+            scan_paragraph(&paragraph, &mut markers);
+            paragraph.clear();
+            continue;
+        }
+        paragraph.push((i + 1, line));
+    }
+    scan_paragraph(&paragraph, &mut markers);
+    markers
+}
+
+/// Append the markers in `paragraph` that are not inside an inline code
+/// span. Spans are found over the paragraph's lines joined by `\n`, and each
+/// match keeps its source line number.
+fn scan_paragraph(paragraph: &[(usize, &str)], markers: &mut Vec<ClarificationMarker>) {
+    if paragraph.is_empty() {
+        return;
+    }
+    let joined = paragraph
+        .iter()
+        .map(|&(_, text)| text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let spans = inline_code_spans(&joined);
+    let mut offset = 0;
+    for &(line_no, text) in paragraph {
+        for caps in RE_NEEDS_CLARIFICATION.captures_iter(text) {
+            let start = offset + caps.get(0).map_or(0, |m| m.start());
+            if spans.iter().any(|&(s, e)| start >= s && start < e) {
+                continue;
+            }
             markers.push(ClarificationMarker {
-                line: i + 1,
+                line: line_no,
                 question: caps[1].trim().to_string(),
             });
         }
+        offset += text.len() + 1;
     }
-    markers
+}
+
+/// If `line` is a Markdown code-fence line (up to three spaces of indent,
+/// then three or more backticks or tildes), return the fence char, run
+/// length and the text after the run.
+fn fence_run(line: &str) -> Option<(u8, usize, &str)> {
+    let indent = line.len() - line.trim_start_matches(' ').len();
+    if indent > 3 {
+        return None;
+    }
+    let rest = &line[indent..];
+    let ch = *rest.as_bytes().first()?;
+    if ch != b'`' && ch != b'~' {
+        return None;
+    }
+    let len = rest.bytes().take_while(|&b| b == ch).count();
+    (len >= 3).then(|| (ch, len, &rest[len..]))
+}
+
+/// Byte ranges of the inline code spans in `text`.
+///
+/// A span opens with a run of N backticks and closes at the next run of
+/// exactly N backticks; an opening run with no matching close is literal
+/// text, so it hides nothing. A backtick preceded by an odd number of
+/// backslashes is escaped and cannot open a span; inside a span,
+/// backslashes are literal.
+fn inline_code_spans(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let run_at = |pos: usize| bytes[pos..].iter().take_while(|&&b| b == b'`').count();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let backslashes = bytes[..i].iter().rev().take_while(|&&b| b == b'\\').count();
+        if backslashes % 2 == 1 {
+            i += 1;
+            continue;
+        }
+        let open = run_at(i);
+        let mut j = i + open;
+        let mut close = None;
+        while j < bytes.len() {
+            if bytes[j] == b'`' {
+                let run = run_at(j);
+                if run == open {
+                    close = Some(j + run);
+                    break;
+                }
+                j += run;
+            } else {
+                j += 1;
+            }
+        }
+        match close {
+            Some(end) => {
+                spans.push((i, end));
+                i = end;
+            }
+            None => i += open,
+        }
+    }
+    spans
 }
 
 // -- Ambiguity detection (T-026, FR-015) -------------------------------------
