@@ -22,9 +22,9 @@ pub mod serializer;
 
 pub use estimator::{
     CHARS_PER_TOKEN, IMAGE_TOKEN_ESTIMATE, MESSAGE_OVERHEAD_TOKENS, TriggerDecision,
-    compaction_threshold, effective_request_tokens, estimate_chat_request_tokens,
-    estimate_message_tokens, estimate_request_tokens, estimate_text_tokens, estimate_tool_tokens,
-    evaluate_trigger, publish_compaction_started,
+    anchored_request_tokens, compaction_threshold, effective_request_tokens,
+    estimate_chat_request_tokens, estimate_message_tokens, estimate_request_tokens,
+    estimate_text_tokens, estimate_tool_tokens, evaluate_trigger, publish_compaction_started,
 };
 pub use prompt::build_prompt;
 pub use runner::{

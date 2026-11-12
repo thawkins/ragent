@@ -1359,13 +1359,18 @@ impl SessionProcessor {
                             input_tokens,
                             output_tokens,
                         } => {
-                            last_input_tokens = input_tokens;
                             last_output_tokens = output_tokens;
-                            // Persist the provider-reported input tokens in the
-                            // per-session state cache so the next turn's start-of-turn
-                            // compaction check can use the same usage value shown in
-                            // the TUI status bar instead of resetting to zero.
-                            {
+                            // Anthropic and Bedrock emit a second, output-only
+                            // usage event (`message_delta`) carrying
+                            // `input_tokens: 0`. A zero input count means "not
+                            // reported in this event", so it must not overwrite
+                            // the real count from `message_start`.
+                            if input_tokens > 0 {
+                                last_input_tokens = input_tokens;
+                                // Persist the provider-reported input tokens in the
+                                // per-session state cache so the next turn's
+                                // start-of-turn compaction check can use the same
+                                // usage value shown in the TUI status bar.
                                 let session_state_lock = self
                                     .session_manager
                                     .as_ref()

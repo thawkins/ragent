@@ -363,6 +363,41 @@ pub fn effective_request_tokens(estimated_tokens: usize, last_reported_input_tok
     }
 }
 
+/// Bring a provider-reported input token count up to date for the next request.
+///
+/// The provider's `input_tokens` describes the *previous* request. Before the
+/// next request the history has grown by the assistant reply and any tool
+/// results, which the stale count does not include. This adds that growth,
+/// measured with the local estimator, on top of the exact provider count.
+///
+/// # Arguments
+///
+/// * `reported_tokens` - provider-reported `input_tokens` of the last request
+///   (`0` when unavailable).
+/// * `anchor_estimate` - local estimate of that same last request, or `None`
+///   when it is unknown (start of a turn, or right after compaction replaced
+///   the history).
+/// * `current_estimate` - local estimate of the request about to be sent.
+///
+/// # Returns
+///
+/// `reported_tokens + (current_estimate - anchor_estimate)` when the anchor is
+/// known; otherwise the larger of `reported_tokens` and `current_estimate`, so
+/// growth the provider has not seen yet is never ignored.
+#[must_use]
+pub fn anchored_request_tokens(
+    reported_tokens: u64,
+    anchor_estimate: Option<usize>,
+    current_estimate: usize,
+) -> u64 {
+    match anchor_estimate {
+        Some(anchor) if reported_tokens > 0 => {
+            reported_tokens + current_estimate.saturating_sub(anchor) as u64
+        }
+        Some(_) | None => reported_tokens.max(current_estimate as u64),
+    }
+}
+
 /// Compute the compaction threshold (FR-003) with a 70 % usage floor.
 ///
 /// When `config.threshold` is set (a fraction such as `0.8` for 80%), the
