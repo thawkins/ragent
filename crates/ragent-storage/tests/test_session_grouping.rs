@@ -230,3 +230,158 @@ fn test_session_grouping_migrates_a_v3_database() {
         .expect("version");
     assert_eq!(version, ragent_storage::SCHEMA_VERSION.to_string());
 }
+
+#[test]
+fn test_session_grouping_children_record_parent_and_kind() {
+    use ragent_storage::SessionKind;
+    let storage = Storage::open_in_memory().expect("storage");
+    storage
+        .create_session("lead", "/nonexistent/kids")
+        .expect("lead");
+    storage
+        .create_session_with(
+            "sub",
+            "/nonexistent/kids",
+            Some("lead"),
+            SessionKind::Subagent,
+        )
+        .expect("sub");
+    storage
+        .create_session_with(
+            "mate",
+            "/nonexistent/kids",
+            Some("lead"),
+            SessionKind::Teammate,
+        )
+        .expect("mate");
+    storage
+        .create_session_with("run", "/nonexistent/kids", None, SessionKind::Automation)
+        .expect("automation run");
+
+    let children: Vec<String> = storage
+        .list_child_sessions("lead")
+        .expect("children")
+        .into_iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(children, vec!["sub".to_string(), "mate".to_string()]);
+    let sub = storage.get_session("sub").expect("get").expect("row");
+    assert_eq!(sub.parent_id.as_deref(), Some("lead"));
+    assert_eq!(
+        storage.session_kind("mate").expect("kind"),
+        Some(SessionKind::Teammate)
+    );
+    assert_eq!(
+        storage.session_kind("lead").expect("kind"),
+        Some(SessionKind::Interactive)
+    );
+
+    let listed: Vec<String> = storage
+        .list_sessions_grouped()
+        .expect("grouped")
+        .into_iter()
+        .flat_map(|g| g.sessions.into_iter().map(|s| s.id))
+        .collect();
+    assert_eq!(
+        listed,
+        vec!["lead".to_string()],
+        "children and automation runs are not top-level sessions"
+    );
+}
+
+#[test]
+fn test_session_grouping_child_of_missing_parent_keeps_the_link() {
+    use ragent_storage::SessionKind;
+    let storage = Storage::open_in_memory().expect("storage");
+    storage
+        .create_session_with(
+            "orphan",
+            "/nonexistent/o",
+            Some("gone"),
+            SessionKind::Teammate,
+        )
+        .expect("a missing parent does not stop the child");
+    let row = storage.get_session("orphan").expect("get").expect("row");
+    assert_eq!(row.parent_id.as_deref(), Some("gone"));
+}
+
+#[test]
+fn test_session_grouping_archive_takes_the_whole_tree() {
+    use ragent_storage::SessionKind;
+    let storage = Storage::open_in_memory().expect("storage");
+    storage
+        .create_session("root", "/nonexistent/tree")
+        .expect("root");
+    storage
+        .create_session_with(
+            "child",
+            "/nonexistent/tree",
+            Some("root"),
+            SessionKind::Subagent,
+        )
+        .expect("child");
+    storage
+        .create_session_with(
+            "grandchild",
+            "/nonexistent/tree",
+            Some("child"),
+            SessionKind::Subagent,
+        )
+        .expect("grandchild");
+    storage
+        .create_session("other", "/nonexistent/tree")
+        .expect("other");
+
+    storage.archive_session("root").expect("archive");
+    let archived: Vec<String> = storage
+        .list_archived_sessions()
+        .expect("archived")
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    for id in ["root", "child", "grandchild"] {
+        assert!(
+            archived.contains(&id.to_string()),
+            "{id} archived with root"
+        );
+    }
+    assert!(!archived.contains(&"other".to_string()));
+
+    storage.unarchive_session("root").expect("unarchive");
+    assert!(
+        storage
+            .list_archived_sessions()
+            .expect("archived")
+            .is_empty()
+    );
+    assert_eq!(storage.list_child_sessions("child").expect("kids").len(), 1);
+}
+
+/// A v4 database (no `kind` column) migrates: the column appears with every
+/// existing session read as interactive.
+#[test]
+fn test_session_grouping_migrates_a_v4_database() {
+    let path = fixture_dir("migrate_v4_db").join("ragent.db");
+    {
+        let storage = Storage::open(&path).expect("open");
+        storage
+            .create_session("old", "/nonexistent/v4")
+            .expect("session");
+        let guard = storage.conn_lock_for_test().expect("lock");
+        guard
+            .execute_batch(
+                "DROP INDEX IF EXISTS idx_sessions_parent;
+                 ALTER TABLE sessions DROP COLUMN kind;
+                 UPDATE settings SET value = '4' WHERE key = 'schema_version';",
+            )
+            .expect("rewind to a v4 schema");
+    }
+
+    let storage = Storage::open(&path).expect("migrate");
+
+    assert_eq!(
+        storage.session_kind("old").expect("kind"),
+        Some(ragent_storage::SessionKind::Interactive)
+    );
+    assert_eq!(storage.list_sessions_grouped().expect("grouped").len(), 1);
+}

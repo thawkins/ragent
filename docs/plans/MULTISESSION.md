@@ -547,6 +547,26 @@ M8 - Per-project services (R4 decided: per project) (about 1.5-2 weeks)
 - Verify: per-project routing tests for the code index and MCP overlay
   (two projects, each sees only its own), plus release on last close.
 
+Follow-up - Session kinds and parent links (schema 5, after PR review)
+- Problem found in real use: every sub-agent, teammate, forked-skill and
+  automation session was created with `SessionManager::create_session`,
+  which always stored `parent_id = NULL`. The sidebar therefore listed
+  about 4000 historical agent runs as top-level sessions.
+- `sessions.kind` (default `interactive`) records what created a session.
+  `SessionManager::create_child_session(dir, parent, kind)` is used by
+  `task` (sub-agents), `team::manager` (teammates, parented to the lead)
+  and `skill::invoke` (forked skills); automation runs use
+  `create_session_of_kind`. A missing parent row is logged, not fatal, so a
+  team rebuilt from disk can still spawn. `Storage::archive_session` and
+  `unarchive_session` apply to the session and all its descendants through
+  a recursive CTE. `list_sessions_grouped` returns interactive top-level
+  sessions only. `list_child_sessions` and `session_kind` expose the tree.
+- Existing data: the old rows carry no reliable marker separating
+  interactive sessions from agent runs. On the user's instruction, every
+  live session except the 19 in `tui.sessions.open` was archived once with
+  a single shared `archived_at` stamp, so the operation can be undone
+  exactly.
+
 Total: roughly 5-7 weeks. M2 is the largest risk to schedule because of
 the size of `App`.
 

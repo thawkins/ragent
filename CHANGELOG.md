@@ -32,6 +32,14 @@
   `RAGENT_SESSION_ID`. A `N need you` badge shows in the status bar.
 - Storage schema 4: sessions record their project and a pinned flag;
   existing sessions are backfilled on first open.
+- Storage schema 5: sessions record what created them (`kind`:
+  `interactive`, `subagent`, `teammate`, `skill`, `automation`).
+  Sub-agent, teammate and forked-skill sessions record the session that
+  started them as `parent_id`. The link is kept even if that parent row is
+  gone. Archiving or unarchiving a session takes its whole tree of children
+  with it, and the sidebar and `/session list --all` show only interactive
+  top-level sessions. Before this, every agent run was stored as an
+  unlinked top-level session and flooded the session list.
 - Per-project services: a session in another project uses that project's
   code index (opened on first focus when its config enables indexing and it
   has a `.ragent` directory, released when its last session closes), specs,

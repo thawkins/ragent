@@ -239,9 +239,11 @@ pub async fn invoke_forked_skill(
     );
 
     // 1. Create an isolated forked session
-    let forked_session = processor
-        .session_manager
-        .create_session(working_dir.to_path_buf())?;
+    let forked_session = processor.session_manager.create_child_session(
+        working_dir.to_path_buf(),
+        parent_session_id,
+        ragent_storage::SessionKind::Skill,
+    )?;
     let forked_sid = forked_session.id.clone();
 
     tracing::debug!(

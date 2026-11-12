@@ -241,11 +241,50 @@ impl SessionManager {
     /// assert!(!session.id.is_empty());
     /// ```
     pub fn create_session(&self, directory: PathBuf) -> anyhow::Result<Session> {
+        self.create_session_with(directory, None, ragent_storage::SessionKind::Interactive)
+    }
+
+    /// Creates a session started by another session (spec MULTISESSION): a
+    /// sub-agent, teammate or forked skill. It records `parent_id`, so it is
+    /// archived with its parent and never listed as a top-level session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the parent does not exist or the insert fails.
+    pub fn create_child_session(
+        &self,
+        directory: PathBuf,
+        parent_id: &str,
+        kind: ragent_storage::SessionKind,
+    ) -> anyhow::Result<Session> {
+        self.create_session_with(directory, Some(parent_id), kind)
+    }
+
+    /// Creates a session of `kind` with no parent (an automation run).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the insert fails.
+    pub fn create_session_of_kind(
+        &self,
+        directory: PathBuf,
+        kind: ragent_storage::SessionKind,
+    ) -> anyhow::Result<Session> {
+        self.create_session_with(directory, None, kind)
+    }
+
+    fn create_session_with(
+        &self,
+        directory: PathBuf,
+        parent_id: Option<&str>,
+        kind: ragent_storage::SessionKind,
+    ) -> anyhow::Result<Session> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now();
 
         let directory_text = directory.display().to_string();
-        self.storage.create_session(&id, &directory_text)?;
+        self.storage
+            .create_session_with(&id, &directory_text, parent_id, kind)?;
 
         let session = Session {
             id: id.clone(),
@@ -253,7 +292,7 @@ impl SessionManager {
             // Same value storage records for the row (MULTISESSION FR-02).
             project_id: ragent_storage::project_root(&directory_text),
             directory,
-            parent_id: None,
+            parent_id: parent_id.map(str::to_string),
             version: 1,
             format_version: 1, // Current format version
             created_at: now,
