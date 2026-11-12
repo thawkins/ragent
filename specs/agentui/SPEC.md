@@ -1,8 +1,12 @@
 ---
-status: draft
+status: implemented
 audit:
   - { time: 1792429906, from: "none", to: "draft", actor: "system" }
   - { time: 1792495400, from: "draft", to: "draft", actor: "cursor-rework (T-022): keyboard-first FR rewrites, mouse retirement, legend, spec text refreshed against the implemented block-cursor model" }
+  - { time: 1794443731, from: "draft", to: "in_review", actor: "cli" }
+  - { time: 1794443731, from: "in_review", to: "approved", actor: "cli" }
+  - { time: 1794443731, from: "approved", to: "in_progress", actor: "cli" }
+  - { time: 1794443732, from: "in_progress", to: "implemented", actor: "cli" }
 ---
 # Specification: Agent and Team Member Panel - Live Sub-Agent and Teammate Control Surface
 

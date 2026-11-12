@@ -1,7 +1,11 @@
 ---
-status: draft
+status: implemented
 audit:
   - { time: 1784332295, from: "none", to: "draft", actor: "system" }
+  - { time: 1794443732, from: "draft", to: "in_review", actor: "cli" }
+  - { time: 1794443732, from: "in_review", to: "approved", actor: "cli" }
+  - { time: 1794443732, from: "approved", to: "in_progress", actor: "cli" }
+  - { time: 1794443733, from: "in_progress", to: "implemented", actor: "cli" }
 ---
 # `/config save` and `/config list` Slash Commands
 
