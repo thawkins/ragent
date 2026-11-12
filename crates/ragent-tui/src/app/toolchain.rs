@@ -494,6 +494,40 @@ impl VersionResult {
     }
 }
 
+/// How many times [`spawn_with_busy_retry`] attempts a spawn before giving up.
+///
+/// A busy executable clears as soon as the holding descriptor is closed, so a
+/// handful of attempts separated by [`BUSY_RETRY_BACKOFF`] spans far more than
+/// the microsecond-scale window that produces `ETXTBSY`.
+const BUSY_SPAWN_ATTEMPTS: u32 = 8;
+
+/// Delay between `ETXTBSY` spawn attempts.
+const BUSY_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(2);
+
+/// Spawn `cmd`, retrying while the executable is reported busy.
+///
+/// `ETXTBSY` means the kernel refused `execve` because some process still holds
+/// a write descriptor on the program file; the descriptor may belong to an
+/// unrelated thread and was merely inherited by that thread's `fork`. The
+/// condition is therefore transient and a retry succeeds once the writer
+/// closes. Every other spawn error is returned immediately - retrying it would
+/// only delay reporting a missing or non-executable program.
+fn spawn_with_busy_retry(cmd: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    let mut attempt = 1;
+    loop {
+        match cmd.spawn() {
+            Err(err)
+                if err.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && attempt < BUSY_SPAWN_ATTEMPTS =>
+            {
+                attempt += 1;
+                std::thread::sleep(BUSY_RETRY_BACKOFF);
+            }
+            other => return other,
+        }
+    }
+}
+
 /// Run one bounded version probe and return the raw spawn/timeout outcome.
 ///
 /// Shared engine behind [`probe_version_args`] and
@@ -529,7 +563,18 @@ fn run_probe_raw(
 
     // A spawn failure never reaches the worker: report it via the same
     // channel shape so callers keep distinguishing Unknown from Timeout.
-    let mut child = match cmd.spawn() {
+    //
+    // `ETXTBSY` ("Text file busy") is retried because it is transient, not a
+    // property of the command: the kernel refuses `execve` when any process
+    // holds a write descriptor open on the file, and a descriptor opened by an
+    // unrelated thread is inherited by every child that thread forks. A freshly
+    // written executable - a just-installed tool, or a test fixture written
+    // moments before the probe - therefore fails intermittently whenever a
+    // sibling thread spawns a process while the writer's descriptor is open.
+    // The window is microseconds wide, so a short bounded retry resolves it;
+    // the alternative is reporting `unknown` for a runtime that is present and
+    // healthy.
+    let mut child = match spawn_with_busy_retry(&mut cmd) {
         Ok(child) => child,
         Err(err) => return Ok(Some(Err(err))),
     };
