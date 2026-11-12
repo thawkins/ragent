@@ -948,6 +948,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Sessions: /session [list] | new | switch | close | rename | pin | archive",
     },
     SlashCommandDef {
+        trigger: "autofix",
+        description: "Pull/merge request binding: /autofix [status] | bind [number|url] | unbind",
+    },
+    SlashCommandDef {
         trigger: "project",
         description: "Projects: /project [show] | list | add | rename | model | refresh | prune | remove",
     },

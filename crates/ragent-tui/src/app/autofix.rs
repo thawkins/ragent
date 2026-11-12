@@ -170,12 +170,10 @@ impl App {
                 project.name
             )
         })?;
-        let source = self.request_counts.source_for(&remote).ok_or_else(|| {
-            format!(
-                "no {} credentials for {}",
-                remote.kind, remote.host
-            )
-        })?;
+        let source = self
+            .request_counts
+            .source_for(&remote)
+            .ok_or_else(|| format!("no {} credentials for {}", remote.kind, remote.host))?;
         Ok((remote, source))
     }
 
@@ -191,12 +189,11 @@ impl App {
                 BindTarget::Branch(branch) => Some(branch.clone()),
                 BindTarget::Number(_) => None,
             };
-            let message = match bind_session(&storage, &notice_session, &source, &remote, target)
-                .await
-            {
-                Ok(outcome) => bind_message(remote.kind, branch.as_deref(), &outcome),
-                Err(e) => format!("/autofix bind failed: {e}"),
-            };
+            let message =
+                match bind_session(&storage, &notice_session, &source, &remote, target).await {
+                    Ok(outcome) => bind_message(remote.kind, branch.as_deref(), &outcome),
+                    Err(e) => format!("/autofix bind failed: {e}"),
+                };
             events.publish(ragent_agent::event::Event::AgentNotice {
                 session_id: notice_session,
                 message,
