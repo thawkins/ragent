@@ -754,3 +754,121 @@ async fn test_completed_turn_records_end_reason() -> Result<()> {
     );
     Ok(())
 }
+
+/// Anthropic and Bedrock report usage twice per response: `message_start`
+/// carries the input count and `message_delta` carries `input_tokens: 0` with
+/// the output count. The trailing zero must not erase the real input count
+/// that the next compaction check and the TUI context gauge rely on.
+#[tokio::test]
+async fn test_output_only_usage_event_keeps_reported_input_tokens() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(256));
+    let (processor, working_dir, _captured, _dir) = make_processor(
+        event_bus,
+        vec![ScriptedReply::Events(vec![
+            StreamEvent::Usage {
+                input_tokens: 1234,
+                output_tokens: 0,
+            },
+            StreamEvent::TextDelta {
+                text: "hello".to_string(),
+            },
+            StreamEvent::Usage {
+                input_tokens: 0,
+                output_tokens: 7,
+            },
+            StreamEvent::Finish {
+                reason: LlmFinishReason::Stop,
+            },
+        ])],
+    )?;
+    let session = processor.session_manager.create_session(working_dir)?;
+
+    processor
+        .process_message(
+            &session.id,
+            "hi",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await?;
+
+    let cached = processor
+        .session_manager
+        .session_state_cache(&session.id)
+        .lock()
+        .expect("session state lock")
+        .last_reported_input_tokens();
+    assert_eq!(
+        cached, 1234,
+        "the output-only usage event must not reset the input count"
+    );
+    Ok(())
+}
+
+/// A tool-call step whose provider usage reports `input_tokens` - used to push
+/// the provider-reported context load over the compaction threshold.
+fn tool_call_with_usage(id: &str, input_tokens: u64) -> ScriptedReply {
+    ScriptedReply::Events(vec![
+        StreamEvent::ToolCallStart {
+            id: id.to_string(),
+            name: "Bash".to_string(),
+        },
+        StreamEvent::ToolCallDelta {
+            id: id.to_string(),
+            args_json: r#"{"command": "echo hi"}"#.to_string(),
+        },
+        StreamEvent::ToolCallEnd { id: id.to_string() },
+        StreamEvent::Usage {
+            input_tokens,
+            output_tokens: 5,
+        },
+        StreamEvent::Finish {
+            reason: LlmFinishReason::ToolUse,
+        },
+    ])
+}
+
+/// Auto-compaction is checked before every request in a turn, not only once:
+/// after a successful compaction brings usage back under the threshold, the
+/// trigger re-arms, so a tool-heavy turn that fills up again compacts again.
+#[tokio::test]
+async fn test_pre_send_compaction_rearms_within_one_turn() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(4096));
+    let mut rx = event_bus.subscribe();
+    // The scripted model has a 128k window; 100k reported input is over the
+    // default 70% threshold (89.6k).
+    let (processor, working_dir, _captured, _dir) = make_processor(
+        event_bus.clone(),
+        vec![
+            tool_call_with_usage("call_1", 100_000),
+            ScriptedReply::TextOnly("summary one"),
+            tool_call_with_usage("call_2", 100_000),
+            ScriptedReply::TextOnly("summary two"),
+            ScriptedReply::TextOnly("done"),
+        ],
+    )?;
+    let session = processor.session_manager.create_session(working_dir)?;
+
+    processor
+        .process_message(
+            &session.id,
+            "run echo twice",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await?;
+
+    let mut auto_compactions = 0;
+    while let Ok(event) = rx.try_recv() {
+        if let Event::CompressionStarted { reason, .. } = event {
+            if reason == "auto" {
+                auto_compactions += 1;
+            }
+        }
+    }
+    assert_eq!(
+        auto_compactions, 2,
+        "each over-threshold step in the turn must trigger its own compaction"
+    );
+    Ok(())
+}

@@ -1139,6 +1139,27 @@ async fn token_usage_accumulates_and_updates_input_tokens() {
     assert_eq!(app.token_usage, (150, 50));
 }
 
+/// An output-only usage event (Anthropic/Bedrock `message_delta`, input 0)
+/// must not reset the context-usage gauge, but its output still accumulates.
+#[tokio::test]
+async fn token_usage_output_only_event_keeps_last_input_tokens() {
+    let mut app = app_with_session("s1");
+    app.handle_event(Event::TokenUsage {
+        session_id: "s1".to_string(),
+        input_tokens: 900,
+        output_tokens: 0,
+    })
+    .await;
+    app.handle_event(Event::TokenUsage {
+        session_id: "s1".to_string(),
+        input_tokens: 0,
+        output_tokens: 25,
+    })
+    .await;
+    assert_eq!(app.last_input_tokens, 900);
+    assert_eq!(app.token_usage, (900, 25));
+}
+
 #[tokio::test]
 async fn loop_terminated_renders_a_banner_with_verification_and_reason() {
     let mut app = app_with_session("s1");

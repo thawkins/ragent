@@ -250,3 +250,55 @@ fn test_request_token_tracker_matches_full_estimate() {
         estimate_request_tokens(system, &messages, &more_tools)
     );
 }
+
+// --- anchored_request_tokens -------------------------------------------------
+
+use crate::compaction::estimator::anchored_request_tokens;
+
+/// Mid-turn: the stale provider count gains the growth measured locally since
+/// the request it describes (the reply and tool results appended after it).
+#[test]
+fn test_anchored_request_tokens_adds_growth_since_report() {
+    assert_eq!(
+        anchored_request_tokens(50_000, Some(40_000), 55_000),
+        65_000
+    );
+}
+
+/// A shrunken local estimate (history replaced) never lowers the exact count.
+#[test]
+fn test_anchored_request_tokens_ignores_shrink() {
+    assert_eq!(
+        anchored_request_tokens(50_000, Some(40_000), 30_000),
+        50_000
+    );
+}
+
+/// No anchor (turn start, after compaction): take the larger of the two, so
+/// content the provider has not seen yet is never ignored.
+#[test]
+fn test_anchored_request_tokens_without_anchor_takes_max() {
+    assert_eq!(anchored_request_tokens(50_000, None, 60_000), 60_000);
+    assert_eq!(anchored_request_tokens(50_000, None, 10_000), 50_000);
+    assert_eq!(anchored_request_tokens(0, Some(10_000), 12_000), 12_000);
+}
+
+/// Regression: a provider count just under the threshold plus a large tool
+/// result appended since must trip the trigger.
+#[test]
+fn test_anchored_request_tokens_trips_trigger_after_tool_growth() {
+    let config = CompactionConfig::default();
+    let stale = 65_000u64;
+    let stale_only = evaluate_trigger(&config, 0, stale, 100_000, 0);
+    assert!(
+        !stale_only.should_compact,
+        "stale count alone stays under 70%"
+    );
+
+    let current = anchored_request_tokens(stale, Some(60_000), 70_000);
+    let decision = evaluate_trigger(&config, 70_000, current, 100_000, 0);
+    assert!(
+        decision.should_compact,
+        "growth since the report crosses 70%"
+    );
+}

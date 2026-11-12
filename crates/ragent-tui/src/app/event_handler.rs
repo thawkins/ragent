@@ -1046,7 +1046,12 @@ impl App {
                 input_tokens,
                 output_tokens,
             } if self.is_current_session(session_id) => {
-                self.last_input_tokens = input_tokens;
+                // An output-only usage event (Anthropic/Bedrock
+                // `message_delta`) carries `input_tokens: 0`; keep the last
+                // real context-usage figure instead of resetting it to zero.
+                if input_tokens > 0 {
+                    self.last_input_tokens = input_tokens;
+                }
                 self.token_usage.0 += input_tokens;
                 self.token_usage.1 += output_tokens;
                 telemetry_counters::increment_tokens_input(input_tokens);

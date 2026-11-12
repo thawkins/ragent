@@ -2330,6 +2330,11 @@ impl SessionProcessor {
         // PERF-036: memoise the per-step request-token estimate so a step that
         // appends one message does not re-sum the whole history + tool schemas.
         let mut token_tracker = crate::compaction::estimator::RequestTokenTracker::new();
+        // Local estimate of the request whose `input_tokens` the provider last
+        // reported. The pre-send check adds the growth since then to the
+        // (otherwise one-request-stale) provider count. `None` at turn start
+        // and after compaction replaces the history.
+        let mut reported_anchor_estimate: Option<usize> = None;
         loop {
             // T-008 (FR-010, FR-013, FR-014, FR-017): the stop-flag guard.
             // No stage of this iteration may run once the loop's stop flag is
@@ -2490,27 +2495,27 @@ impl SessionProcessor {
             let llm_request_start = std::time::Instant::now();
 
             if turn.session_config.compaction.auto && !compaction_attempted_this_turn {
-                // Skip the local estimate when the provider already reported
-                // input tokens for the previous turn - `evaluate_trigger`
-                // prefers the provider value, so the local estimate is pure
-                // wasted work (it serialises every message + tool definition).
-                let estimate = if last_reported_input_tokens > 0 {
-                    0
-                } else {
-                    // PERF-036: incremental estimate - only changed messages are
-                    // re-costed; the tool term reuses the caller's cached byte
-                    // hint so ~111 schemas are not re-serialised each step.
-                    token_tracker.estimate(
-                        Some(system_prompt.as_ref()),
-                        &chat_messages,
-                        &tool_definitions[..],
-                        self.get_cached_tool_definition_bytes(),
-                    )
-                };
+                // PERF-036: incremental estimate - only changed messages are
+                // re-costed; the tool term reuses the caller's cached byte
+                // hint so ~111 schemas are not re-serialised each step. The
+                // estimate is always needed: the provider count describes the
+                // previous request and misses the reply and tool results
+                // appended since, which only the local estimate can measure.
+                let estimate = token_tracker.estimate(
+                    Some(system_prompt.as_ref()),
+                    &chat_messages,
+                    &tool_definitions[..],
+                    self.get_cached_tool_definition_bytes(),
+                );
+                let current_tokens = crate::compaction::anchored_request_tokens(
+                    last_reported_input_tokens,
+                    reported_anchor_estimate,
+                    estimate,
+                );
                 let decision = crate::compaction::evaluate_trigger(
                     &turn.session_config.compaction,
                     estimate,
-                    last_reported_input_tokens,
+                    current_tokens,
                     context_window,
                     0,
                 );
@@ -2584,6 +2589,23 @@ impl SessionProcessor {
                             );
                             chat_messages = Arc::new(new_chat);
                             compressed_this_turn = true;
+                            // The history was replaced: no provider count
+                            // describes it yet, so drop the anchor.
+                            reported_anchor_estimate = None;
+                            // Re-arm the trigger when compaction brought the
+                            // request back under the threshold, so a long
+                            // tool-heavy turn that fills up again can compact
+                            // again. If it could not get under the threshold,
+                            // stay disarmed to avoid re-summarising every step.
+                            let compacted_estimate = token_tracker.estimate(
+                                Some(system_prompt.as_ref()),
+                                &chat_messages,
+                                &tool_definitions[..],
+                                self.get_cached_tool_definition_bytes(),
+                            );
+                            if compacted_estimate <= decision.threshold {
+                                compaction_attempted_this_turn = false;
+                            }
                             last_reported_input_tokens = outcome.compressed_tokens as u64;
                             self.persist_last_reported_input_tokens(
                                 session_id,
@@ -2660,6 +2682,17 @@ impl SessionProcessor {
                 // Persist the provider-reported input tokens into the session state cache
                 // so the next turn starts with the same usage value shown in the TUI.
                 self.persist_last_reported_input_tokens(session_id, llm_result.last_input_tokens);
+                // Anchor the provider count to the local estimate of the
+                // request it describes (`chat_messages` is still exactly what
+                // was sent; this step's reply is appended below).
+                if turn.session_config.compaction.auto {
+                    reported_anchor_estimate = Some(token_tracker.estimate(
+                        Some(system_prompt.as_ref()),
+                        &chat_messages,
+                        &tool_definitions[..],
+                        self.get_cached_tool_definition_bytes(),
+                    ));
+                }
             }
             // T-008 (FR-014): tally this exchange's tokens into the loop
             // tracker so the next iteration's budget gate sees the updated
