@@ -125,11 +125,11 @@ impl BackendPanelState {
 impl App {
     /// Open the `/backend` switcher panel, snapshotting the registry (FR-008).
     pub fn open_backend_panel(&mut self) {
-        let config = ragent_agent::Config::load().unwrap_or_default();
+        let config = ragent_agent::Config::load_for(&self.cwd_path).unwrap_or_default();
         self.backend_panel = Some(BackendPanelState::build(
             &config,
             &self.cwd_path,
-            &self.active_backend,
+            &self.session.active_backend,
         ));
         self.needs_redraw = true;
     }
@@ -173,8 +173,8 @@ impl App {
         self.activate_backend_row(&id, kind, health, detail.as_deref());
         // Re-snapshot the panel so the active marker follows a successful switch
         // (a refused switch leaves the previous active row correct).
-        let active = self.active_backend.clone();
-        let config = self.session_processor.load_config_cached();
+        let active = self.session.active_backend.clone();
+        let config = self.session_processor.load_config_for(&self.cwd_path);
         self.backend_panel = Some(BackendPanelState::build(&config, &self.cwd_path, &active));
     }
 
@@ -188,8 +188,8 @@ impl App {
     ///
     /// Returns `true` when a switch was attempted (persisted or already active).
     pub fn switch_backend_by_selector(&mut self, selector: &str) -> bool {
-        let config = self.session_processor.load_config_cached();
-        let panel = BackendPanelState::build(&config, &self.cwd_path, &self.active_backend);
+        let config = self.session_processor.load_config_for(&self.cwd_path);
+        let panel = BackendPanelState::build(&config, &self.cwd_path, &self.session.active_backend);
         let needle = selector.trim().to_ascii_lowercase();
         if let Some(row) = panel
             .rows
@@ -247,7 +247,12 @@ impl App {
             self.status = "backend: unavailable".to_string();
             return;
         }
-        if kind == self.active_backend {
+        // Another session in this project may have switched the backend
+        // since this one last looked: compare against the config as it is
+        // now, not the cached value.
+        let current = ragent_agent::Config::load_for(&self.cwd_path).unwrap_or_default();
+        self.session.active_backend = current.effective_execution_backend().as_str().to_string();
+        if kind == self.session.active_backend {
             self.append_assistant_text(&format!(
                 "From: /backend\n[i]  `{id}` is already the active execution backend."
             ));
@@ -292,30 +297,36 @@ impl App {
             );
             Ok(())
         })?;
-        self.active_backend = kind.to_string();
+        self.session.active_backend = kind.to_string();
         // The next turn resolves the backend from the freshly-saved file.
         self.session_processor.invalidate_config_cache();
         Ok(())
     }
 
     /// The config file a backend switch is written to: the project-local
-    /// `.ragent/ragent.json` when one was loaded, else the global config.
+    /// `.ragent/ragent.json` the focused session's effective config loaded,
+    /// else that config's first file, else the global config.
     fn backend_config_path(&self) -> Option<PathBuf> {
-        let is_project = |path: &PathBuf| {
+        let is_project = |path: &&PathBuf| {
             path.file_name().is_some_and(|f| f == "ragent.json")
                 && path
                     .parent()
                     .and_then(|parent| parent.file_name())
                     .is_some_and(|f| f == ".ragent")
         };
-        if self.config_paths.iter().any(is_project) {
-            return Some(
-                std::env::current_dir()
-                    .unwrap_or_default()
-                    .join(".ragent/ragent.json"),
-            );
+        // The session's effective config (MULTISESSION M8): its own project
+        // file, or the launch configuration it inherits.
+        let paths = match ragent_agent::Config::load_for(&self.cwd_path) {
+            Ok(config) => config.config_paths,
+            Err(e) => {
+                tracing::warn!(error = %e, "could not load session config for /backend");
+                self.config_paths.clone()
+            }
+        };
+        if let Some(project) = paths.iter().find(is_project) {
+            return Some(project.clone());
         }
-        self.config_paths
+        paths
             .first()
             .cloned()
             .or_else(ragent_config::Config::global_config_path)

@@ -19,7 +19,7 @@ mod support;
 /// Build an app with a live session.
 fn app() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("slash-codeindex".to_string());
+    app.session.session_id = Some("slash-codeindex".to_string());
     app
 }
 
@@ -40,7 +40,8 @@ fn attach_empty_index(app: &mut App) -> Arc<CodeIndex> {
 
 /// Text of the most recent message in the message window.
 fn last_message(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(ragent_types::message::Message::text_content)
         .unwrap_or_default()

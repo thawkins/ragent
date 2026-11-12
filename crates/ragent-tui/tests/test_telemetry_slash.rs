@@ -25,7 +25,8 @@ use ragent_tui::App;
 use ragent_tui::app::ProviderSetupStep;
 
 fn last_message_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(|m| {
             m.parts

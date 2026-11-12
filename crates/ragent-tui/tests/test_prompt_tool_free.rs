@@ -36,6 +36,7 @@ fn prompt_report(input: &str) -> (String, String) {
             let mut app = make_app();
             app.execute_slash_command(input).await;
             let text = app
+                .session
                 .messages
                 .last()
                 .map(|m| m.text_content())
@@ -123,6 +124,7 @@ fn test_prompt_primary_tool_free_custom_agent_reports_no_tools() {
             app.custom_agent_defs = vec![def];
             app.execute_slash_command("/prompt primary oneliner").await;
             let text = app
+                .session
                 .messages
                 .last()
                 .map(|m| m.text_content())
@@ -186,6 +188,7 @@ fn test_prompt_subagent_tool_free_custom_agent_reports_no_tools() {
             app.execute_slash_command("/prompt subagent oneliner-sub")
                 .await;
             let text = app
+                .session
                 .messages
                 .last()
                 .map(|m| m.text_content())

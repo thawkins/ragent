@@ -21,13 +21,14 @@ mod support;
 
 fn app_with_session(session: &str) -> App {
     let mut app = support::make_app();
-    app.session_id = Some(session.to_string());
+    app.session.session_id = Some(session.to_string());
     app.needs_redraw = false;
     app
 }
 
 fn joined_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .flat_map(|m| m.parts.iter())
         .filter_map(|p| match p {
@@ -75,7 +76,7 @@ async fn permission_replied_removes_request_and_restores_working_status() {
         options: Vec::new(),
     })
     .await;
-    assert_eq!(app.permission_queue.len(), 1);
+    assert_eq!(app.session.permission_queue.len(), 1);
 
     app.handle_event(Event::PermissionReplied {
         session_id: "s1".to_string(),
@@ -85,7 +86,7 @@ async fn permission_replied_removes_request_and_restores_working_status() {
     })
     .await;
     assert!(
-        app.permission_queue.is_empty(),
+        app.session.permission_queue.is_empty(),
         "the answered request is removed"
     );
     assert!(
@@ -108,7 +109,11 @@ async fn duplicate_permission_request_is_deduplicated() {
         })
         .await;
     }
-    assert_eq!(app.permission_queue.len(), 1, "the duplicate is ignored");
+    assert_eq!(
+        app.session.permission_queue.len(),
+        1,
+        "the duplicate is ignored"
+    );
 }
 
 #[tokio::test]
@@ -123,9 +128,9 @@ async fn question_answered_removes_request() {
         default_index: Some(1),
     })
     .await;
-    assert_eq!(app.question_queue.len(), 1);
+    assert_eq!(app.session.question_queue.len(), 1);
     assert_eq!(
-        app.question_selected_index, 1,
+        app.session.question_selected_index, 1,
         "the default index pre-selects"
     );
 
@@ -136,7 +141,7 @@ async fn question_answered_removes_request() {
         secret: false,
     })
     .await;
-    assert!(app.question_queue.is_empty());
+    assert!(app.session.question_queue.is_empty());
 }
 
 #[tokio::test]
@@ -152,7 +157,7 @@ async fn question_requested_from_non_current_session_still_queues() {
         default_index: None,
     })
     .await;
-    assert_eq!(app.question_queue.len(), 1);
+    assert_eq!(app.session.question_queue.len(), 1);
 }
 
 // ===========================================================================
@@ -170,6 +175,7 @@ async fn agent_switch_requested_records_pending_plan_task() {
     })
     .await;
     let (task, context) = app
+        .session
         .pending_plan_task
         .clone()
         .expect("pending plan task set");
@@ -186,6 +192,7 @@ async fn agent_restore_requested_opens_plan_approval_dialog() {
     })
     .await;
     let pending = app
+        .session
         .plan_approval_pending
         .as_ref()
         .expect("plan approval dialog opened");
@@ -200,15 +207,18 @@ async fn agent_restore_requested_opens_plan_approval_dialog() {
 #[tokio::test]
 async fn task_completed_stops_autopilot_and_renders_summary() {
     let mut app = app_with_session("s1");
-    app.autopilot_enabled = true;
-    app.autopilot_started_at = Some(std::time::Instant::now());
+    app.session.autopilot_enabled = true;
+    app.session.autopilot_started_at = Some(std::time::Instant::now());
     app.handle_event(Event::TaskCompleted {
         session_id: "s1".to_string(),
         summary: "all done".to_string(),
     })
     .await;
-    assert!(!app.autopilot_enabled, "autopilot stops on task completion");
-    assert!(app.last_task_completed_at.is_some());
+    assert!(
+        !app.session.autopilot_enabled,
+        "autopilot stops on task completion"
+    );
+    assert!(app.session.last_task_completed_at.is_some());
     let text = joined_text(&app);
     assert!(text.contains("Task Complete"), "got: {text}");
 }
@@ -223,9 +233,9 @@ async fn task_completed_stops_autopilot_and_renders_summary() {
 #[tokio::test]
 async fn subagent_completion_leaves_primary_autopilot_running() {
     let mut app = app_with_session("primary");
-    app.autopilot_enabled = true;
-    app.autopilot_started_at = Some(std::time::Instant::now());
-    app.autopilot_time_limit_secs = Some(5000);
+    app.session.autopilot_enabled = true;
+    app.session.autopilot_started_at = Some(std::time::Instant::now());
+    app.session.autopilot_time_limit_secs = Some(5000);
     app.active_tasks.push(task_entry("t1", "child-1"));
 
     // The child session completes with its own `agent_complete`.
@@ -236,20 +246,20 @@ async fn subagent_completion_leaves_primary_autopilot_running() {
     .await;
 
     assert!(
-        app.autopilot_enabled,
+        app.session.autopilot_enabled,
         "a sub-agent's agent_complete must not stop the primary's autopilot"
     );
     assert!(
-        app.autopilot_started_at.is_some(),
+        app.session.autopilot_started_at.is_some(),
         "the primary's autopilot start stamp must survive"
     );
     assert_eq!(
-        app.autopilot_time_limit_secs,
+        app.session.autopilot_time_limit_secs,
         Some(5000),
         "the primary's autopilot time limit must survive"
     );
     assert!(
-        app.autopilot_pending_continue.is_none(),
+        app.session.autopilot_pending_continue.is_none(),
         "a sub-agent completion must not schedule a primary continuation"
     );
     let text = joined_text(&app);
@@ -267,9 +277,9 @@ async fn subagent_completion_leaves_primary_autopilot_running() {
 #[tokio::test]
 async fn subagent_completion_logs_against_its_own_session_only() {
     let mut app = app_with_session("primary");
-    app.autopilot_enabled = true;
-    app.autopilot_started_at = Some(std::time::Instant::now());
-    app.autopilot_time_limit_secs = Some(5000);
+    app.session.autopilot_enabled = true;
+    app.session.autopilot_started_at = Some(std::time::Instant::now());
+    app.session.autopilot_time_limit_secs = Some(5000);
     app.active_tasks.push(task_entry("t1", "child-1"));
 
     app.handle_event(Event::TaskCompleted {
@@ -281,7 +291,7 @@ async fn subagent_completion_logs_against_its_own_session_only() {
     // The primary's completion clock is untouched, so the running turn's
     // continuation logic still sees "not completed".
     assert!(
-        app.last_task_completed_at.is_none(),
+        app.session.last_task_completed_at.is_none(),
         "a child completion must not mark the PRIMARY task complete"
     );
     assert_eq!(
@@ -319,9 +329,9 @@ async fn subagent_completion_logs_against_its_own_session_only() {
 async fn primary_completion_and_message_end_in_one_drain_stop_autopilot() {
     // TaskCompleted first, then MessageEnd - the production publish order.
     let mut app = app_with_session("s1");
-    app.autopilot_enabled = true;
-    app.autopilot_started_at = Some(std::time::Instant::now());
-    app.autopilot_time_limit_secs = Some(5000);
+    app.session.autopilot_enabled = true;
+    app.session.autopilot_started_at = Some(std::time::Instant::now());
+    app.session.autopilot_time_limit_secs = Some(5000);
 
     app.handle_event(Event::TaskCompleted {
         session_id: "s1".to_string(),
@@ -336,19 +346,19 @@ async fn primary_completion_and_message_end_in_one_drain_stop_autopilot() {
     .await;
 
     assert!(
-        !app.autopilot_enabled,
+        !app.session.autopilot_enabled,
         "autopilot stays off after the primary's agent_complete"
     );
     assert!(
-        app.autopilot_pending_continue.is_none(),
+        app.session.autopilot_pending_continue.is_none(),
         "no continuation is scheduled once the primary completed"
     );
 
     // Reversed order must also end the run.
     let mut app = app_with_session("s1");
-    app.autopilot_enabled = true;
-    app.autopilot_started_at = Some(std::time::Instant::now());
-    app.autopilot_time_limit_secs = Some(5000);
+    app.session.autopilot_enabled = true;
+    app.session.autopilot_started_at = Some(std::time::Instant::now());
+    app.session.autopilot_time_limit_secs = Some(5000);
 
     app.handle_event(Event::MessageEnd {
         session_id: "s1".to_string(),
@@ -363,11 +373,11 @@ async fn primary_completion_and_message_end_in_one_drain_stop_autopilot() {
     .await;
 
     assert!(
-        !app.autopilot_enabled,
+        !app.session.autopilot_enabled,
         "autopilot ends whichever order the two events arrive in"
     );
     assert!(
-        app.autopilot_pending_continue.is_none(),
+        app.session.autopilot_pending_continue.is_none(),
         "the completion clears any continuation scheduled by MessageEnd"
     );
 }
@@ -389,9 +399,9 @@ async fn primary_completion_and_message_end_in_one_drain_stop_autopilot() {
 #[tokio::test]
 async fn message_start_after_agent_complete_keeps_autopilot_off() {
     let mut app = app_with_session("s1");
-    app.autopilot_enabled = true;
-    app.autopilot_started_at = Some(std::time::Instant::now());
-    app.autopilot_time_limit_secs = Some(5000);
+    app.session.autopilot_enabled = true;
+    app.session.autopilot_started_at = Some(std::time::Instant::now());
+    app.session.autopilot_time_limit_secs = Some(5000);
 
     // Production order: the tool publishes TaskCompleted, the loop then
     // publishes MessageEnd, and the autopilot continuation for this turn was
@@ -401,12 +411,15 @@ async fn message_start_after_agent_complete_keeps_autopilot_off() {
         summary: "all done".to_string(),
     })
     .await;
-    assert!(!app.autopilot_enabled, "agent_complete exits autopilot");
-    assert!(app.autopilot_pending_continue.is_none());
+    assert!(
+        !app.session.autopilot_enabled,
+        "agent_complete exits autopilot"
+    );
+    assert!(app.session.autopilot_pending_continue.is_none());
 
     // ...but a stale continuation can still be in flight from an earlier
     // wake, and a late MessageStart must not clear the latch.
-    app.autopilot_pending_continue = Some("Continue working on the task.".to_string());
+    app.session.autopilot_pending_continue = Some("Continue working on the task.".to_string());
     app.handle_event(Event::MessageStart {
         session_id: "s1".to_string(),
         message_id: "m-next".to_string(),
@@ -414,7 +427,7 @@ async fn message_start_after_agent_complete_keeps_autopilot_off() {
     .await;
 
     assert!(
-        app.last_task_completed_at.is_some(),
+        app.session.last_task_completed_at.is_some(),
         "a MessageStart that arrives after agent_complete must not clear the \
          completion latch"
     );
@@ -422,11 +435,11 @@ async fn message_start_after_agent_complete_keeps_autopilot_off() {
     // The next loop wake must settle autopilot off rather than dispatch.
     ragent_tui::app::poll_autopilot_continue_for_tests(&mut app);
     assert!(
-        !app.autopilot_enabled,
+        !app.session.autopilot_enabled,
         "autopilot must stay off after the primary's agent_complete"
     );
     assert!(
-        app.autopilot_pending_continue.is_none(),
+        app.session.autopilot_pending_continue.is_none(),
         "no continuation may survive the completion"
     );
 }
@@ -541,19 +554,26 @@ async fn teammate_p2p_message_updates_send_and_receive_counts() {
         preview: "hi".to_string(),
     })
     .await;
-    assert_eq!(app.team_message_counts.get("tm-001").copied(), Some((1, 0)));
-    assert_eq!(app.team_message_counts.get("tm-002").copied(), Some((0, 1)));
+    assert_eq!(
+        app.session.team_message_counts.get("tm-001").copied(),
+        Some((1, 0))
+    );
+    assert_eq!(
+        app.session.team_message_counts.get("tm-002").copied(),
+        Some((0, 1))
+    );
 }
 
 #[tokio::test]
 async fn team_cleaned_up_clears_members_and_swarm_state() {
     let mut app = app_with_session("s1");
-    app.active_team = Some(TeamConfig::new("alpha", "s1"));
-    app.team_members
+    app.session.active_team = Some(TeamConfig::new("alpha", "s1"));
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
     app.show_teams = true;
-    app.focused_teammate = Some("tm-001".to_string());
-    app.swarm_state = Some(ragent_agent::team::SwarmState {
+    app.session.focused_teammate = Some("tm-001".to_string());
+    app.session.swarm_state = Some(ragent_agent::team::SwarmState {
         team_name: "alpha".to_string(),
         prompt: "x".to_string(),
         decomposition: ragent_agent::team::SwarmDecomposition { tasks: vec![] },
@@ -567,12 +587,12 @@ async fn team_cleaned_up_clears_members_and_swarm_state() {
         team_name: "alpha".to_string(),
     })
     .await;
-    assert!(app.active_team.is_none());
-    assert!(app.team_members.is_empty());
+    assert!(app.session.active_team.is_none());
+    assert!(app.session.team_members.is_empty());
     assert!(!app.show_teams);
-    assert!(app.focused_teammate.is_none());
+    assert!(app.session.focused_teammate.is_none());
     assert!(
-        app.swarm_state.is_none(),
+        app.session.swarm_state.is_none(),
         "the swarm backed by this team is cleared"
     );
 }
@@ -580,7 +600,8 @@ async fn team_cleaned_up_clears_members_and_swarm_state() {
 #[tokio::test]
 async fn teammate_idle_and_failed_update_member_status() {
     let mut app = app_with_session("s1");
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
 
     app.handle_event(Event::TeammateIdle {
@@ -589,7 +610,7 @@ async fn teammate_idle_and_failed_update_member_status() {
         agent_id: "tm-001".to_string(),
     })
     .await;
-    assert_eq!(app.team_members[0].status, MemberStatus::Idle);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Idle);
 
     app.handle_event(Event::TeammateFailed {
         session_id: "s1".to_string(),
@@ -598,9 +619,9 @@ async fn teammate_idle_and_failed_update_member_status() {
         error: "boom".to_string(),
     })
     .await;
-    assert_eq!(app.team_members[0].status, MemberStatus::Failed);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Failed);
     assert_eq!(
-        app.team_members[0].last_spawn_error.as_deref(),
+        app.session.team_members[0].last_spawn_error.as_deref(),
         Some("boom")
     );
 }
@@ -608,7 +629,8 @@ async fn teammate_idle_and_failed_update_member_status() {
 #[tokio::test]
 async fn team_task_claimed_and_completed_update_member_task_id() {
     let mut app = app_with_session("s1");
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
 
     app.handle_event(Event::TeamTaskClaimed {
@@ -618,9 +640,9 @@ async fn team_task_claimed_and_completed_update_member_task_id() {
         task_id: "task-7".to_string(),
     })
     .await;
-    assert_eq!(app.team_members[0].status, MemberStatus::Working);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Working);
     assert_eq!(
-        app.team_members[0].current_task_id.as_deref(),
+        app.session.team_members[0].current_task_id.as_deref(),
         Some("task-7")
     );
 
@@ -631,7 +653,7 @@ async fn team_task_claimed_and_completed_update_member_task_id() {
         task_id: "task-7".to_string(),
     })
     .await;
-    assert!(app.team_members[0].current_task_id.is_none());
+    assert!(app.session.team_members[0].current_task_id.is_none());
 }
 
 #[tokio::test]
@@ -641,9 +663,10 @@ async fn teammate_suspended_and_resumed_update_the_member_row() {
     // `/team suspend`, so the row must follow instead of relying on the
     // next render-time store hydration.
     let mut app = app_with_session("s1");
-    app.team_members
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
-    assert_eq!(app.team_members[0].status, MemberStatus::Spawning);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Spawning);
 
     app.handle_event(Event::TeammateSuspended {
         session_id: "s1".to_string(),
@@ -651,7 +674,7 @@ async fn teammate_suspended_and_resumed_update_the_member_row() {
         agent_id: "tm-001".to_string(),
     })
     .await;
-    assert_eq!(app.team_members[0].status, MemberStatus::Suspended);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Suspended);
     assert!(app.needs_redraw);
 
     app.handle_event(Event::TeammateResumed {
@@ -660,7 +683,7 @@ async fn teammate_suspended_and_resumed_update_the_member_row() {
         agent_id: "tm-001".to_string(),
     })
     .await;
-    assert_eq!(app.team_members[0].status, MemberStatus::Idle);
+    assert_eq!(app.session.team_members[0].status, MemberStatus::Idle);
     assert!(app.needs_redraw);
 }
 
@@ -924,7 +947,7 @@ async fn tool_call_batch_creates_and_finalises_tool_parts() {
     // is the per-call `ToolResult` arm's job).
     let mut saw_completed = false;
     let mut saw_input = false;
-    for part in app.messages.iter().flat_map(|m| m.parts.iter()) {
+    for part in app.session.messages.iter().flat_map(|m| m.parts.iter()) {
         if let MessagePart::ToolCall { call_id, state, .. } = part
             && call_id == "c1"
         {
@@ -1025,8 +1048,13 @@ async fn teammate_spawned_adds_member_and_reveals_teams_panel() {
         app.show_teams,
         "spawning a teammate reveals the teams panel"
     );
-    assert!(app.team_members.iter().any(|m| m.agent_id == "tm-001"));
-    assert!(app.team_message_counts.contains_key("tm-001"));
+    assert!(
+        app.session
+            .team_members
+            .iter()
+            .any(|m| m.agent_id == "tm-001")
+    );
+    assert!(app.session.team_message_counts.contains_key("tm-001"));
 }
 
 #[tokio::test]
@@ -1045,18 +1073,20 @@ async fn loop_change_summary_rejects_rollback_when_no_files() {
         files: Vec::new(),
     })
     .await;
-    assert!(app.pending_rollback.is_some());
+    assert!(app.session.pending_rollback.is_some());
     assert!(app.status.contains("roll back"));
 }
 
 #[tokio::test]
 async fn message_end_cancelled_retains_input_queue() {
     let mut app = app_with_session("s1");
-    app.input_queue.push_back(ragent_tui::app::QueuedInput {
-        text: "queued".to_string(),
-        image_paths: Vec::new(),
-    });
-    app.is_processing = true;
+    app.session
+        .input_queue
+        .push_back(ragent_tui::app::QueuedInput {
+            text: "queued".to_string(),
+            image_paths: Vec::new(),
+        });
+    app.session.is_processing = true;
 
     app.handle_event(Event::MessageEnd {
         session_id: "s1".to_string(),
@@ -1086,7 +1116,8 @@ async fn text_delta_appends_to_assistant_message() {
     })
     .await;
     assert!(
-        app.messages
+        app.session
+            .messages
             .iter()
             .any(|m| m.role == Role::Assistant && m.text_content().contains("streamed"))
     );

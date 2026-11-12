@@ -336,8 +336,11 @@ async fn activate_real_spec_sets_active_spec() {
     let (_g, _e, _t, mut app) = app_with_spec();
     app.execute_slash_command("/spec activate sample").await;
     assert_eq!(app.status, "spec: sample activated");
-    assert!(app.active_spec.is_some(), "active spec must be recorded");
-    assert_eq!(app.active_spec.as_deref(), Some("sample"));
+    assert!(
+        app.session.active_spec.is_some(),
+        "active spec must be recorded"
+    );
+    assert_eq!(app.session.active_spec.as_deref(), Some("sample"));
     assert!(app.spec_manager.is_some());
     let text = last_message(&app);
     assert!(text.contains("is now the active spec"), "text: {text}");
@@ -360,7 +363,7 @@ async fn deactivate_active_spec_clears_it() {
     app.execute_slash_command("/spec activate sample").await;
     app.execute_slash_command("/spec deactivate").await;
     assert_eq!(app.status, "spec: deactivated");
-    assert!(app.active_spec.is_none());
+    assert!(app.session.active_spec.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -389,9 +392,9 @@ async fn delete_with_yes_removes_directory() {
 async fn delete_active_spec_deactivates_it() {
     let (_g, _e, _t, mut app) = app_with_spec();
     app.execute_slash_command("/spec activate sample").await;
-    assert_eq!(app.active_spec.as_deref(), Some("sample"));
+    assert_eq!(app.session.active_spec.as_deref(), Some("sample"));
     app.execute_slash_command("/spec delete sample --yes").await;
-    assert_eq!(app.active_spec, None);
+    assert_eq!(app.session.active_spec, None);
     assert!(last_message(&app).contains("deactivated"));
 }
 
@@ -480,7 +483,7 @@ async fn create_starts_generation() {
         app.status,
         ragent_specs::SpecCommand::build_create_status("newspec")
     );
-    assert!(app.is_processing);
+    assert!(app.session.is_processing);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

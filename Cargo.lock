@@ -5380,6 +5380,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "async-trait",
+ "axum",
  "chrono",
  "criterion",
  "crossterm 0.28.1",

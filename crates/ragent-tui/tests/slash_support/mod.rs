@@ -122,13 +122,14 @@ pub fn enter_project(config: &str) -> (MutexGuard<'static, ()>, EnvGuard, tempfi
 /// messages into the message window.
 pub fn app_with_session() -> App {
     let mut app = super::support::make_app();
-    app.session_id = Some("slash-support".to_string());
+    app.session.session_id = Some("slash-support".to_string());
     app
 }
 
 /// Text of the most recent message in the message window.
 pub fn last_message(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(ragent_types::message::Message::text_content)
         .unwrap_or_default()
@@ -137,7 +138,8 @@ pub fn last_message(app: &App) -> String {
 /// Join every message in the window into one string (for substring asserts
 /// that may span several appended assistant messages).
 pub fn all_messages(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .map(ragent_types::message::Message::text_content)
         .collect::<Vec<_>>()

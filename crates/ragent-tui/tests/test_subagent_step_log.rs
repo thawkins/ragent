@@ -26,7 +26,7 @@ fn tool_call_lines<'a>(entries: &'a [ragent_tui::app::LogEntry], needle: &str) -
 #[tokio::test]
 async fn test_tool_call_start_tracked_subagent_is_logged_with_step_tag() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-sess".to_string());
+    app.session.session_id = Some("lead-sess".to_string());
 
     // Register a sub-agent task so its child session becomes tracked.
     app.handle_event(Event::SubagentStart {
@@ -74,7 +74,7 @@ async fn test_tool_call_start_tracked_subagent_is_logged_with_step_tag() {
 #[tokio::test]
 async fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-sess".to_string());
+    app.session.session_id = Some("lead-sess".to_string());
 
     app.handle_event(Event::SubagentStart {
         session_id: "lead-sess".to_string(),
@@ -131,7 +131,7 @@ async fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
 #[tokio::test]
 async fn test_tool_call_end_tracked_subagent_is_logged_with_step_tag() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-sess".to_string());
+    app.session.session_id = Some("lead-sess".to_string());
 
     app.handle_event(Event::SubagentStart {
         session_id: "lead-sess".to_string(),
@@ -200,7 +200,7 @@ async fn test_tool_call_end_tracked_subagent_is_logged_with_step_tag() {
 #[tokio::test]
 async fn test_tool_call_batch_tracked_subagent_logs_untagged_calls() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-sess".to_string());
+    app.session.session_id = Some("lead-sess".to_string());
 
     app.handle_event(Event::SubagentStart {
         session_id: "lead-sess".to_string(),
@@ -265,12 +265,12 @@ async fn test_tool_call_batch_tracked_subagent_logs_untagged_calls() {
 #[tokio::test]
 async fn test_team_member_tool_calls_logged_with_teammate_name() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-sess".to_string());
-    app.active_team = Some(TeamConfig::new("alpha", "lead-sess"));
+    app.session.session_id = Some("lead-sess".to_string());
+    app.session.active_team = Some(TeamConfig::new("alpha", "lead-sess"));
 
     let mut member = TeamMember::new("reviewer", "tm-001", "general");
     member.session_id = Some("tm-session-9".to_string());
-    app.team_members.push(member);
+    app.session.team_members.push(member);
 
     app.event_bus.set_step("tm-session-9", 3);
     app.handle_event(Event::ToolCallStart {
@@ -292,7 +292,7 @@ async fn test_team_member_tool_calls_logged_with_teammate_name() {
 #[tokio::test]
 async fn test_untracked_session_tool_calls_are_not_logged() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-sess".to_string());
+    app.session.session_id = Some("lead-sess".to_string());
 
     // Neither the current session nor a tracked agent: must be ignored.
     app.handle_event(Event::ToolCallStart {

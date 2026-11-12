@@ -26,13 +26,13 @@ use support::make_app;
 /// An app with the Teams window open on team `alpha`.
 fn open_teams(members: usize) -> App {
     let mut app = make_app();
-    app.session_id = Some("lead-session-0001".to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new("alpha", "lead-session-0001"));
+    app.session.session_id = Some("lead-session-0001".to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new("alpha", "lead-session-0001"));
     for i in 0..members {
         let mut member = TeamMember::new(format!("reviewer-{i}"), format!("tm-{i:03}"), "general");
         member.session_id = Some(format!("child-session-{i}"));
-        app.team_members.push(member);
+        app.session.team_members.push(member);
     }
     app.show_teams_window = true;
     app
@@ -213,10 +213,12 @@ fn test_teams_modal_paints_borders_and_bold_blue_title() {
 fn test_teams_modal_clears_the_underlay() {
     let mut app = open_teams(2);
     for i in 0..40 {
-        app.messages.push(ragent_agent::message::Message::user_text(
-            "lead-session-0001",
-            format!("UNDERLAY-{i}-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"),
-        ));
+        app.session
+            .messages
+            .push(ragent_agent::message::Message::user_text(
+                "lead-session-0001",
+                format!("UNDERLAY-{i}-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"),
+            ));
     }
     let buffer = render(&mut app, 120, 40);
 
@@ -327,12 +329,12 @@ async fn test_teams_escape_dismisses_the_window() {
         "Esc must dismiss the Teams window (FR-018)"
     );
     assert_eq!(
-        app.team_members.len(),
+        app.session.team_members.len(),
         2,
         "dismissing the window must not touch the member list"
     );
     assert!(
-        app.active_team.is_some(),
+        app.session.active_team.is_some(),
         "dismissing the window must not clear the active team"
     );
 }

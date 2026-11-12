@@ -173,8 +173,8 @@ fn log_has_attribution(app: &App, session_id: &str, needle: &str) -> bool {
 /// An Agents-window app with one live row per subject.
 fn app_with_agents_window() -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
     app.show_agents_window = true;
     app.needs_redraw = false;
     app
@@ -183,10 +183,12 @@ fn app_with_agents_window() -> App {
 /// A Teams-window app over the given member statuses.
 fn app_with_teams_window(status: MemberStatus) -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members.push(member("tm-001", "reviewer", status));
+    app.session.session_id = Some(LEAD_SESSION.to_string());
+    app.session.agent_name = "general".to_string();
+    app.session.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.session
+        .team_members
+        .push(member("tm-001", "reviewer", status));
     app.show_teams_window = true;
     app.needs_redraw = false;
     app
@@ -560,7 +562,7 @@ async fn stale_teammate_answer_dispatches_nothing() {
     });
     let baseline = app.log_entries.len();
     // The subject disappears between open and answer.
-    app.team_members.clear();
+    app.session.team_members.clear();
 
     app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
         .await;

@@ -595,9 +595,15 @@ mod test_window_routing;
 #[path = "test_window_scroll_wheel.rs"]
 mod test_window_scroll_wheel;
 
+#[path = "test_multisession.rs"]
+mod test_multisession;
 #[path = "test_panic_hook_thread_scope.rs"]
 mod test_panic_hook_thread_scope;
 #[path = "test_probe_t022.rs"]
 mod test_probe_t022;
+#[path = "test_project_services.rs"]
+mod test_project_services;
+#[path = "test_sessions_sidebar.rs"]
+mod test_sessions_sidebar;
 #[path = "test_slash_advertised_forms.rs"]
 mod test_slash_advertised_forms;

@@ -20,7 +20,7 @@ mod support;
 
 fn app_with_session(session: &str) -> App {
     let mut app = support::make_app();
-    app.session_id = Some(session.to_string());
+    app.session.session_id = Some(session.to_string());
     app.needs_redraw = false;
     app
 }
@@ -50,7 +50,8 @@ fn subtask(id: &str, deps: &[&str]) -> SwarmSubtask {
 }
 
 fn joined_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .flat_map(|m| m.parts.iter())
         .filter_map(|p| match p {
@@ -81,7 +82,7 @@ async fn swarm_status_without_task_store_renders_decomposition_rows() {
     let dir = temp_dir("status-fallback");
     let mut app = app_with_session("s-lead");
     app.cwd_path = dir;
-    app.swarm_state = Some(swarm(
+    app.session.swarm_state = Some(swarm(
         vec![subtask("s1", &[]), subtask("s2", &["s1"])],
         false,
     ));
@@ -100,10 +101,10 @@ async fn swarm_status_renders_teammate_rows_when_members_registered() {
     let dir = temp_dir("status-members");
     let mut app = app_with_session("s-lead");
     app.cwd_path = dir;
-    app.swarm_state = Some(swarm(vec![subtask("s1", &[])], false));
+    app.session.swarm_state = Some(swarm(vec![subtask("s1", &[])], false));
     let mut member = TeamMember::new("swarm-s1", "tm-001", "general");
     member.status = MemberStatus::Working;
-    app.team_members.push(member);
+    app.session.team_members.push(member);
 
     app.execute_slash_command("/swarm status").await;
     let text = joined_text(&app);
@@ -116,7 +117,7 @@ async fn swarm_status_all_complete_prints_the_cleanup_hint() {
     let dir = temp_dir("status-complete");
     let mut app = app_with_session("s-lead");
     app.cwd_path = dir;
-    app.swarm_state = Some(swarm(vec![subtask("s1", &[])], true));
+    app.session.swarm_state = Some(swarm(vec![subtask("s1", &[])], true));
 
     app.execute_slash_command("/swarm status").await;
     let text = joined_text(&app);
@@ -134,10 +135,10 @@ async fn swarm_cancel_clears_state_and_prints_cancelled() {
     let dir = temp_dir("cancel-no-team");
     let mut app = app_with_session("s-lead");
     app.cwd_path = dir;
-    app.swarm_state = Some(swarm(vec![subtask("s1", &[])], false));
+    app.session.swarm_state = Some(swarm(vec![subtask("s1", &[])], false));
 
     app.execute_slash_command("/swarm cancel").await;
-    assert!(app.swarm_state.is_none());
+    assert!(app.session.swarm_state.is_none());
     assert_eq!(app.status, "swarm: cancelled");
     assert!(joined_text(&app).contains("Swarm Cancelled"));
 }
@@ -149,13 +150,13 @@ async fn swarm_cancel_with_live_team_store_shuts_it_down() {
     let _ = TeamStore::create(team, "s-lead", &dir, true).expect("create team");
     let mut app = app_with_session("s-lead");
     app.cwd_path = dir;
-    app.swarm_state = Some(SwarmState {
+    app.session.swarm_state = Some(SwarmState {
         team_name: team.to_string(),
         ..swarm(vec![], false)
     });
 
     app.execute_slash_command("/swarm cancel").await;
-    assert!(app.swarm_state.is_none());
+    assert!(app.session.swarm_state.is_none());
     assert!(app.status.contains("cancelled"));
 }
 
@@ -177,8 +178,8 @@ async fn swarm_help_lists_every_subcommand() {
 async fn swarm_bare_prompt_without_model_requires_configuration() {
     // With no selected model the prompt path warns before spawning anything.
     let mut app = app_with_session("s-lead");
-    app.selected_model = None;
-    app.swarm_state = None;
+    app.session.selected_model = None;
+    app.session.swarm_state = None;
     app.execute_slash_command("/swarm build a thing").await;
     assert!(
         app.status.contains("requires a configured model"),
@@ -186,13 +187,13 @@ async fn swarm_bare_prompt_without_model_requires_configuration() {
         app.status
     );
     // A placeholder swarm state is recorded so a later status reports in-flight.
-    assert!(app.swarm_state.is_some());
+    assert!(app.session.swarm_state.is_some());
 }
 
 #[tokio::test]
 async fn swarm_second_invocation_while_active_is_refused() {
     let mut app = app_with_session("s-lead");
-    app.swarm_state = Some(swarm(vec![], false));
+    app.session.swarm_state = Some(swarm(vec![], false));
     app.execute_slash_command("/swarm another goal").await;
     assert!(app.status.contains("already active"), "got: {}", app.status);
 }

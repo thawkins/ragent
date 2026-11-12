@@ -29,7 +29,8 @@ fn cwd_lock() -> MutexGuard<'static, ()> {
 
 /// Run `/<cmd> help` and return the last assistant message text.
 fn last_output(app: &mut App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(|m| m.text_content())
         .unwrap_or_default()
@@ -216,7 +217,10 @@ async fn test_new_scaffolds_project_foreground() {
         wait_newproj(&mut app);
 
         // FR-014: foreground - no sub-agent processing state.
-        assert!(!app.is_processing, "/new must run in the foreground");
+        assert!(
+            !app.session.is_processing,
+            "/new must run in the foreground"
+        );
 
         // FR-005/FR-006 code artifacts.
         assert!(dir.join("Cargo.toml").exists());
@@ -514,6 +518,7 @@ async fn test_new_streams_progress_lines_into_message_window() {
         // The run start is visible immediately: the seeded progress message
         // carries the `Scaffolding `slug`...` header (T-013).
         let started = app
+            .session
             .messages
             .iter()
             .any(|m| m.text_content().contains("Scaffolding '"));
@@ -522,6 +527,7 @@ async fn test_new_streams_progress_lines_into_message_window() {
         // Streamed step lines land in the message window: guard, emission,
         // git, and completion markers are all rendered.
         let streamed = app
+            .session
             .messages
             .iter()
             .any(|m| m.text_content().contains("[ ok ]"));
@@ -530,6 +536,7 @@ async fn test_new_streams_progress_lines_into_message_window() {
         // FR-011: the final summary lands in its own message with the
         // full report content.
         let summary = app
+            .session
             .messages
             .iter()
             .find(|m| m.text_content().contains("Scaffolded "))
@@ -557,6 +564,7 @@ async fn test_new_progress_updates_one_message_in_place() {
         // one message per streamed step), and it accumulates every step
         // marker.
         let panels: Vec<String> = app
+            .session
             .messages
             .iter()
             .filter(|m| m.text_content().contains("Scaffolding '"))
@@ -570,6 +578,7 @@ async fn test_new_progress_updates_one_message_in_place() {
         assert!(panel.contains("scaffold complete"));
         // The streamed panel is separate from the FR-011 summary message.
         let summary_count = app
+            .session
             .messages
             .iter()
             .filter(|m| m.text_content().contains("Scaffolded "))
@@ -597,7 +606,8 @@ async fn test_new_guard_refusal_is_synchronous_without_streaming() {
             "guard refusal must not spawn a worker"
         );
         assert!(
-            !app.messages
+            !app.session
+                .messages
                 .iter()
                 .any(|m| m.text_content().contains("Scaffolding '")),
             "no progress panel for a refused run"
@@ -659,12 +669,14 @@ async fn test_new_remote_failure_streams_contained_summary() {
         // T-013: the streamed run-start header plus step lines are present,
         // and the contained remote failure is reported in the summary.
         assert!(
-            app.messages
+            app.session
+                .messages
                 .iter()
                 .any(|m| m.text_content().contains("Scaffolding '")),
             "streamed progress panel must exist for a hosting run"
         );
         let summary = app
+            .session
             .messages
             .iter()
             .find(|m| m.text_content().contains("Scaffolded "))

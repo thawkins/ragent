@@ -86,7 +86,7 @@ async fn off_disables_router() {
 async fn status_reports_enabled_and_tier() {
     let mut app = app_with_session();
     app.router_enabled = true;
-    app.router_current_tier = Some("MEDIUM".to_string());
+    app.session.router_current_tier = Some("MEDIUM".to_string());
     app.execute_slash_command("/router status").await;
     assert_eq!(app.status, "router: status");
     let text = last_message(&app);
@@ -168,7 +168,7 @@ async fn test_with_prompt_classifies_and_records_tier() {
         "expected a classified tier, got {}",
         app.status
     );
-    assert!(app.router_current_tier.is_some());
+    assert!(app.session.router_current_tier.is_some());
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +208,10 @@ async fn reload_with_router_section_succeeds() {
         app.router_enabled,
         "reload must adopt the file's enabled flag"
     );
-    assert!(app.router_current_tier.is_none(), "reload resets the tier");
+    assert!(
+        app.session.router_current_tier.is_none(),
+        "reload resets the tier"
+    );
 }
 
 #[tokio::test]

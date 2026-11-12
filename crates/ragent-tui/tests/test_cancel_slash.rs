@@ -225,7 +225,7 @@ async fn cancel_requests_through_the_registry_and_keeps_the_row() {
 
     // A task the registry actually knows about, with its cancel flag.
     let mut entry = task_entry("explore-req01", "explore", TaskStatus::Running);
-    entry.parent_session_id = app.session_id.clone().unwrap_or_default();
+    entry.parent_session_id = app.session.session_id.clone().unwrap_or_default();
     let task_id = entry.id.clone();
     let flag = manager.insert_task_for_test(entry);
     app.active_tasks

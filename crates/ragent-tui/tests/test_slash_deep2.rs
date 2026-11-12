@@ -85,7 +85,7 @@ fn cron_event(id: &str, enabled: bool) -> CronEvent {
 #[tokio::test]
 async fn bug_report_writes_redacted_report_file() {
     let (_g, _e, temp, mut app) = isolated_app();
-    app.token_usage = (120, 34);
+    app.session.token_usage = (120, 34);
     app.log_entries.push(ragent_tui::app::LogEntry {
         timestamp: chrono::Utc::now(),
         level: ragent_tui::app::LogLevel::Info,
@@ -121,7 +121,7 @@ async fn bug_report_with_unknown_session_reports_not_found() {
     let (_g, _e, temp, mut app) = isolated_app();
     // A non-empty session id `ensure_session` leaves untouched; storage has no
     // such row, so the report's Ok(None) branch renders.
-    app.session_id = Some("ghost-session".to_string());
+    app.session.session_id = Some("ghost-session".to_string());
 
     app.execute_slash_command("/bug-report").await;
 
@@ -576,11 +576,17 @@ async fn mode_all_role_variants_and_normal_alias() {
             "{cmd} status was {}",
             app.status
         );
-        assert!(app.role_mode.is_some(), "{cmd} should set a role mode");
+        assert!(
+            app.session.role_mode.is_some(),
+            "{cmd} should set a role mode"
+        );
     }
 
     // `normal` is an alias for `off`.
     app.execute_slash_command("/mode normal").await;
     assert_eq!(app.status, "mode: normal");
-    assert!(app.role_mode.is_none(), "normal must clear the role mode");
+    assert!(
+        app.session.role_mode.is_none(),
+        "normal must clear the role mode"
+    );
 }

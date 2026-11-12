@@ -96,14 +96,15 @@ impl SkillProject {
         let mut app = support::make_app();
         // The slash-command gate creates a session on demand; a pre-set id
         // keeps the invocation form from touching session storage.
-        app.session_id = Some("skill-test-session".to_string());
+        app.session.session_id = Some("skill-test-session".to_string());
         app
     }
 }
 
 /// The text of the most recently appended message.
 fn last_message_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(ragent_types::message::Message::text_content)
         .unwrap_or_default()
@@ -111,7 +112,8 @@ fn last_message_text(app: &App) -> String {
 
 /// Every message body currently in the transcript.
 fn all_message_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .map(ragent_types::message::Message::text_content)
         .collect::<Vec<_>>()
@@ -204,7 +206,7 @@ async fn test_skill_load_starts_invocation() {
         name: "Ollama".to_string(),
         source: ProviderSource::AutoDiscovered,
     });
-    app.selected_model = Some("ollama/qwen3:latest".to_string());
+    app.session.selected_model = Some("ollama/qwen3:latest".to_string());
 
     app.execute_slash_command("/skill tiny").await;
 
@@ -238,7 +240,7 @@ async fn test_skill_load_reports_a_stale_allowed_tool_entry() {
         name: "Ollama".to_string(),
         source: ProviderSource::AutoDiscovered,
     });
-    app.selected_model = Some("ollama/qwen3:latest".to_string());
+    app.session.selected_model = Some("ollama/qwen3:latest".to_string());
 
     app.execute_slash_command("/skill typo").await;
 

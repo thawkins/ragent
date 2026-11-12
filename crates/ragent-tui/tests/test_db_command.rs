@@ -63,7 +63,7 @@ fn test_db_registered_in_slash_commands() {
 #[test]
 fn test_db_suggestions_offer_prune_and_help() {
     let mut app = make_app();
-    app.input = "/db".to_string();
+    app.session.input = "/db".to_string();
     app.update_slash_menu();
     let menu = app
         .slash_menu
@@ -89,11 +89,12 @@ fn test_db_suggestions_offer_prune_and_help() {
 #[tokio::test]
 async fn test_help_index_lists_db() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/help").await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("help should create a message")
@@ -107,11 +108,12 @@ async fn test_help_index_lists_db() {
 #[tokio::test]
 async fn test_db_help_lists_subcommands() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/db help").await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("db help should create a message")
@@ -139,7 +141,7 @@ async fn test_db_help_lists_subcommands() {
 async fn test_bare_db_shows_help() {
     // A bare `/db` must not prune anything - it shows help instead.
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/db").await;
 
@@ -148,6 +150,7 @@ async fn test_bare_db_shows_help() {
         "bare /db must not arm the prune dialog"
     );
     let text = app
+        .session
         .messages
         .last()
         .expect("bare /db should create a message")
@@ -161,11 +164,12 @@ async fn test_bare_db_shows_help() {
 #[tokio::test]
 async fn test_db_unknown_subcommand_is_rejected() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/db wat").await;
 
     let text = app
+        .session
         .messages
         .last()
         .expect("unknown subcommand should create a message")
@@ -181,7 +185,7 @@ async fn test_db_unknown_subcommand_is_rejected() {
 #[tokio::test]
 async fn test_db_prune_dry_run_deletes_nothing() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     let storage = Arc::clone(&app.storage);
     seed_old_messages(&storage, "test-session", 3, 30);
 
@@ -201,6 +205,7 @@ async fn test_db_prune_dry_run_deletes_nothing() {
         .expect("count must succeed");
     assert_eq!(after, before, "--dry-run must delete nothing");
     let text = app
+        .session
         .messages
         .last()
         .expect("dry run should create a message")
@@ -218,7 +223,7 @@ async fn test_db_prune_dry_run_deletes_nothing() {
 #[tokio::test]
 async fn test_db_prune_arms_confirmation_and_deletes_only_on_yes() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     let storage = Arc::clone(&app.storage);
     seed_old_messages(&storage, "test-session", 2, 40);
 
@@ -251,7 +256,7 @@ async fn test_db_prune_accepts_joined_days_form() {
     // `--days=N` (joined) must arm the dialog with the same window as the
     // two-token `--days N` form.
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/db prune --days=21").await;
 
@@ -262,7 +267,7 @@ async fn test_db_prune_accepts_joined_days_form() {
 #[tokio::test]
 async fn test_db_prune_defaults_to_configured_window() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.db_retention_days = 7;
 
     app.execute_slash_command("/db prune").await;
@@ -280,7 +285,7 @@ async fn test_db_prune_rejects_zero_days() {
     // A zero-day window would empty the store; it must be refused, not silently
     // accepted or coerced.
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/db prune --days 0").await;
 
@@ -294,12 +299,13 @@ async fn test_db_prune_rejects_zero_days() {
 #[tokio::test]
 async fn test_db_prune_rejects_unknown_flag() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/db prune --wat").await;
 
     assert!(!app.db_prune_confirm_open);
     let text = app
+        .session
         .messages
         .last()
         .expect("bad flag should create a message")

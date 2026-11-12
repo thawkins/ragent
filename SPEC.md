@@ -2026,16 +2026,42 @@ The TUI is a ratatui full-screen interface with these panels:
 | Teammate strip | One row of pills under the status bar, one per active teammate (status glyph, clipped name, focused highlight, `Alt+^v:cycle` hint); omitted when no team is active (spec `agentui` FR-027) |
 | Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` status glyphs, and a background-shell section; openable from the keyboard with `Alt+A` (the chord resolves to `InputAction::ToggleAgentsWindow` and calls the same `App::toggle_agents_window` the button click does, so both share one visibility path, one no-subject no-op and one redraw flag - spec `agentssetup` FR-022); keyboard-first: a block cursor (`Up`/`Down`/`PgUp`/`PgDn`) selects a row, `Space` toggles suspend/resume, `Del` arms the kill confirmation, `Enter` opens the row's output view, and clicking a row selects it; the FR-077 key legend sits in the footer (spec `agentui` FR-006..FR-016) |
 | Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; the block cursor plus `Enter`/`Space`/`Del` drive focus, suspend and shutdown; clicking a teammate selects it (spec `agentui` FR-017..FR-026) |
+| Session sidebar | Left-hand list of every session: `+ New session`, `Pinned`, then one section per project (git work tree of the session directory, launch project first); attention markers `!` waiting, `*` running, `x` failed, `o` unread; relative age; filter, per-project collapse, drag resize, `Alt+S` toggle; hidden below 100 columns (spec `MULTISESSION` M5) |
 | Input | Command-line with slash-command autocomplete |
 | Permission dialog | Modal approval dialog with live countdown (120 s) |
 | Question dialog | Modal user question (free-text or multiple-choice) |
 | Row-action dialog | Yes/No confirmation for destructive row actions (sub-agent kill, background-shell cancel, teammate suspend/shutdown) drawn over the windows, keyboard and mouse answered (spec `agentui` T-009) |
+
+### 6.1a Multiple sessions
+
+The TUI focuses one session (`App::session`) and parks the others in a
+most-recently-focused registry (`App::background`). Bus events are routed
+to the session that owns them (its own id, a sub-agent's parent, or a
+teammate's lead); work for a background session runs the normal handlers
+with that session swapped into focus, so background sessions keep running
+and their permission requests queue on them rather than opening a dialog.
+Each session carries its own directory, model, permission and question
+queues, and run state; focusing a session moves the TUI's working
+directory there, and the agent loop loads a session's own
+`.ragent/ragent.json` when its directory has one (`Config::load_for`).
+The open sessions are saved under the `tui.sessions.open` setting and
+reopened at startup (`ragent --new` skips this). Untitled sessions are
+titled from the first prompt. The `on_notification` hook trigger
+(Claude: `Notification`) fires when a background session starts waiting,
+finishes or fails. Each open project has its own services: code index
+(opened when its config enables indexing and it has a `.ragent` directory),
+specs, custom agents, plugin commands, and an MCP client with its own tool
+registry (user-global and plugin servers, stdio servers started in the
+project root; a project's own config still cannot add servers). A
+project's services are released when its last open session closes. Design
+and milestones: `docs/plans/MULTISESSION.md`.
 
 ### 6.2 Slash Commands
 
 | Command | Description |
 |---------|-------------|
 | `/quit` / `/exit` | Exit ragent |
+| `/session` | Multiple sessions: `[list] \| list --all \| list --archived \| new [path] \| switch <id-or-title> \| close \| rename <title> \| pin \| archive \| unarchive <id-or-title> \| help` (spec `MULTISESSION`) |
 | `/provider` | Open provider setup dialog (always allows editing the stored key) |
 | `/model` | Select model (jumps to model list when a provider is already configured) |
 | `/agent` | Select agent |

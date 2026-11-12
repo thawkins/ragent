@@ -83,6 +83,11 @@ struct Cli {
     #[arg(long, global = true, default_value = "info")]
     log_level: String,
 
+    /// Start a fresh TUI session instead of reopening the sessions that were
+    /// open when ragent last exited
+    #[arg(long = "new")]
+    new_session: bool,
+
     /// Disable TUI, use plain stdout
     #[arg(long, global = true)]
     no_tui: bool,
@@ -956,6 +961,8 @@ async fn async_main() -> Result<()> {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         bg_service: std::sync::OnceLock::new(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
@@ -1250,7 +1257,11 @@ async fn async_main() -> Result<()> {
                     session_processor,
                     (*resolved_agent).clone(),
                     cli.log,
-                    None,
+                    if cli.new_session {
+                        ragent_tui::StartupSession::New
+                    } else {
+                        ragent_tui::StartupSession::Restore
+                    },
                     tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
                     db_path.clone(),
                     config.read().await.config_paths.clone(),
@@ -1450,7 +1461,7 @@ async fn async_main() -> Result<()> {
                     session_processor,
                     (*resolved_agent).clone(),
                     cli.log,
-                    Some(id),
+                    ragent_tui::StartupSession::Resume(id),
                     tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
                     db_path.clone(),
                     config.read().await.config_paths.clone(),

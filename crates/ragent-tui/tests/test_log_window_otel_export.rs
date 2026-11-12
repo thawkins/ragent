@@ -243,7 +243,7 @@ async fn test_tool_call_is_exported_with_the_panel_closed() {
         app.show_log = false;
         assert!(!app.show_log, "the test must run with the panel closed");
         let session_id = "test-session-closed".to_string();
-        app.session_id = Some(session_id.clone());
+        app.session.session_id = Some(session_id.clone());
 
         let captured = capture(|| {
             futures::executor::block_on(app.handle_event(Event::ToolCallStart {
@@ -283,7 +283,7 @@ async fn test_tool_call_event_reaches_tracing_from_the_log_window() {
     // `handle_event` only records a log line for the session it considers
     // current, and the bare test `App` has none set, so pin one.
     let session_id = "test-session-1".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
 
     // The capture must wrap the emit, so the event is handled inside `capture`.
     // `capture` takes a synchronous closure and `handle_event` is async, so the

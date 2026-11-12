@@ -124,7 +124,7 @@ impl App {
     /// `From: /new` message when the worker finishes. No sub-agent and no
     /// LLM turn is involved.
     fn run_scaffold(&mut self, request: &ScaffoldRequest) {
-        let cwd = crate::app::helpers::current_working_dir();
+        let cwd = self.cwd_path.clone();
 
         // FR-002: refuse non-empty targets before any filesystem writes.
         if let Err(err) = enforce_empty_directory_guard(&cwd) {
@@ -155,6 +155,7 @@ impl App {
         self.newproj_progress_text = None;
         self.newproj_progress_slug = None;
         self.newproj_running = true;
+        self.newproj_origin_session = self.session.session_id.clone();
 
         // Seed the progress panel: the first streamed line is visible as
         // soon as the worker's first step starts. The header is plain text
@@ -244,6 +245,14 @@ impl App {
     /// collapsed into the final FR-011 summary message and the status line
     /// reports the terminal state.
     pub fn poll_newproj_result(&mut self) {
+        // Progress and the summary belong to the session that started the
+        // scaffold (MULTISESSION).
+        let origin = self.newproj_origin_session.clone();
+        self.with_origin_session(origin.as_deref(), Self::poll_newproj_result_in_origin);
+    }
+
+    /// [`Self::poll_newproj_result`] with the scaffold's own session focused.
+    fn poll_newproj_result_in_origin(&mut self) {
         // Stream any fresh worker progress lines into the panel.
         let drained: Vec<String> = match self.newproj_progress.lock() {
             Ok(mut lines) => std::mem::take(&mut *lines),
@@ -278,19 +287,23 @@ impl App {
         };
         self.newproj_running = false;
         self.needs_redraw = true;
+        // The panel is final: drop its text so a later poll (in whichever
+        // session is focused) cannot recreate it.
+        self.newproj_progress_text = None;
+        self.newproj_origin_session = None;
         match outcome {
             Ok((summary, stack_note)) => {
                 let mut text = format!("From: /new\n\n{summary}");
                 text.push_str(&stack_note);
                 // Start a fresh message: the progress panel message must
                 // not absorb the summary as a trailing text part.
-                self.force_new_message = true;
+                self.session.force_new_message = true;
                 self.append_assistant_text(&text);
                 self.status = "new: scaffolded".to_string();
                 self.push_log_no_agent(LogLevel::Info, "new: scaffold complete".to_owned());
             }
             Err(err) => {
-                self.force_new_message = true;
+                self.session.force_new_message = true;
                 self.append_assistant_text(&format!("From: /new\n\n[err] **{err}**"));
                 self.status = "new: emission failed".to_string();
                 self.push_log_no_agent(LogLevel::Warn, "new: scaffold failed".to_owned());
@@ -314,7 +327,7 @@ impl App {
         let Some(header_line) = self.newproj_progress_slug.clone() else {
             return;
         };
-        for (i, msg) in self.messages.iter_mut().enumerate() {
+        for (i, msg) in self.session.messages.iter_mut().enumerate() {
             if msg.role != ragent_agent::message::Role::Assistant {
                 continue;
             }
@@ -329,13 +342,15 @@ impl App {
         }
         // No panel message yet: create one (first drained batch). The raw
         // header is stored verbatim so the first-line lookup keeps matching.
-        if let Some(ref sid) = self.session_id {
-            self.force_new_message = false;
-            self.messages.push(ragent_agent::message::Message::new(
-                sid.clone(),
-                ragent_agent::message::Role::Assistant,
-                vec![ragent_agent::message::MessagePart::Text { text: rendered }],
-            ));
+        if let Some(ref sid) = self.session.session_id {
+            self.session.force_new_message = false;
+            self.session
+                .messages
+                .push(ragent_agent::message::Message::new(
+                    sid.clone(),
+                    ragent_agent::message::Role::Assistant,
+                    vec![ragent_agent::message::MessagePart::Text { text: rendered }],
+                ));
             self.trim_messages_if_needed();
         }
     }

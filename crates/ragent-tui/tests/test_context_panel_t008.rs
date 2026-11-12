@@ -7,7 +7,7 @@ mod support;
 /// Mirror of [`ragent_agent::agent::resolve_default_model`] resolution used
 /// to determine which (provider, model) pair the panel should look up.
 fn resolved_default_model(app: &ragent_tui::App) -> Option<(String, String)> {
-    if let Some(model) = app.agent_info.model.as_ref() {
+    if let Some(model) = app.session.agent_info.model.as_ref() {
         return Some((model.provider_id.clone(), model.model_id.clone()));
     }
     app.provider_registry

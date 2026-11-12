@@ -95,23 +95,23 @@ async fn test_esc_sets_the_redraw_flag() {
 #[tokio::test]
 async fn test_esc_leaves_input_buffer_and_attachments_untouched() {
     let mut app = app_with_menu_open().await;
-    app.input = "KEEP-ME".to_string();
-    app.input_cursor = app.input_len_chars();
-    app.pending_attachments = vec![std::path::PathBuf::from("/tmp/keep.png")];
+    app.session.input = "KEEP-ME".to_string();
+    app.session.input_cursor = app.input_len_chars();
+    app.session.pending_attachments = vec![std::path::PathBuf::from("/tmp/keep.png")];
 
     app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert_eq!(
-        app.input, "KEEP-ME",
+        app.session.input, "KEEP-ME",
         "FR-031: Esc must not mutate the input buffer"
     );
     assert_eq!(
-        app.input_cursor,
+        app.session.input_cursor,
         app.input_len_chars(),
         "FR-031: Esc must not move the cursor"
     );
     assert_eq!(
-        app.pending_attachments,
+        app.session.pending_attachments,
         vec![std::path::PathBuf::from("/tmp/keep.png")],
         "FR-031: Esc must not touch staged attachments"
     );
@@ -120,8 +120,8 @@ async fn test_esc_leaves_input_buffer_and_attachments_untouched() {
 #[tokio::test]
 async fn test_esc_leaves_the_queue_untouched() {
     let mut app = app_with_menu_open().await;
-    app.input_queue.push_back(entry("first"));
-    app.input_queue.push_back(entry("second"));
+    app.session.input_queue.push_back(entry("first"));
+    app.session.input_queue.push_back(entry("second"));
 
     app.handle_key_event(key(KeyCode::Esc)).await;
 
@@ -135,16 +135,16 @@ async fn test_esc_leaves_the_queue_untouched() {
 #[tokio::test]
 async fn test_esc_leaves_the_running_turn_untouched() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
+    app.session.cancel_flag = Some(flag.clone());
     app.handle_key_event(alt(KeyCode::Char('q'))).await;
     let status_before = app.status.clone();
 
     app.handle_key_event(key(KeyCode::Esc)).await;
 
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "FR-032: dismissing the menu must not stop the running turn"
     );
     assert!(
@@ -164,13 +164,13 @@ async fn test_esc_leaves_the_running_turn_untouched() {
 #[tokio::test]
 async fn test_plain_character_is_swallowed_while_menu_is_open() {
     let mut app = app_with_menu_open().await;
-    app.input = "PROBE".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = "PROBE".to_string();
+    app.session.input_cursor = app.input_len_chars();
 
     app.handle_key_event(key(KeyCode::Char('z'))).await;
 
     assert_eq!(
-        app.input, "PROBE",
+        app.session.input, "PROBE",
         "FR-031: a printable character must not reach the input buffer while the menu is open"
     );
     assert!(
@@ -182,13 +182,13 @@ async fn test_plain_character_is_swallowed_while_menu_is_open() {
 #[tokio::test]
 async fn test_backspace_is_swallowed_while_menu_is_open() {
     let mut app = app_with_menu_open().await;
-    app.input = "PROBE".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = "PROBE".to_string();
+    app.session.input_cursor = app.input_len_chars();
 
     app.handle_key_event(key(KeyCode::Backspace)).await;
 
     assert_eq!(
-        app.input, "PROBE",
+        app.session.input, "PROBE",
         "FR-031: Backspace must not edit the input buffer while the menu is open"
     );
 }
@@ -196,13 +196,13 @@ async fn test_backspace_is_swallowed_while_menu_is_open() {
 #[tokio::test]
 async fn test_enter_is_swallowed_while_menu_is_open() {
     let mut app = app_with_menu_open().await;
-    app.input = "typed but not sent".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = "typed but not sent".to_string();
+    app.session.input_cursor = app.input_len_chars();
 
     app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert!(
-        app.messages.is_empty(),
+        app.session.messages.is_empty(),
         "FR-031: Enter must not dispatch a turn while the menu is open"
     );
     assert_eq!(
@@ -211,7 +211,7 @@ async fn test_enter_is_swallowed_while_menu_is_open() {
         "FR-031: Enter must not enqueue a message while the menu is open"
     );
     assert_eq!(
-        app.input, "typed but not sent",
+        app.session.input, "typed but not sent",
         "FR-031: the pending text must survive the swallowed Enter"
     );
 }
@@ -223,9 +223,9 @@ async fn test_enter_is_swallowed_while_menu_is_open() {
 #[tokio::test]
 async fn test_esc_still_cancels_a_running_turn_when_menu_is_closed() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let flag = Arc::new(AtomicBool::new(false));
-    app.cancel_flag = Some(flag.clone());
+    app.session.cancel_flag = Some(flag.clone());
     assert!(!app.queue_menu_open, "precondition: the menu is closed");
 
     app.handle_key_event(key(KeyCode::Esc)).await;

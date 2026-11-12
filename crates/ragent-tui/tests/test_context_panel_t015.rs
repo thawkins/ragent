@@ -129,13 +129,15 @@ fn test_history_growth_leaves_system_prompt_partition_stable() {
     let mut app = support::make_app();
     let before = app.context_partition_snapshot();
 
-    app.messages.push(ragent_agent::message::Message::new(
-        "session-1",
-        ragent_agent::message::Role::User,
-        vec![ragent_agent::message::MessagePart::Text {
-            text: "turn content for partition arithmetic".into(),
-        }],
-    ));
+    app.session
+        .messages
+        .push(ragent_agent::message::Message::new(
+            "session-1",
+            ragent_agent::message::Role::User,
+            vec![ragent_agent::message::MessagePart::Text {
+                text: "turn content for partition arithmetic".into(),
+            }],
+        ));
 
     let after = app.context_partition_snapshot();
     assert_eq!(

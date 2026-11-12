@@ -107,7 +107,7 @@ async fn test_execute_slash_command_sets_last_prompt() {
     let mut app = support::make_app();
     app.execute_slash_command("/about").await;
     assert_eq!(
-        app.last_prompt, "/about",
+        app.session.last_prompt, "/about",
         "slash command must be recorded as the last prompt so the status-bar \
          tag shows it"
     );
@@ -117,7 +117,7 @@ async fn test_execute_slash_command_sets_last_prompt() {
 async fn test_execute_slash_command_trims_whitespace() {
     let mut app = support::make_app();
     app.execute_slash_command("  /agents  ").await;
-    assert_eq!(app.last_prompt, "/agents");
+    assert_eq!(app.session.last_prompt, "/agents");
 }
 
 #[tokio::test]
@@ -164,7 +164,7 @@ fn test_statusbar_renders_last_prompt_tag() {
     pin_host_fields(&mut app);
     // 60 chars exceeds the 48-char status-bar tag budget, so the rendered tag
     // is the first 48 chars plus the `....` truncation suffix.
-    app.last_prompt = "x".repeat(60);
+    app.session.last_prompt = "x".repeat(60);
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
     let expected = format!("[{}....]", "x".repeat(48));
@@ -183,7 +183,7 @@ const TEST_CWD: &str = "~/demo/a/very/long/project/path";
 fn test_statusbar_tag_group_follows_branch_after_cwd() {
     let mut app = support::make_app();
     app.cwd = TEST_CWD.to_string();
-    app.last_prompt = "hello world".to_string();
+    app.session.last_prompt = "hello world".to_string();
     app.git_branch = Some("main".to_string());
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
@@ -222,7 +222,7 @@ fn test_statusbar_tag_group_follows_branch_after_cwd() {
 fn test_statusbar_tag_group_shortens_cwd_to_fit() {
     let mut app = support::make_app();
     app.cwd = format!("~/{}/{}", "d".repeat(60), "e".repeat(40));
-    app.last_prompt = "x".repeat(60); // 54-column tag (48 chars + `....`)
+    app.session.last_prompt = "x".repeat(60); // 54-column tag (48 chars + `....`)
     app.git_branch = Some("main".to_string());
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
@@ -261,7 +261,7 @@ fn test_statusbar_branch_before_tag_and_cwd_before_branch() {
     // from the process working directory, which a consolidated test binary
     // shares with the cwd-mutating children.
     app.cwd = TEST_CWD.to_string();
-    app.last_prompt = "hello world".to_string();
+    app.session.last_prompt = "hello world".to_string();
     app.git_branch = Some("main".to_string());
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");

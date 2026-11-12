@@ -105,7 +105,7 @@ impl App {
             }
         };
 
-        let Some(parent_sid) = self.session_id.clone() else {
+        let Some(parent_sid) = self.session.session_id.clone() else {
             // The gate in `execute_slash_command_inner` already created a
             // session; reaching here with none is a bug - fail visibly rather
             // than holding the launch slot forever.
@@ -122,7 +122,7 @@ impl App {
         // rather than by a second hand-written guard here.
         let agent_manager = self.session_processor.agent_manager.get().cloned();
         let prompt_owned = prompt.to_string();
-        let model_override = self.selected_model.clone();
+        let model_override = self.session.selected_model.clone();
 
         let work = detached_launch_work(
             agent_manager,

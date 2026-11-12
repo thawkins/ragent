@@ -386,7 +386,7 @@ pub fn open_loop_setup(app: &mut App) {
         .map(|a| (a.name.clone(), a.description.clone()))
         .collect();
     let defaults = loop_config_defaults();
-    let mut state = LoopSetupState::new(agents, app.current_agent_index);
+    let mut state = LoopSetupState::new(agents, app.session.current_agent_index);
     state.max_steps_field = InputField::with_text(defaults.max_steps.to_string());
     if let Some(cost_limit) = defaults.cost_limit {
         state.cost_limit_field = InputField::with_text(cost_limit.to_string());
@@ -574,11 +574,11 @@ impl App {
             self.status = "loop: no provider configured - use /provider first".to_string();
             return;
         }
-        if self.selected_model.is_none() {
+        if self.session.selected_model.is_none() {
             self.status = "loop: no model selected - use /model first".to_string();
             return;
         }
-        let Some(sid) = self.session_id.clone() else {
+        let Some(sid) = self.session.session_id.clone() else {
             self.status = "[warn] No active session".to_string();
             return;
         };
@@ -587,16 +587,16 @@ impl App {
         let goal_text = spec.goal.clone();
         let display_text = format!("[loop {}] {}", spec.agent, goal_text);
         let msg = ragent_agent::message::Message::user_text(&sid, display_text.clone());
-        self.messages.push(msg);
-        self.last_prompt = goal_text.clone();
+        self.session.messages.push(msg);
+        self.session.last_prompt = goal_text.clone();
         self.schedule_context_snapshot_refresh();
         self.add_to_history(goal_text.clone());
-        self.input.clear();
-        self.input_cursor = 0;
+        self.session.input.clear();
+        self.session.input_cursor = 0;
         self.file_menu = None;
         self.set_status_working("loop running");
-        self.stream_in_bytes = 0;
-        self.stream_out_bytes = 0;
+        self.session.stream_in_bytes = 0;
+        self.session.stream_out_bytes = 0;
         self.trim_messages_if_needed();
         let truncated = crate::app::helpers::truncate_to_char_boundary(&goal_text, 120);
         self.push_log_no_agent(
@@ -607,7 +607,7 @@ impl App {
         let agent = self.loop_dispatch_agent(&spec);
         let processor = self.session_processor.clone();
         let flag = Arc::new(AtomicBool::new(false));
-        self.cancel_flag = Some(flag.clone());
+        self.session.cancel_flag = Some(flag.clone());
         tokio::spawn(async move {
             processor.start_loop(&sid, spec).await;
             if let Err(e) = processor

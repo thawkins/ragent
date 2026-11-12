@@ -368,8 +368,9 @@ type TaskCounts = HashMap<String, (usize, usize)>;
 /// once per row, and `team::pending_plans` is the single implementation of the
 /// roster-plus-mailbox join so the popup cannot disagree with `team_status`.
 fn pending_plans_by_agent(app: &App) -> HashMap<String, PendingPlan> {
-    let working_dir = std::env::current_dir().unwrap_or_default();
-    app.active_team
+    let working_dir = app.cwd_path.clone();
+    app.session
+        .active_team
         .as_ref()
         .and_then(|team| TeamStore::load_by_name(&team.name, &working_dir).ok())
         .map(|store| {
@@ -427,8 +428,9 @@ fn parked_resume_hint(members: &[TeamMember]) -> Option<String> {
 ///
 /// The store is read once per frame (NFR-002), never once per row.
 fn task_counts(app: &App) -> TaskCounts {
-    let working_dir = std::env::current_dir().unwrap_or_default();
-    app.active_team
+    let working_dir = app.cwd_path.clone();
+    app.session
+        .active_team
         .as_ref()
         .and_then(|team| TeamStore::load_by_name(&team.name, &working_dir).ok())
         .and_then(|store| TaskStore::open(&store.dir).ok())
@@ -545,19 +547,21 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     app.refresh_team_member_session_ids();
     let team_name = app
+        .session
         .active_team
         .as_ref()
         .map(|team| team.name.clone())
         .unwrap_or_else(|| "team".to_string());
 
-    let lead_session = app.session_id.clone().unwrap_or_default();
+    let lead_session = app.session.session_id.clone().unwrap_or_default();
     let lead_steps = app.event_bus.current_tool_calls(&lead_session);
     let lead_elapsed = lead_elapsed(app, &lead_session);
-    let lead_agent_id = app.agent_name.clone();
+    let lead_agent_id = app.session.agent_name.clone();
     let (lead_sent, lead_recv) = app
+        .session
         .team_message_counts
         .get(&lead_agent_id)
-        .or_else(|| app.team_message_counts.get("lead"))
+        .or_else(|| app.session.team_message_counts.get("lead"))
         .copied()
         .unwrap_or((0, 0));
 
@@ -566,7 +570,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     // `plan_pending` row can name the plan it waits on.
     let parked_plans = pending_plans_by_agent(app);
     let global_model = app.active_model_ref_string();
-    let member_count = app.team_members.len();
+    let member_count = app.session.team_members.len();
 
     let mut lines: Vec<Line> = Vec::new();
     // Click key per painted row, kept index-aligned with `lines` (T-008): the
@@ -590,12 +594,12 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().fg(lead).add_modifier(Modifier::BOLD),
             ),
             Cell::left(
-                clip(&app.agent_name, columns::LABEL_W),
+                clip(&app.session.agent_name, columns::LABEL_W),
                 columns::LABEL_W,
                 Style::default().fg(lead).add_modifier(Modifier::BOLD),
             ),
             Cell::left(
-                clip(&app.agent_name, columns::AGENT_TYPE_W),
+                clip(&app.session.agent_name, columns::AGENT_TYPE_W),
                 columns::AGENT_TYPE_W,
                 Style::default().fg(lead),
             ),
@@ -634,11 +638,11 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // -- teammate rows (FR-022 through FR-025) -----------------------------
     let teammate_row_start = row_keys.len();
-    for (index, member) in app.team_members.iter().enumerate() {
+    for (index, member) in app.session.team_members.iter().enumerate() {
         let member_agent_name = member.agent_id.clone();
         let id_short = short_id(&member.agent_id);
         let label = teammate_label(member, &id_short);
-        let is_focused = app.focused_teammate.as_ref() == Some(&member.agent_id);
+        let is_focused = app.session.focused_teammate.as_ref() == Some(&member.agent_id);
         let steps = member
             .session_id
             .as_deref()
@@ -646,6 +650,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             .unwrap_or(0);
         let (claimed, done) = counts.get(&member.agent_id).copied().unwrap_or((0, 0));
         let (sent, recv) = app
+            .session
             .team_message_counts
             .get(&member.agent_id)
             .copied()
@@ -783,7 +788,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     // While any member is `Blocked` or `Suspended`, the popup says which key
     // gets it out, so a parked team is visibly escapable rather than looking
     // wedged. The row carries no click key: it names keys, it is not a row.
-    if let Some(hint) = parked_resume_hint(&app.team_members) {
+    if let Some(hint) = parked_resume_hint(&app.session.team_members) {
         let budget = (area.width as usize).saturating_sub(4);
         lines.push(Line::from(vec![
             Span::styled(

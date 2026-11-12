@@ -44,7 +44,7 @@ fn snapshot(history_count: usize) -> ContextPartitionSnapshot {
 
 fn app_with_session(session: &str) -> App {
     let mut app = support::make_app();
-    app.session_id = Some(session.to_string());
+    app.session.session_id = Some(session.to_string());
     app
 }
 
@@ -55,8 +55,8 @@ fn app_with_session(session: &str) -> App {
 #[test]
 fn queue_show_move_up_clamps_at_first_entry() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
-    app.input_queue.push_back(entry("b"));
+    app.session.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("b"));
     app.queue_show_open = true;
     app.queue_show_selected = 0;
 
@@ -70,8 +70,8 @@ fn queue_show_move_up_clamps_at_first_entry() {
 #[test]
 fn queue_show_move_down_clamps_at_last_entry() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
-    app.input_queue.push_back(entry("b"));
+    app.session.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("b"));
     app.queue_show_open = true;
     app.queue_show_selected = 0;
 
@@ -84,8 +84,8 @@ fn queue_show_move_down_clamps_at_last_entry() {
 #[test]
 fn queue_show_move_down_sets_redraw_flag() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
-    app.input_queue.push_back(entry("b"));
+    app.session.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("b"));
     app.queue_show_open = true;
     app.queue_show_selected = 0;
     app.needs_redraw = false;
@@ -98,14 +98,15 @@ fn queue_show_move_down_sets_redraw_flag() {
 fn queue_show_promote_swaps_toward_front_and_follows() {
     let mut app = support::make_app();
     for text in ["a", "b", "c"] {
-        app.input_queue.push_back(entry(text));
+        app.session.input_queue.push_back(entry(text));
     }
     app.queue_show_open = true;
     app.queue_show_selected = 2;
 
     app.queue_show_promote_selected();
     assert_eq!(
-        app.input_queue
+        app.session
+            .input_queue
             .iter()
             .map(|e| e.text.clone())
             .collect::<Vec<_>>(),
@@ -120,15 +121,16 @@ fn queue_show_promote_swaps_toward_front_and_follows() {
 #[test]
 fn queue_show_promote_at_front_is_a_noop() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
-    app.input_queue.push_back(entry("b"));
+    app.session.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("b"));
     app.queue_show_open = true;
     app.queue_show_selected = 0;
     app.needs_redraw = false;
 
     app.queue_show_promote_selected();
     assert_eq!(
-        app.input_queue
+        app.session
+            .input_queue
             .iter()
             .map(|e| e.text.clone())
             .collect::<Vec<_>>(),
@@ -140,26 +142,31 @@ fn queue_show_promote_at_front_is_a_noop() {
 #[test]
 fn queue_show_promote_out_of_range_is_a_noop() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("a"));
     app.queue_show_open = true;
     app.queue_show_selected = 5;
 
     app.queue_show_promote_selected();
-    assert_eq!(app.input_queue.len(), 1, "out-of-range index is ignored");
+    assert_eq!(
+        app.session.input_queue.len(),
+        1,
+        "out-of-range index is ignored"
+    );
 }
 
 #[test]
 fn queue_show_delete_removes_entry_and_shrinks_highlight() {
     let mut app = support::make_app();
     for text in ["a", "b", "c"] {
-        app.input_queue.push_back(entry(text));
+        app.session.input_queue.push_back(entry(text));
     }
     app.queue_show_open = true;
     app.queue_show_selected = 2;
 
     app.queue_show_delete_selected();
     assert_eq!(
-        app.input_queue
+        app.session
+            .input_queue
             .iter()
             .map(|e| e.text.clone())
             .collect::<Vec<_>>(),
@@ -172,12 +179,12 @@ fn queue_show_delete_removes_entry_and_shrinks_highlight() {
 #[test]
 fn queue_show_delete_last_entry_closes_panel() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("only"));
+    app.session.input_queue.push_back(entry("only"));
     app.queue_show_open = true;
     app.queue_show_selected = 0;
 
     app.queue_show_delete_selected();
-    assert!(app.input_queue.is_empty());
+    assert!(app.session.input_queue.is_empty());
     assert!(!app.queue_show_open, "empty queue closes the panel");
     assert_eq!(app.queue_show_selected, 0);
 }
@@ -189,7 +196,7 @@ fn queue_show_delete_out_of_range_is_a_noop() {
     app.queue_show_selected = 3;
 
     app.queue_show_delete_selected();
-    assert!(app.input_queue.is_empty());
+    assert!(app.session.input_queue.is_empty());
 }
 
 #[test]
@@ -215,7 +222,7 @@ fn queue_menu_move_up_skips_unselectable_empty_next_row() {
     // moving up from the `Halt` row lands on it only when a queue entry
     // exists; here it must skip straight past the dead row.
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("a"));
     app.queue_menu_selected = 2;
     app.needs_redraw = false;
 
@@ -233,7 +240,7 @@ fn queue_menu_move_up_skips_unselectable_empty_next_row() {
 #[test]
 fn queue_menu_move_down_stops_at_bottom_row() {
     let mut app = support::make_app();
-    app.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("a"));
     app.queue_menu_selected = ragent_tui::app::QUEUE_MENU_ROWS - 1;
 
     app.queue_menu_move_down();
@@ -256,7 +263,7 @@ fn queue_menu_row_selectable_only_gates_the_next_row() {
     assert!(app.queue_menu_row_selectable(ragent_tui::app::QUEUE_MENU_ROW_SHOW));
     assert!(!app.queue_menu_row_selectable(ragent_tui::app::QUEUE_MENU_ROWS));
 
-    app.input_queue.push_back(entry("a"));
+    app.session.input_queue.push_back(entry("a"));
     assert!(app.queue_menu_row_selectable(ragent_tui::app::QUEUE_MENU_ROW_NEXT));
 }
 
@@ -267,7 +274,7 @@ fn queue_menu_labels_report_resume_when_idle_and_stop_when_blocked() {
 
     // `queue_menu_halt_label` uses `is_input_blocked` (a running turn, not a
     // pending permission dialog), so a processing turn flips it to `Stop`.
-    app.is_processing = true;
+    app.session.is_processing = true;
     assert_eq!(app.queue_menu_halt_label(), "Stop");
     assert_eq!(app.queue_menu_labels(), ["Next", "Stop", "Clear", "Show"]);
 }
@@ -308,7 +315,7 @@ fn usage_display_ollama_without_context_window_reports_local() {
         source: ProviderSource::Database,
     });
     // No selected model -> no context window -> the local label.
-    app.selected_model = None;
+    app.session.selected_model = None;
     let (label, unknown) = app.usage_display();
     assert_eq!(label, "local");
     assert!(!unknown);
@@ -322,7 +329,7 @@ fn usage_display_unknown_provider_without_context_marks_unknown() {
         name: "Some Provider".to_string(),
         source: ProviderSource::EnvVar,
     });
-    app.selected_model = None;
+    app.session.selected_model = None;
     let (label, unknown) = app.usage_display();
     assert_eq!(label, "unknown");
     assert!(unknown, "no context window -> flagged unknown");
@@ -336,11 +343,11 @@ fn usage_display_unknown_provider_without_context_marks_unknown() {
 fn schedule_context_snapshot_refresh_is_a_noop_when_panel_closed() {
     let mut app = support::make_app();
     app.show_context_panel = false;
-    app.context_refresh_inflight = false;
+    app.session.context_refresh_inflight = false;
 
     app.schedule_context_snapshot_refresh();
     assert!(
-        !app.context_refresh_inflight,
+        !app.session.context_refresh_inflight,
         "no refresh is scheduled while the panel is closed"
     );
 }
@@ -350,34 +357,37 @@ async fn schedule_then_poll_context_snapshot_refresh_populates_cache() {
     let mut app = app_with_session("s1");
     app.show_context_panel = true;
     app.schedule_context_snapshot_refresh();
-    assert!(app.context_refresh_inflight, "refresh is in flight");
+    assert!(app.session.context_refresh_inflight, "refresh is in flight");
 
     // The disk-bound work runs on a blocking worker; poll until it lands.
     for _ in 0..200 {
         app.poll_context_snapshot_refresh();
-        if app.context_snapshot_cache.is_some() {
+        if app.session.context_snapshot_cache.is_some() {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     assert!(
-        app.context_snapshot_cache.is_some(),
+        app.session.context_snapshot_cache.is_some(),
         "the background snapshot must be adopted"
     );
-    assert!(!app.context_refresh_inflight, "the in-flight latch clears");
+    assert!(
+        !app.session.context_refresh_inflight,
+        "the in-flight latch clears"
+    );
 }
 
 #[test]
 fn poll_context_snapshot_refresh_drops_stale_history_snapshot() {
     let mut app = app_with_session("s1");
     // Deposit a snapshot whose history count is stale relative to the app.
-    *app.context_snapshot_result.lock().unwrap() = Some(snapshot(999));
-    app.context_refresh_inflight = true;
+    *app.session.context_snapshot_result.lock().unwrap() = Some(snapshot(999));
+    app.session.context_refresh_inflight = true;
     app.show_context_panel = false;
 
     app.poll_context_snapshot_refresh();
     assert!(
-        app.context_snapshot_cache.is_none(),
+        app.session.context_snapshot_cache.is_none(),
         "a snapshot with a mismatched history count must be dropped"
     );
 }
@@ -386,7 +396,7 @@ fn poll_context_snapshot_refresh_drops_stale_history_snapshot() {
 fn context_effective_snapshot_prefers_cache_then_falls_back() {
     let mut app = app_with_session("s1");
     assert!(
-        app.context_snapshot_cache.is_none(),
+        app.session.context_snapshot_cache.is_none(),
         "precondition: no cached snapshot"
     );
     // Fallback computes synchronously.
@@ -394,7 +404,7 @@ fn context_effective_snapshot_prefers_cache_then_falls_back() {
     assert_eq!(computed.history_message_count, 0);
 
     // A cached snapshot wins over the live computation.
-    app.context_snapshot_cache = Some(snapshot(7));
+    app.session.context_snapshot_cache = Some(snapshot(7));
     let cached = app.context_effective_snapshot();
     assert_eq!(cached.history_message_count, 7);
 }
@@ -406,37 +416,37 @@ fn context_effective_snapshot_prefers_cache_then_falls_back() {
 #[test]
 fn handle_paste_text_ignores_empty_and_carriage_returns_only() {
     let mut app = support::make_app();
-    app.input = "keep".to_string();
-    app.input_cursor = 4;
+    app.session.input = "keep".to_string();
+    app.session.input_cursor = 4;
 
     app.handle_paste_text("\r\r");
-    assert_eq!(app.input, "keep", "an all-CR paste is a no-op");
+    assert_eq!(app.session.input, "keep", "an all-CR paste is a no-op");
 
     app.handle_paste_text("");
-    assert_eq!(app.input, "keep");
+    assert_eq!(app.session.input, "keep");
 }
 
 #[test]
 fn handle_paste_text_strips_carriage_returns_and_inserts() {
     let mut app = support::make_app();
-    app.input.clear();
-    app.input_cursor = 0;
+    app.session.input.clear();
+    app.session.input_cursor = 0;
 
     app.handle_paste_text("a\r\nb");
-    assert_eq!(app.input, "a\nb");
+    assert_eq!(app.session.input, "a\nb");
 }
 
 #[test]
 fn handle_paste_text_replaces_active_keyboard_selection() {
     let mut app = support::make_app();
-    app.input = "abcdef".to_string();
-    app.input_cursor = 6;
-    app.kb_select_anchor = Some(3);
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = 6;
+    app.session.kb_select_anchor = Some(3);
 
     app.handle_paste_text("X");
-    assert_eq!(app.input, "abcX");
+    assert_eq!(app.session.input, "abcX");
     assert!(
-        app.kb_select_anchor.is_none(),
+        app.session.kb_select_anchor.is_none(),
         "selection cleared after paste"
     );
 }
@@ -444,39 +454,42 @@ fn handle_paste_text_replaces_active_keyboard_selection() {
 #[test]
 fn cursor_byte_pos_at_char_index_handles_multibyte_and_out_of_range() {
     let mut app = support::make_app();
-    app.input = "aé中".to_string();
+    app.session.input = "aé中".to_string();
     assert_eq!(app.cursor_byte_pos_at_char_index(0), 0);
     assert_eq!(app.cursor_byte_pos_at_char_index(1), 1);
     // 'é' is two bytes, so char index 2 is byte 3.
     assert_eq!(app.cursor_byte_pos_at_char_index(2), 3);
     // Past the end clamps to the byte length.
-    assert_eq!(app.cursor_byte_pos_at_char_index(99), app.input.len());
+    assert_eq!(
+        app.cursor_byte_pos_at_char_index(99),
+        app.session.input.len()
+    );
 }
 
 #[test]
 fn delete_next_char_and_remove_range_edit_middle_of_input() {
     let mut app = support::make_app();
-    app.input = "abcd".to_string();
-    app.input_cursor = 1;
+    app.session.input = "abcd".to_string();
+    app.session.input_cursor = 1;
     app.delete_next_char();
-    assert_eq!(app.input, "acd");
+    assert_eq!(app.session.input, "acd");
 
     app.remove_input_char_range(0, 1);
-    assert_eq!(app.input, "cd");
+    assert_eq!(app.session.input, "cd");
 
     // An empty range is a no-op.
     app.remove_input_char_range(1, 1);
-    assert_eq!(app.input, "cd");
+    assert_eq!(app.session.input, "cd");
 }
 
 #[test]
 fn insert_char_at_cursor_middle_inserts_and_advances() {
     let mut app = support::make_app();
-    app.input = "ac".to_string();
-    app.input_cursor = 1;
+    app.session.input = "ac".to_string();
+    app.session.input_cursor = 1;
     app.insert_char_at_cursor('b');
-    assert_eq!(app.input, "abc");
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input, "abc");
+    assert_eq!(app.session.input_cursor, 2);
 }
 
 #[test]
@@ -527,10 +540,11 @@ fn pane_at_reports_each_visible_panel_and_none_when_hidden() {
 #[test]
 fn clear_project_memory_reports_outcome_in_transcript() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.cwd_path = std::env::temp_dir();
     app.clear_project_memory();
     let text = app
+        .session
         .messages
         .iter()
         .flat_map(|m| m.parts.iter())
@@ -550,31 +564,37 @@ fn clear_project_memory_reports_outcome_in_transcript() {
 #[test]
 fn reset_message_cache_clears_content_lines() {
     let mut app = support::make_app();
-    app.message_content_lines = vec!["stale".to_string()];
+    app.session.message_content_lines = vec!["stale".to_string()];
     app.reset_message_cache();
-    assert_eq!(app.message_content_lines, [] as [std::string::String; 0]);
+    assert_eq!(
+        app.session.message_content_lines,
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]
 fn ensure_copy_content_lines_does_not_panic_on_empty_history() {
     let mut app = support::make_app();
     app.ensure_copy_content_lines();
-    assert_eq!(app.message_content_lines, [] as [std::string::String; 0]);
+    assert_eq!(
+        app.session.message_content_lines,
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]
 fn mark_message_dirty_lowers_the_watermark_only() {
     let mut app = support::make_app();
     // Seed a high watermark, then lower it twice; a lower index wins.
-    app.message_cache_dirty_from = 10;
+    app.session.message_cache_dirty_from = 10;
     app.mark_message_dirty(3);
     assert_eq!(
-        app.message_cache_dirty_from, 3,
+        app.session.message_cache_dirty_from, 3,
         "watermark lowered to the edit index"
     );
     // A higher index must not raise an already-low watermark.
     app.mark_message_dirty(7);
-    assert_eq!(app.message_cache_dirty_from, 3);
+    assert_eq!(app.session.message_cache_dirty_from, 3);
 }
 
 #[test]

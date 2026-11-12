@@ -24,19 +24,19 @@ async fn test_forcecleanup_modal_confirm_flow() {
         .expect("add member");
 
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new("force-team", "s1"));
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new("force-team", "s1"));
     let mut m = TeamMember::new("alice", "tm-001", "general");
     m.status = MemberStatus::Working;
-    app.team_members.push(m);
+    app.session.team_members.push(m);
 
     app.execute_slash_command("/team forcecleanup").await;
 
     assert!(
-        app.pending_forcecleanup.is_some(),
+        app.session.pending_forcecleanup.is_some(),
         "pending modal should be set"
     );
-    let last_msg = app.messages.last().unwrap().text_content();
+    let last_msg = app.session.messages.last().unwrap().text_content();
     assert!(last_msg.contains("Active teammates") || last_msg.contains("Press Enter"));
     assert!(
         app.log_entries
@@ -49,7 +49,7 @@ async fn test_forcecleanup_modal_confirm_flow() {
         .await;
 
     assert!(
-        app.pending_forcecleanup.is_none(),
+        app.session.pending_forcecleanup.is_none(),
         "pending modal should be cleared after confirm"
     );
     // After confirming, team should be cleaned up (status updated)
@@ -65,15 +65,15 @@ async fn test_forcecleanup_modal_confirm_flow() {
 #[tokio::test]
 async fn test_forcecleanup_modal_cancel_flow() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.active_team = Some(TeamConfig::new("force-team", "s1"));
+    app.session.session_id = Some("s1".to_string());
+    app.session.active_team = Some(TeamConfig::new("force-team", "s1"));
     let mut m = TeamMember::new("bob", "tm-002", "general");
     m.status = MemberStatus::Working;
-    app.team_members.push(m);
+    app.session.team_members.push(m);
 
     app.execute_slash_command("/team forcecleanup").await;
     assert!(
-        app.pending_forcecleanup.is_some(),
+        app.session.pending_forcecleanup.is_some(),
         "pending modal should be set"
     );
 
@@ -82,10 +82,10 @@ async fn test_forcecleanup_modal_cancel_flow() {
         .await;
 
     assert!(
-        app.pending_forcecleanup.is_none(),
+        app.session.pending_forcecleanup.is_none(),
         "pending modal should be cleared after cancel"
     );
-    let last_msg = app.messages.last().unwrap().text_content();
+    let last_msg = app.session.messages.last().unwrap().text_content();
     assert!(last_msg.contains("Force-cleanup cancelled"));
     assert!(
         app.log_entries

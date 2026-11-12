@@ -29,7 +29,8 @@ fn enter_temp_dir() -> (CwdGuard, tempfile::TempDir) {
 
 /// The rendered text of the most recent assistant message.
 fn last_text(app: &ragent_tui::App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .expect("an assistant message must have been appended")
         .text_content()
@@ -100,7 +101,7 @@ fn plugins_suggestions_list_all_subcommands() {
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
 
-    app.input = "/plugins".to_string();
+    app.session.input = "/plugins".to_string();
     app.update_slash_menu();
     let menu = app
         .slash_menu
@@ -146,7 +147,7 @@ async fn help_bare_and_unknown_all_render_the_usage_block() {
     let _lock = crate::global_env_lock();
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     for invocation in ["/plugins help", "/plugins", "/plugins bogus"] {
         app.execute_slash_command(invocation).await;
@@ -190,7 +191,7 @@ async fn stores_reports_both_endpoints_as_default_without_a_stores_block() {
     let (_guard, temp) = enter_temp_dir();
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.execute_slash_command("/plugins stores").await;
     let raw = last_text(&app);
     let text = flat_text(&app);
@@ -226,7 +227,7 @@ async fn stores_tags_a_configured_endpoint_as_config() {
     .expect("config writable");
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.execute_slash_command("/plugins stores").await;
     let text = flat_text(&app);
 
@@ -250,7 +251,7 @@ async fn marketplace_show_lists_both_marketplaces_in_separate_sections() {
     let (_guard, temp) = enter_temp_dir();
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.execute_slash_command("/plugins marketplace show").await;
     let raw = last_text(&app);
     let text = flat_text(&app);
@@ -298,7 +299,7 @@ async fn marketplace_show_names_a_configured_endpoint() {
     .expect("config writable");
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.execute_slash_command("/plugins marketplace show").await;
     let text = flat_text(&app);
 
@@ -325,7 +326,7 @@ async fn bare_marketplace_and_unknown_sub_subcommand_render_usage() {
     let _lock = crate::global_env_lock();
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     for invocation in ["/plugins marketplace", "/plugins marketplace bogus"] {
         app.execute_slash_command(invocation).await;
@@ -347,7 +348,7 @@ async fn help_creates_no_files() {
     let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     for invocation in ["/plugins help", "/plugins", "/plugins bogus"] {
         app.execute_slash_command(invocation).await;
@@ -390,7 +391,7 @@ async fn list_reports_a_discovered_plugin_as_disabled() {
         "codex-weather",
     );
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
     assert!(
@@ -437,7 +438,7 @@ async fn list_shows_mcp_server_and_tool_counts() {
         "mongodb",
     );
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
     let listed = panel_text(&app);
@@ -470,7 +471,7 @@ async fn list_shows_live_mcp_tool_count_after_connect() {
         "mongodb",
     );
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     // `App::new` captured the pre-test cwd; point it at the temp project so the
     // plugin scan sees the staged store.
     app.cwd_path = temp.path().to_path_buf();
@@ -520,7 +521,7 @@ async fn add_from_a_local_directory_installs_and_reports_enabled() {
     write_codex_plugin(&src, "codex-weather");
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command(&format!("/plugins add {}", src.display()))
         .await;
@@ -563,7 +564,7 @@ async fn test_harness_reports_per_step_results_without_touching_the_session() {
         "codex-weather",
     );
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins test codex-weather")
         .await;
@@ -592,7 +593,7 @@ async fn enable_loads_the_plugin_and_disable_unloads_it() {
         "codex-weather",
     );
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     // FR-011: enable loads it and states the declared permissions.
     app.execute_slash_command("/plugins enable codex-weather")
@@ -636,7 +637,7 @@ async fn master_switch_disables_the_subsystem() {
     .expect("config writable");
 
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
     let listed = last_text(&app);

@@ -59,6 +59,7 @@ async fn ask(
         timeout_secs,
         false,
         false,
+        &std::env::current_dir().expect("cwd"),
     )
     .await
     .expect("permission check must not error")
@@ -292,6 +293,7 @@ async fn test_auto_approve_allows_without_prompting() {
         1,
         false,
         false,
+        &std::env::current_dir().expect("cwd"),
     )
     .await
     .expect("permission check must not error");
@@ -326,6 +328,7 @@ async fn test_auto_approve_is_suppressed_by_a_forced_checkpoint() {
         1,
         false,
         false,
+        &std::env::current_dir().expect("cwd"),
     )
     .await
     .expect("permission check must not error");

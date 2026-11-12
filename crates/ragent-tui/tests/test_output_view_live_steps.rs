@@ -96,7 +96,7 @@ fn think_tool_call_part() -> MessagePart {
 #[tokio::test]
 async fn test_output_view_cache_invalidates_on_agent_progress() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-sess".to_string());
+    app.session.session_id = Some("lead-sess".to_string());
 
     // Register a sub-agent task so its child session becomes tracked.
     app.handle_event(ragent_agent::event::Event::SubagentStart {
@@ -156,7 +156,7 @@ async fn test_output_view_cache_invalidates_on_agent_progress() {
 #[tokio::test]
 async fn test_output_view_shows_mid_run_tool_call_rows() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-sess".to_string());
+    app.session.session_id = Some("lead-sess".to_string());
 
     let child = "child-sess-2";
     ensure_session(&app, child);
@@ -198,7 +198,7 @@ async fn test_output_view_shows_mid_run_tool_call_rows() {
 #[tokio::test]
 async fn test_output_view_storage_backed_target_renders_transcript() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-sess".to_string());
+    app.session.session_id = Some("lead-sess".to_string());
     let sid = "peer-sess-1".to_string();
 
     ensure_session(&app, &sid);
@@ -227,7 +227,7 @@ async fn test_output_view_storage_backed_target_renders_transcript() {
 #[tokio::test]
 async fn test_output_view_empty_child_session_cache_is_stable() {
     let mut app = support::make_app();
-    app.session_id = Some("lead-sess".to_string());
+    app.session.session_id = Some("lead-sess".to_string());
 
     let g0 = open_and_render(&mut app, "child-sess-3", "explore [c3d4e5f6]", 120, 40);
     let text = screen_text(&app);

@@ -79,17 +79,24 @@ async fn test_input_transition_spool_records_a_typed_character() {
 
 #[tokio::test]
 async fn test_input_transition_spool_is_silent_when_nothing_moves() {
+    // Any test that presses a key appends to the shared spool from its own
+    // process, so a whole-file line count races with them. Seed the buffer
+    // with text unique to this test: a row written by the no-op below would
+    // record `after="<marker>"`, so counting only those rows isolates it.
+    const MARKER: &str = "spool-silent-noop-marker";
     let mut app = support::make_app();
-    let before = read_spool().lines().count();
+    app.session.input = MARKER.to_string();
+    app.session.input_cursor = MARKER.chars().count();
+    let before = rows_ending_with(MARKER).len();
 
     // A key that changes neither the buffer nor the cursor: with an empty
     // transcript this scrolls nothing, so it must add no row at all.
     app.handle_key_event(key(KeyCode::PageDown)).await;
 
-    let after = read_spool().lines().count();
+    let after = rows_ending_with(MARKER).len();
     assert_eq!(
         after, before,
-        "a no-op keypress must not write a transition row (spool grew {before} -> {after})"
+        "a no-op keypress must not write a transition row (rows grew {before} -> {after})"
     );
 }
 

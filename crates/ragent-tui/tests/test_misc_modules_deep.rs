@@ -1650,12 +1650,13 @@ fn backend_panel_switch_by_selector_accepts_kinds_and_rejects_unknown_ids() {
 
     // The already-active local backend is a genuine (no-op) switch attempt.
     assert!(app.switch_backend_by_selector("local"));
-    assert_eq!(app.active_backend, "local");
+    assert_eq!(app.session.active_backend, "local");
 
     // An unregistered id is refused with a listing hint.
     assert!(!app.switch_backend_by_selector("no-such-backend-xyz"));
     assert_eq!(app.status, "backend: unknown");
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -1834,6 +1835,7 @@ fn loop_dialog_show_help_documents_the_commands() {
     let mut app = slash_support::app_with_session();
     ragent_tui::app::show_loop_help(&mut app);
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -1912,8 +1914,8 @@ async fn cron_scheduler_starts_ticks_and_stops() {
 /// Populate the App with a two-level agent tree plus a background shell task.
 fn app_with_agent_tree() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some("s1".to_string());
+    app.session.agent_name = "general".to_string();
     app.active_tasks.push(task_entry(
         "task-1",
         "s1",
@@ -2010,26 +2012,28 @@ fn layout_agents_window_without_tasks_still_paints() {
 #[test]
 fn layout_teams_window_paints_the_lead_and_teammates() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
-    app.agent_name = "general".to_string();
+    app.session.session_id = Some("s1".to_string());
+    app.session.agent_name = "general".to_string();
     app.show_teams_window = true;
-    app.active_team = Some(TeamConfig::new("alpha", "s1"));
+    app.session.active_team = Some(TeamConfig::new("alpha", "s1"));
 
     let mut working = TeamMember::new("reviewer", "tm-001", "build");
     working.status = MemberStatus::Working;
     working.session_id = Some("s2".to_string());
-    app.team_members.push(working);
+    app.session.team_members.push(working);
 
     let mut suspended = TeamMember::new("tester", "tm-002", "build");
     suspended.status = MemberStatus::Suspended;
-    app.team_members.push(suspended);
+    app.session.team_members.push(suspended);
 
     let mut stopped = TeamMember::new("archivist", "tm-003", "build");
     stopped.status = MemberStatus::Stopped;
-    app.team_members.push(stopped);
+    app.session.team_members.push(stopped);
 
-    app.focused_teammate = Some("tm-001".to_string());
-    app.team_message_counts.insert("tm-001".to_string(), (3, 2));
+    app.session.focused_teammate = Some("tm-001".to_string());
+    app.session
+        .team_message_counts
+        .insert("tm-001".to_string(), (3, 2));
 
     let terminal = render(&mut app, 160, 44);
     let screen = painted(&terminal);
@@ -2057,7 +2061,7 @@ fn layout_teams_window_paints_the_lead_and_teammates() {
 #[test]
 fn layout_teams_window_without_members_shows_the_hint() {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.show_teams_window = true;
     let terminal = render(&mut app, 140, 40);
     assert!(painted(&terminal).contains("no teammates yet"));
@@ -2069,15 +2073,15 @@ fn status_bar_full_width_surfaces_every_segment() {
     app.status = "Ready".to_string();
     app.cwd = "/home/dev/projects/ragent".to_string();
     app.git_branch = Some("main".to_string());
-    app.last_prompt = "a".repeat(80);
-    app.selected_model = Some("anthropic/claude-sonnet-4".to_string());
-    app.selected_thinking_level = Some(ThinkingLevel::High);
-    app.is_processing = true;
+    app.session.last_prompt = "a".repeat(80);
+    app.session.selected_model = Some("anthropic/claude-sonnet-4".to_string());
+    app.session.selected_thinking_level = Some(ThinkingLevel::High);
+    app.session.is_processing = true;
     app.quota_percent = Some(85.0);
     app.code_index_enabled = true;
     app.code_index_busy = true;
     app.code_index_graph_busy = true;
-    app.autopilot_enabled = true;
+    app.session.autopilot_enabled = true;
     let terminal = render(&mut app, 200, 30);
     let screen = painted(&terminal);
     assert!(screen.contains("ragent"), "the version prefix must paint");
@@ -2097,7 +2101,7 @@ fn status_bar_full_width_surfaces_every_segment() {
 fn status_bar_compact_and_minimal_modes_differ() {
     let mut app = support::make_app();
     app.cwd = "/home/dev/projects/ragent-with-a-long-name".to_string();
-    app.is_processing = true;
+    app.session.is_processing = true;
     // 100 columns -> Compact, 60 columns -> Minimal.
     let compact = painted(&render(&mut app, 100, 20));
     assert!(compact.contains("ragent"), "compact screen: {compact}");
@@ -2108,11 +2112,11 @@ fn status_bar_compact_and_minimal_modes_differ() {
 #[test]
 fn status_bar_renders_the_compaction_and_compression_indicators() {
     let mut app = support::make_app();
-    app.compact_in_progress = true;
+    app.session.compact_in_progress = true;
     let both = painted(&render(&mut app, 140, 24));
     assert!(both.contains("compacting"));
 
-    app.compress_in_progress = true;
+    app.session.compress_in_progress = true;
     let combined = painted(&render(&mut app, 140, 24));
     assert!(combined.contains("cmp+compress"));
 }
@@ -2124,7 +2128,7 @@ fn status_bar_renders_the_web_phase_countdown() {
     // model cannot push the countdown off a 140-column status bar.
     app.cwd = "/home/dev/projects/ragent".to_string();
     app.git_branch = Some("main".to_string());
-    app.selected_model = Some("anthropic/claude-sonnet-4".to_string());
+    app.session.selected_model = Some("anthropic/claude-sonnet-4".to_string());
     let mut progress = research_progress::ResearchProgress::new("run", "topic");
     progress.web_phase_deadline = Some(std::time::Instant::now() + Duration::from_secs(95));
     app.research_progress.push(progress);
@@ -2135,11 +2139,12 @@ fn status_bar_renders_the_web_phase_countdown() {
 #[test]
 fn status_bar_renders_a_non_local_backend_and_error_health() {
     let mut app = support::make_app();
-    app.active_backend = "docker".to_string();
+    app.session.active_backend = "docker".to_string();
     // Mark the provider unhealthy so the error icon branch renders.
-    app.provider_health
+    app.session
+        .provider_health
         .store(2, std::sync::atomic::Ordering::Relaxed);
-    app.selected_model = Some("anthropic/claude".to_string());
+    app.session.selected_model = Some("anthropic/claude".to_string());
     // The unhealthy provider branch paints the error colouring.
     let _ = render(&mut app, 140, 24);
 }
@@ -2147,7 +2152,7 @@ fn status_bar_renders_a_non_local_backend_and_error_health() {
 #[test]
 fn status_bar_hides_the_service_row_in_non_verbose_modes() {
     let mut app = support::make_app();
-    app.autopilot_enabled = true;
+    app.session.autopilot_enabled = true;
     app.code_index_enabled = true;
 
     // Minimal (60 cols) defers the service indicator row to `/status`, so the
@@ -2168,7 +2173,7 @@ fn status_bar_paints_the_status_history_and_error_status() {
     // model cannot push the status text off a 140-column status bar.
     app.cwd = "/home/dev/projects/ragent".to_string();
     app.git_branch = Some("main".to_string());
-    app.selected_model = Some("anthropic/claude-sonnet-4".to_string());
+    app.session.selected_model = Some("anthropic/claude-sonnet-4".to_string());
     app.status = "error: model unavailable".to_string();
     let screen = painted(&render(&mut app, 140, 24));
     assert!(screen.contains("model unavailable"), "screen: {screen}");
@@ -2183,6 +2188,7 @@ async fn run_slash(cmd: &str) -> (App, String) {
     let mut app = slash_support::app_with_session();
     app.execute_slash_command(cmd).await;
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2304,6 +2310,7 @@ async fn reverse_hook_covers_help_bad_repo_and_bad_depth() {
     ragent_tui::app::reverse_command_for_tests(&mut app, "thawkins/ragent --depth 99");
     assert_eq!(app.status, "reverse: invalid depth");
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2366,9 +2373,9 @@ fn spawn_poll_surfaces_launch_success_and_failure() {
     let mut app = slash_support::app_with_session();
 
     // Nothing pending: the poll is a no-op.
-    let before = app.messages.len();
+    let before = app.session.messages.len();
     ragent_tui::poll_spawn_result_for_tests(&mut app);
-    assert_eq!(app.messages.len(), before);
+    assert_eq!(app.session.messages.len(), before);
 
     // Success arm: the detached task id is reported and the panel is told the
     // run will never be waited on (D3: the outcome is seeded on the shared
@@ -2381,6 +2388,7 @@ fn spawn_poll_surfaces_launch_success_and_failure() {
         app.status
     );
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2402,6 +2410,7 @@ fn spawn_poll_surfaces_launch_success_and_failure() {
         app.status
     );
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2445,21 +2454,23 @@ fn spawn_poll_releases_only_the_finished_launch() {
 #[test]
 fn compaction_poll_applies_a_successful_compaction() {
     let mut app = slash_support::app_with_session();
-    app.messages
+    app.session
+        .messages
         .push(Message::user_text("s", "before compaction"));
-    app.compact_in_progress = true;
-    app.auto_compact_in_progress = true;
+    app.session.compact_in_progress = true;
+    app.session.auto_compact_in_progress = true;
 
     {
-        let mut slot = app.compact_result.lock().expect("compact slot");
+        let mut slot = app.session.compact_result.lock().expect("compact slot");
         *slot = Some(Ok(vec![Message::user_text("s", "compacted summary")]));
     }
     app.poll_compaction_result();
 
-    assert!(!app.compact_in_progress);
-    assert!(!app.auto_compact_in_progress);
+    assert!(!app.session.compact_in_progress);
+    assert!(!app.session.auto_compact_in_progress);
     assert_eq!(app.status, "ready");
     let transcript = app
+        .session
         .messages
         .iter()
         .map(Message::text_content)
@@ -2471,19 +2482,19 @@ fn compaction_poll_applies_a_successful_compaction() {
 #[test]
 fn compaction_poll_surfaces_a_failure_and_clears_the_auto_flag() {
     let mut app = slash_support::app_with_session();
-    app.compact_in_progress = true;
-    app.auto_compact_in_progress = true;
-    app.pending_send_after_compact = Some(("queued".to_string(), Vec::new()));
+    app.session.compact_in_progress = true;
+    app.session.auto_compact_in_progress = true;
+    app.session.pending_send_after_compact = Some(("queued".to_string(), Vec::new()));
 
     {
-        let mut slot = app.compact_result.lock().expect("compact slot");
+        let mut slot = app.session.compact_result.lock().expect("compact slot");
         *slot = Some(Err("provider refused".to_string()));
     }
     app.poll_compaction_result();
 
-    assert!(!app.compact_in_progress);
-    assert!(!app.auto_compact_in_progress);
-    assert!(app.auto_compact_failed);
+    assert!(!app.session.compact_in_progress);
+    assert!(!app.session.auto_compact_in_progress);
+    assert!(app.session.auto_compact_failed);
     assert!(
         app.status.starts_with("[warn] compact failed"),
         "{}",
@@ -2494,10 +2505,10 @@ fn compaction_poll_surfaces_a_failure_and_clears_the_auto_flag() {
 #[test]
 fn compaction_poll_without_a_pending_result_is_a_no_op() {
     let mut app = slash_support::app_with_session();
-    app.compact_in_progress = true;
+    app.session.compact_in_progress = true;
     app.poll_compaction_result();
     // No result deposited: the in-progress flag is untouched.
-    assert!(app.compact_in_progress);
+    assert!(app.session.compact_in_progress);
 }
 
 #[test]
@@ -2523,6 +2534,7 @@ fn bench_poll_surfaces_the_finished_run_and_workbooks() {
     assert_eq!(app.status, "bench: done");
     assert_eq!(app.bench_last_workbooks.len(), 1);
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2563,6 +2575,7 @@ fn bench_poll_watchdog_detaches_a_stale_run() {
     assert!(app.active_bench_task_id.is_none(), "the run is detached");
     assert_eq!(app.status, "bench: timed out");
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2597,6 +2610,7 @@ async fn slash_bench_status_and_open_last_report_a_finished_run() {
 
     app.execute_slash_command("/bench status").await;
     let status = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2606,6 +2620,7 @@ async fn slash_bench_status_and_open_last_report_a_finished_run() {
 
     app.execute_slash_command("/bench open last").await;
     let open_last = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2633,6 +2648,7 @@ fn newproj_poll_streams_progress_then_the_final_summary() {
     app.poll_newproj_result();
     assert!(app.newproj_running, "the run is still in flight");
     let panel = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2641,13 +2657,13 @@ fn newproj_poll_streams_progress_then_the_final_summary() {
     assert!(panel.contains("git init"), "got {panel}");
 
     // A second batch updates the same message in place rather than stacking.
-    let messages_after_first = app.messages.len();
+    let messages_after_first = app.session.messages.len();
     {
         let mut lines = app.newproj_progress.lock().expect("progress slot");
         lines.push("[step] initial commit".to_string());
     }
     app.poll_newproj_result();
-    assert_eq!(app.messages.len(), messages_after_first);
+    assert_eq!(app.session.messages.len(), messages_after_first);
 
     // The terminal outcome lands and clears the running flag.
     {
@@ -2661,6 +2677,7 @@ fn newproj_poll_streams_progress_then_the_final_summary() {
     assert!(!app.newproj_running);
     assert_eq!(app.status, "new: scaffolded");
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2681,6 +2698,7 @@ fn newproj_poll_surfaces_a_failure() {
     assert!(!app.newproj_running);
     assert_eq!(app.status, "new: emission failed");
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2691,9 +2709,9 @@ fn newproj_poll_surfaces_a_failure() {
 #[test]
 fn newproj_poll_without_state_is_a_no_op() {
     let mut app = slash_support::app_with_session();
-    let before = app.messages.len();
+    let before = app.session.messages.len();
     app.poll_newproj_result();
-    assert_eq!(app.messages.len(), before);
+    assert_eq!(app.session.messages.len(), before);
     assert!(!app.newproj_running);
 }
 
@@ -2705,7 +2723,7 @@ fn newproj_poll_without_state_is_a_no_op() {
 /// Build an app whose session id matches the events published below.
 fn app_for_events() -> App {
     let mut app = slash_support::app_with_session();
-    app.session_id = Some("s-events".to_string());
+    app.session.session_id = Some("s-events".to_string());
     app
 }
 
@@ -2729,6 +2747,7 @@ async fn loop_terminated_banner_covers_every_status_label() {
         })
         .await;
         let banner = app
+            .session
             .messages
             .last()
             .map(Message::text_content)
@@ -2757,6 +2776,7 @@ async fn loop_terminated_banner_appends_verification_and_reason() {
     })
     .await;
     let banner = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2785,6 +2805,7 @@ async fn loop_change_summary_previews_the_affected_files() {
     })
     .await;
     let summary = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2796,7 +2817,7 @@ async fn loop_change_summary_previews_the_affected_files() {
     assert!(summary.contains("(+4 more)"), "got {summary}");
     assert!(summary.contains("2 iterations"), "got {summary}");
     assert!(
-        app.pending_rollback.is_some(),
+        app.session.pending_rollback.is_some(),
         "the rollback offer is armed"
     );
 }
@@ -2816,6 +2837,7 @@ async fn loop_change_summary_without_extra_files_omits_the_more_suffix() {
     })
     .await;
     let summary = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2835,6 +2857,7 @@ async fn agent_error_surfaces_the_stripped_summary_in_the_status_bar() {
     // `summarise_error` strips the `LLM call failed: ` prefix.
     assert_eq!(app.status, "error: Unknown model: claude-haiku-4.5");
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -2944,7 +2967,7 @@ fn backend_panel_switches_via_a_registered_descriptor() {
     // stay internally consistent.
     let attempted = app.switch_backend_by_selector("docker");
     assert!(attempted, "a registered kind is always a switch attempt");
-    if app.active_backend == "docker" {
+    if app.session.active_backend == "docker" {
         assert_eq!(app.status, "backend: docker");
         // The switch is persisted into the project config file.
         let raw = std::fs::read_to_string(temp.path().join(".ragent/ragent.json"))
@@ -2955,9 +2978,10 @@ fn backend_panel_switches_via_a_registered_descriptor() {
             Some("docker")
         );
     } else {
-        assert_eq!(app.active_backend, "local", "a refusal keeps local");
+        assert_eq!(app.session.active_backend, "local", "a refusal keeps local");
         assert_eq!(app.status, "backend: unavailable");
         let text = app
+            .session
             .messages
             .last()
             .map(Message::text_content)
@@ -2975,7 +2999,7 @@ fn backend_panel_switch_by_bare_kind_synthesises_an_unregistered_row() {
 
     let attempted = app.switch_backend_by_selector("DOCKER");
     assert!(attempted, "the selector is case-insensitive");
-    if app.active_backend == "docker" {
+    if app.session.active_backend == "docker" {
         assert_eq!(app.status, "backend: docker");
         let raw = std::fs::read_to_string(temp.path().join(".ragent/ragent.json"))
             .expect("read project config");
@@ -3054,6 +3078,7 @@ async fn slash_plugins_list_mcp_reports_the_bridged_tool_inventory() {
     app.execute_slash_command("/plugins list --mcp").await;
 
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -3137,6 +3162,7 @@ async fn slash_bench_status_reports_the_active_run_context() {
 
     app.execute_slash_command("/bench status").await;
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)
@@ -3375,7 +3401,7 @@ async fn slash_compact_refuses_without_messages() {
     // A fresh session has no messages to compact.
     app.execute_slash_command("/compact").await;
     assert_eq!(app.status, "[warn] No messages to compact");
-    assert!(!app.compact_in_progress);
+    assert!(!app.session.compact_in_progress);
     drop(temp);
 }
 
@@ -3384,15 +3410,17 @@ async fn slash_compact_refuses_without_a_model() {
     let _lock = crate::global_env_lock();
     let (_env, temp) = enter_project_pair();
     let mut app = slash_support::app_with_session();
-    app.messages.push(Message::user_text("s-compact", "hello"));
-    app.selected_model = None;
-    app.agent_info.model = None;
+    app.session
+        .messages
+        .push(Message::user_text("s-compact", "hello"));
+    app.session.selected_model = None;
+    app.session.agent_info.model = None;
     app.execute_slash_command("/compact").await;
     assert_eq!(
         app.status,
         "[warn] No model selected - use /model to choose"
     );
-    assert!(!app.compact_in_progress);
+    assert!(!app.session.compact_in_progress);
     drop(temp);
 }
 
@@ -3543,9 +3571,9 @@ fn status_bar_shortens_the_cwd_when_the_prompt_tag_needs_room() {
     // A deep cwd plus a long prompt tag forces the shortened-cwd branch.
     app.cwd = "/home/dev/projects/a-very-long-nested-project-directory-name".to_string();
     app.git_branch = Some("feature/long-branch-name".to_string());
-    app.last_prompt = "p".repeat(60);
-    app.selected_model = Some("anthropic/claude-sonnet-4".to_string());
-    app.is_processing = true;
+    app.session.last_prompt = "p".repeat(60);
+    app.session.selected_model = Some("anthropic/claude-sonnet-4".to_string());
+    app.session.is_processing = true;
 
     // Every width from narrow to wide must render without panicking, and the
     // prompt tag must still be visible whenever the tag plan applies.
@@ -3579,25 +3607,30 @@ async fn compaction_start_accepts_a_configured_model() {
     let _lock = crate::global_env_lock();
     let (_env, temp) = enter_project_pair();
     let mut app = slash_support::app_with_session();
-    app.messages.push(Message::user_text("s-compact", "hello"));
-    app.selected_model = Some("anthropic/claude-sonnet-4-20250514".to_string());
+    app.session
+        .messages
+        .push(Message::user_text("s-compact", "hello"));
+    app.session.selected_model = Some("anthropic/claude-sonnet-4-20250514".to_string());
 
     // The manual path sets the in-progress flag and spawns the compaction; with
     // no reachable provider the spawned task fails and deposits an error into
     // the result slot, which the poll surfaces.
     app.execute_slash_command("/compact").await;
-    assert!(app.compact_in_progress, "status: {}", app.status);
+    assert!(app.session.compact_in_progress, "status: {}", app.status);
     assert_eq!(app.status, "compacting...");
-    assert!(!app.auto_compact_in_progress);
+    assert!(!app.session.auto_compact_in_progress);
 
     for _ in 0..200 {
         app.poll_compaction_result();
-        if !app.compact_in_progress {
+        if !app.session.compact_in_progress {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert!(!app.compact_in_progress, "the compaction result must land");
+    assert!(
+        !app.session.compact_in_progress,
+        "the compaction result must land"
+    );
     drop(temp);
 }
 
@@ -3617,6 +3650,7 @@ async fn reverse_hook_refuses_without_a_provider_token() {
     ragent_tui::app::reverse_command_for_tests(&mut app, "thawkins/ragent");
     assert_eq!(app.status, "reverse: no token");
     let text = app
+        .session
         .messages
         .last()
         .map(Message::text_content)

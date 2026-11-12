@@ -108,11 +108,13 @@ fn test_research_view_holds_one_copy_of_rendered_lines() {
 #[test]
 fn test_output_view_holds_one_copy_of_rendered_lines() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-1234".to_string());
-    app.messages.push(ragent_agent::message::Message::user_text(
-        "sess-1234".to_string(),
-        "hello there, this is a prompt",
-    ));
+    app.session.session_id = Some("sess-1234".to_string());
+    app.session
+        .messages
+        .push(ragent_agent::message::Message::user_text(
+            "sess-1234".to_string(),
+            "hello there, this is a prompt",
+        ));
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::Session {
             session_id: "sess-1234".to_string(),
@@ -150,7 +152,7 @@ fn test_output_view_holds_one_copy_of_rendered_lines() {
 #[test]
 fn test_output_view_area_tracks_rendered_overlay() {
     let mut app = support::make_app();
-    app.session_id = Some("sess-1234".to_string());
+    app.session.session_id = Some("sess-1234".to_string());
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::Session {
             session_id: "sess-1234".to_string(),

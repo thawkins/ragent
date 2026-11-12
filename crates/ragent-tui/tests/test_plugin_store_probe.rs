@@ -84,14 +84,15 @@ fn enter_empty_project() -> (MutexGuard<'static, ()>, LaunchEnv, tempfile::TempD
 /// An app with a session and the given offline store-fetch seam installed.
 fn app_with_seam(seam: FixtureStoreFetcher) -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.set_plugin_store_fetcher(Arc::new(seam));
     app
 }
 
 /// The rendered text of the most recent assistant message.
 fn last_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .expect("an assistant message must have been appended")
         .text_content()

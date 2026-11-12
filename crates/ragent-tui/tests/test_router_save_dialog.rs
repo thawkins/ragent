@@ -80,7 +80,7 @@ async fn test_router_save_confirm_persists_and_activates() {
     assert!(app.provider_setup.is_none(), "setup dialog should close");
     assert!(app.router_enabled, "router should be enabled");
     assert_eq!(
-        app.selected_model.as_deref(),
+        app.session.selected_model.as_deref(),
         Some("router/router"),
         "router should be active model"
     );

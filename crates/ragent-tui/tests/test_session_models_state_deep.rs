@@ -93,13 +93,13 @@ fn configure_provider(app: &mut App, provider: &str, model: &str) {
         name: provider.to_string(),
         source: ProviderSource::Database,
     });
-    app.selected_model = Some(model.to_string());
+    app.session.selected_model = Some(model.to_string());
 }
 
 /// Type `text` into the prompt and press Enter.
 async fn type_and_enter(app: &mut App, text: &str) {
-    app.input = text.to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = text.to_string();
+    app.session.input_cursor = app.input_len_chars();
     app.handle_key_event(key(KeyCode::Enter)).await;
 }
 
@@ -192,9 +192,9 @@ async fn bang_command_via_enter_renders_and_dispatches() {
 
     type_and_enter(&mut app, "!echo hi").await;
 
-    assert_eq!(app.last_prompt, "!echo hi");
-    assert_eq!(app.input, "");
-    assert_eq!(app.input_cursor, 0);
+    assert_eq!(app.session.last_prompt, "!echo hi");
+    assert_eq!(app.session.input, "");
+    assert_eq!(app.session.input_cursor, 0);
     let text = last_message(&app);
     assert_eq!(text, "$ echo hi");
     assert!(
@@ -213,7 +213,7 @@ async fn bang_command_with_empty_command_warns() {
 
     assert_eq!(app.status, "[warn] Empty shell command");
     assert_eq!(
-        app.messages.len(),
+        app.session.messages.len(),
         0,
         "nothing is rendered for an empty bang"
     );
@@ -222,12 +222,12 @@ async fn bang_command_with_empty_command_warns() {
 #[tokio::test]
 async fn bang_command_while_busy_is_refused() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
 
     type_and_enter(&mut app, "!echo hi").await;
 
     assert_eq!(app.status, "busy - wait for the current turn to finish");
-    assert_eq!(app.messages.len(), 0);
+    assert_eq!(app.session.messages.len(), 0);
 }
 
 #[tokio::test]
@@ -237,8 +237,11 @@ async fn user_message_dispatch_sets_state_and_logs() {
 
     type_and_enter(&mut app, "hello world").await;
 
-    assert_eq!(app.last_prompt, "hello world");
-    assert_eq!(app.selected_model.as_deref(), Some("ollama/qwen3:latest"));
+    assert_eq!(app.session.last_prompt, "hello world");
+    assert_eq!(
+        app.session.selected_model.as_deref(),
+        Some("ollama/qwen3:latest")
+    );
     let text = last_message(&app);
     assert_eq!(text, "hello world");
     assert!(
@@ -259,13 +262,13 @@ async fn user_message_with_attachment_renders_attach_prefix() {
     configure_provider(&mut app, "ollama", "ollama/qwen3:latest");
     let png = temp.path().join("shot.png");
     std::fs::write(&png, b"png").expect("write image");
-    app.pending_attachments.push(png);
+    app.session.pending_attachments.push(png);
 
     type_and_enter(&mut app, "see attached").await;
 
     let text = last_message(&app);
     assert_eq!(text, "[attach shot.png] see attached");
-    assert_eq!(app.pending_attachments.len(), 0);
+    assert_eq!(app.session.pending_attachments.len(), 0);
 }
 
 #[tokio::test]
@@ -309,7 +312,7 @@ async fn send_without_model_reports_guard() {
         name: "Ollama".to_string(),
         source: ProviderSource::Database,
     });
-    app.selected_model = None;
+    app.session.selected_model = None;
 
     type_and_enter(&mut app, "hello").await;
 
@@ -320,15 +323,16 @@ async fn send_without_model_reports_guard() {
 async fn auto_compact_threshold_defers_the_send() {
     let (_g, _e, _t, mut app) = isolated_app();
     configure_provider(&mut app, "ollama", "ollama/qwen3:latest");
-    app.messages
+    app.session
+        .messages
         .push(Message::user_text("slash-support", "earlier turn"));
-    app.selected_model_ctx_window = Some(1_000);
-    app.last_input_tokens = 10_000;
+    app.session.selected_model_ctx_window = Some(1_000);
+    app.session.last_input_tokens = 10_000;
 
     type_and_enter(&mut app, "next turn").await;
 
     assert!(
-        app.pending_send_after_compact.is_some(),
+        app.session.pending_send_after_compact.is_some(),
         "the send is deferred behind compaction"
     );
     assert_eq!(app.status, "compacting before send...");
@@ -337,11 +341,11 @@ async fn auto_compact_threshold_defers_the_send() {
 #[tokio::test]
 async fn resume_continuation_via_slash_command() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.agent_halted = true;
+    app.session.agent_halted = true;
 
     app.execute_slash_command("/resume").await;
 
-    assert!(!app.agent_halted, "the halted flag is cleared");
+    assert!(!app.session.agent_halted, "the halted flag is cleared");
     let text = last_message(&app);
     assert!(text.contains("previously interrupted"), "msg: {text}");
     assert!(
@@ -355,7 +359,7 @@ async fn resume_continuation_via_slash_command() {
 #[tokio::test]
 async fn resume_without_halt_reports_nothing_to_resume() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.agent_halted = false;
+    app.session.agent_halted = false;
 
     app.execute_slash_command("/resume").await;
 
@@ -365,11 +369,14 @@ async fn resume_without_halt_reports_nothing_to_resume() {
 #[tokio::test]
 async fn ensure_session_creates_one_for_a_slash_command() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.session_id = None;
+    app.session.session_id = None;
 
     app.execute_slash_command("/cost").await;
 
-    assert!(app.session_id.is_some(), "a session is created on demand");
+    assert!(
+        app.session.session_id.is_some(),
+        "a session is created on demand"
+    );
     assert_ne!(app.sid_to_display_name.len(), 0);
 }
 
@@ -389,9 +396,9 @@ async fn load_session_restores_messages_and_cwd() {
 
     app.load_session(&session.id).expect("load session");
 
-    assert_eq!(app.session_id.as_deref(), Some(session.id.as_str()));
-    assert_eq!(app.messages.len(), 1);
-    assert_eq!(app.messages[0].text_content(), "restored");
+    assert_eq!(app.session.session_id.as_deref(), Some(session.id.as_str()));
+    assert_eq!(app.session.messages.len(), 1);
+    assert_eq!(app.session.messages[0].text_content(), "restored");
     assert_eq!(app.status, "resumed (1 messages)");
     assert_eq!(app.cwd_path, dir, "the session working directory wins");
 }
@@ -404,7 +411,7 @@ async fn load_session_with_unknown_id_returns_error() {
 
     assert!(err.to_string().contains("Session not found"), "err: {err}");
     assert!(
-        app.session_id.is_some(),
+        app.session.session_id.is_some(),
         "the previous session is untouched"
     );
 }
@@ -634,26 +641,32 @@ async fn refresh_connector_catalogue_installed_without_panel_is_noop() {
 #[tokio::test]
 async fn cursor_moves_by_word_and_logical_line() {
     let mut app = support::make_app();
-    app.input = "alpha beta\ngamma delta".to_string();
-    app.input_cursor = 0;
+    app.session.input = "alpha beta\ngamma delta".to_string();
+    app.session.input_cursor = 0;
 
     app.handle_key_event(key_mod(KeyCode::Right, KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input_cursor, 6, "Ctrl+Right lands after the first word");
+    assert_eq!(
+        app.session.input_cursor, 6,
+        "Ctrl+Right lands after the first word"
+    );
 
     app.handle_key_event(key_mod(KeyCode::Right, KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input_cursor, 11, "the second hop crosses the newline");
+    assert_eq!(
+        app.session.input_cursor, 11,
+        "the second hop crosses the newline"
+    );
 
     app.handle_key_event(key(KeyCode::Up)).await;
     assert_eq!(
-        app.input_cursor, 0,
+        app.session.input_cursor, 0,
         "Up keeps column zero on the first line"
     );
 
     app.handle_key_event(key(KeyCode::Down)).await;
     assert_eq!(
-        app.input_cursor, 11,
+        app.session.input_cursor, 11,
         "Down returns to line two, column zero"
     );
 }
@@ -661,23 +674,23 @@ async fn cursor_moves_by_word_and_logical_line() {
 #[tokio::test]
 async fn cursor_up_and_down_clamp_to_shorter_lines() {
     let mut app = support::make_app();
-    app.input = "short\na much longer line".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = "short\na much longer line".to_string();
+    app.session.input_cursor = app.input_len_chars();
 
     // Up from the end of the long line lands at the end of the short one.
     app.handle_key_event(key(KeyCode::Up)).await;
-    assert_eq!(app.input_cursor, 5);
+    assert_eq!(app.session.input_cursor, 5);
 
     // Down from the end of the short line keeps the same column.
     app.handle_key_event(key(KeyCode::Down)).await;
-    assert_eq!(app.input_cursor, 11);
+    assert_eq!(app.session.input_cursor, 11);
 }
 
 #[tokio::test]
 async fn cut_kb_selection_removes_the_selected_span() {
     let mut app = support::make_app();
-    app.input = "hello world".to_string();
-    app.input_cursor = 0;
+    app.session.input = "hello world".to_string();
+    app.session.input_cursor = 0;
 
     // Shift+Right selects one char at a time; select "hello".
     for _ in 0..5 {
@@ -687,8 +700,8 @@ async fn cut_kb_selection_removes_the_selected_span() {
     app.handle_key_event(key_mod(KeyCode::Char('x'), KeyModifiers::CONTROL))
         .await;
 
-    assert_eq!(app.input, " world");
-    assert_eq!(app.kb_select_anchor, None);
+    assert_eq!(app.session.input, " world");
+    assert_eq!(app.session.kb_select_anchor, None);
 }
 
 #[tokio::test]
@@ -702,7 +715,7 @@ async fn paste_image_from_clipboard_without_image_logs_notice() {
     app.handle_key_event(key_mod(KeyCode::Char('v'), KeyModifiers::ALT))
         .await;
 
-    assert_eq!(app.pending_attachments.len(), 0);
+    assert_eq!(app.session.pending_attachments.len(), 0);
     assert!(
         app.log_entries
             .iter()
@@ -729,7 +742,7 @@ async fn paste_outside_scope_image_attaches_with_a_warning() {
     app.handle_key_event(key_mod(KeyCode::Char('v'), KeyModifiers::ALT))
         .await;
 
-    assert_eq!(app.pending_attachments, vec![png.clone()]);
+    assert_eq!(app.session.pending_attachments, vec![png.clone()]);
     assert!(
         app.log_entries
             .iter()
@@ -746,7 +759,7 @@ async fn paste_outside_scope_image_attaches_with_a_warning() {
 async fn scrollbar_drag_maps_the_gutter_row_to_an_offset() {
     let mut app = support::make_app();
     app.message_area = Rect::new(0, 0, 20, 11);
-    app.message_max_scroll = 100;
+    app.session.message_max_scroll = 100;
 
     app.handle_mouse_event(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
@@ -757,7 +770,7 @@ async fn scrollbar_drag_maps_the_gutter_row_to_an_offset() {
 
     assert_eq!(app.scrollbar_drag, Some(ScrollbarDragPane::Messages));
     assert_eq!(
-        app.scroll_offset, 100,
+        app.session.scroll_offset, 100,
         "the top of the track is the oldest line"
     );
 }
@@ -854,7 +867,7 @@ fn accept_file_menu_selection_handles_every_shape() {
         query: String::new(),
         current_dir: None,
     });
-    app.input.clear();
+    app.session.input.clear();
     assert!(!app.accept_file_menu_selection());
     assert!(app.file_menu.is_none());
 }
@@ -862,8 +875,8 @@ fn accept_file_menu_selection_handles_every_shape() {
 #[test]
 fn accept_file_menu_selection_inserts_the_mention() {
     let mut app = support::make_app();
-    app.input = "@not".to_string();
-    app.input_cursor = app.input_len_chars();
+    app.session.input = "@not".to_string();
+    app.session.input_cursor = app.input_len_chars();
     app.file_menu = Some(FileMenuState {
         matches: vec![FileMenuEntry {
             display: "notes.txt".to_string(),
@@ -877,8 +890,8 @@ fn accept_file_menu_selection_inserts_the_mention() {
     });
 
     assert!(app.accept_file_menu_selection());
-    assert_eq!(app.input, "@notes.txt");
-    assert_eq!(app.input_cursor, app.input_len_chars());
+    assert_eq!(app.session.input, "@notes.txt");
+    assert_eq!(app.session.input_cursor, app.input_len_chars());
     assert!(app.file_menu.is_none());
 }
 
@@ -936,8 +949,8 @@ fn usage_display_covers_quota_context_and_unknown() {
 
     // Without a quota the context-window usage is shown.
     app.quota_percent = None;
-    app.selected_model = Some("gemini/gemini-2.5-pro-preview-05-06".to_string());
-    app.last_input_tokens = 1_000;
+    app.session.selected_model = Some("gemini/gemini-2.5-pro-preview-05-06".to_string());
+    app.session.last_input_tokens = 1_000;
     let (label, is_rate) = app.usage_display();
     assert!(label.starts_with("ctx: "), "label: {label}");
     assert!(!is_rate);
@@ -948,7 +961,7 @@ fn usage_display_covers_quota_context_and_unknown() {
         name: "Ollama".to_string(),
         source: ProviderSource::Database,
     });
-    app.selected_model = None;
+    app.session.selected_model = None;
     assert_eq!(app.usage_display(), ("local".to_string(), false));
 
     // A non-ollama provider with no context window reports unknown + rate.
@@ -975,14 +988,15 @@ fn team_panel_render_syncs_member_session_ids() {
         config,
     };
     updated.save().expect("save team");
-    app.active_team = Some(updated.config.clone());
-    app.team_members
+    app.session.active_team = Some(updated.config.clone());
+    app.session
+        .team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
     app.show_teams_window = true;
 
     render(&mut app, 120, 40);
 
-    let member = app.team_members.first().expect("member");
+    let member = app.session.team_members.first().expect("member");
     assert_eq!(member.session_id.as_deref(), Some("child-session"));
     assert_eq!(member.status, MemberStatus::Working);
     assert_eq!(member.current_task_id.as_deref(), Some("task-1"));
@@ -995,7 +1009,7 @@ fn team_panel_render_syncs_member_session_ids() {
 #[test]
 fn team_panel_render_tolerates_a_missing_team_store() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.active_team = Some(TeamConfig::new("missing-team", "slash-support"));
+    app.session.active_team = Some(TeamConfig::new("missing-team", "slash-support"));
     app.show_teams_window = true;
 
     render(&mut app, 120, 40);
@@ -1006,26 +1020,26 @@ fn team_panel_render_tolerates_a_missing_team_store() {
 #[tokio::test]
 async fn plan_approval_restores_the_previous_agent() {
     let (_g, _e, _t, mut app) = isolated_app();
-    let previous = app.agent_info.clone();
-    app.agent_stack.push(previous);
-    app.plan_approval_pending = Some(PlanApprovalState {
+    let previous = app.session.agent_info.clone();
+    app.session.agent_stack.push(previous);
+    app.session.plan_approval_pending = Some(PlanApprovalState {
         plan_text: "1. do the thing".to_string(),
         cursor_approve: true,
     });
 
     app.handle_key_event(key(KeyCode::Enter)).await;
 
-    assert!(app.plan_approval_pending.is_none());
+    assert!(app.session.plan_approval_pending.is_none());
     let all = slash_support::all_messages(&app);
     assert!(all.contains("Plan summary"), "messages: {all}");
     assert!(all.contains("1. do the thing"), "messages: {all}");
-    assert!(app.force_new_message);
+    assert!(app.session.force_new_message);
 }
 
 #[tokio::test]
 async fn plan_approval_with_empty_stack_logs_an_error() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.plan_approval_pending = Some(PlanApprovalState {
+    app.session.plan_approval_pending = Some(PlanApprovalState {
         plan_text: "1. orphan plan".to_string(),
         cursor_approve: true,
     });
@@ -1184,7 +1198,7 @@ async fn provider_show_skips_the_router_for_invalid_json() {
 #[tokio::test]
 async fn cost_summary_groups_by_provider_and_uses_known_costs() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.llm_request_stats = vec![
+    app.session.llm_request_stats = vec![
         ragent_tui::app::LlmRequestStat {
             model_ref: "gemini/gemini-2.5-flash-preview-05-20".to_string(),
             elapsed_ms: 1_000,
@@ -1211,7 +1225,7 @@ async fn cost_summary_groups_by_provider_and_uses_known_costs() {
 #[tokio::test]
 async fn cost_summary_without_a_session_reports_unknown_duration() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.llm_request_stats = vec![ragent_tui::app::LlmRequestStat {
+    app.session.llm_request_stats = vec![ragent_tui::app::LlmRequestStat {
         model_ref: "gemini/gemini-2.5-pro-preview-05-06".to_string(),
         elapsed_ms: 10,
         input_tokens: 10,
@@ -1223,7 +1237,7 @@ async fn cost_summary_without_a_session_reports_unknown_duration() {
     app.execute_slash_command("/cost").await;
     // `/cost` re-arms only the status timer; pointing the app at a session the
     // store does not hold makes the duration lookup report "unknown".
-    app.session_id = Some("no-such-session".to_string());
+    app.session.session_id = Some("no-such-session".to_string());
     app.execute_slash_command("/cost").await;
     let text = last_message(&app);
     assert!(text.contains("Session duration: unknown"), "text: {text}");
@@ -1233,7 +1247,7 @@ async fn cost_summary_without_a_session_reports_unknown_duration() {
 async fn model_show_renders_resolved_metadata_and_thinking() {
     let (_g, _e, _t, mut app) = isolated_app();
     configure_provider(&mut app, "gemini", "gemini/gemini-2.5-pro-preview-05-06");
-    app.selected_model_ctx_window = Some(1_048_576);
+    app.session.selected_model_ctx_window = Some(1_048_576);
 
     app.execute_slash_command("/model show").await;
 
@@ -1249,7 +1263,7 @@ async fn model_show_renders_resolved_metadata_and_thinking() {
 async fn model_show_falls_back_when_metadata_is_unresolvable() {
     let (_g, _e, _t, mut app) = isolated_app();
     configure_provider(&mut app, "gemini", "gemini/not-a-real-model");
-    app.selected_model_ctx_window = Some(8_192);
+    app.session.selected_model_ctx_window = Some(8_192);
 
     app.execute_slash_command("/model show").await;
 
@@ -1284,12 +1298,12 @@ async fn tools_list_renders_every_tool_and_its_source() {
 #[test]
 fn backfill_model_ctx_window_fills_from_the_registry() {
     let mut app = support::make_app();
-    app.selected_model = Some("gemini/gemini-2.5-pro-preview-05-06".to_string());
-    app.selected_model_ctx_window = None;
+    app.session.selected_model = Some("gemini/gemini-2.5-pro-preview-05-06".to_string());
+    app.session.selected_model_ctx_window = None;
 
     app.backfill_model_ctx_window();
 
-    assert_eq!(app.selected_model_ctx_window, Some(1_048_576));
+    assert_eq!(app.session.selected_model_ctx_window, Some(1_048_576));
 }
 
 #[test]
@@ -1297,19 +1311,19 @@ fn backfill_model_ctx_window_ignores_unparsable_and_unknown_models() {
     let mut app = support::make_app();
 
     // No model at all.
-    app.selected_model = None;
+    app.session.selected_model = None;
     app.backfill_model_ctx_window();
-    assert_eq!(app.selected_model_ctx_window, None);
+    assert_eq!(app.session.selected_model_ctx_window, None);
 
     // No provider separator.
-    app.selected_model = Some("bare-model".to_string());
+    app.session.selected_model = Some("bare-model".to_string());
     app.backfill_model_ctx_window();
-    assert_eq!(app.selected_model_ctx_window, None);
+    assert_eq!(app.session.selected_model_ctx_window, None);
 
     // A model the registry does not advertise.
-    app.selected_model = Some("gemini/not-a-model".to_string());
+    app.session.selected_model = Some("gemini/not-a-model".to_string());
     app.backfill_model_ctx_window();
-    assert_eq!(app.selected_model_ctx_window, None);
+    assert_eq!(app.session.selected_model_ctx_window, None);
 }
 
 #[test]
@@ -1324,7 +1338,7 @@ fn try_restore_provider_model_restores_and_prunes() {
         .expect("model restored");
     assert_eq!(entry.id, "gemini-2.5-pro-preview-05-06");
     assert_eq!(
-        app.selected_model.as_deref(),
+        app.session.selected_model.as_deref(),
         Some("gemini/gemini-2.5-pro-preview-05-06")
     );
     assert_eq!(
@@ -1495,7 +1509,8 @@ async fn provider_health_check_marks_unknown_then_available() {
     app.configured_provider = None;
     close_done_step(&mut app).await;
     assert_eq!(
-        app.provider_health
+        app.session
+            .provider_health
             .load(std::sync::atomic::Ordering::Relaxed),
         0
     );
@@ -1505,6 +1520,7 @@ async fn provider_health_check_marks_unknown_then_available() {
     close_done_step(&mut app).await;
     for _ in 0..50 {
         if app
+            .session
             .provider_health
             .load(std::sync::atomic::Ordering::Relaxed)
             != 0
@@ -1514,7 +1530,8 @@ async fn provider_health_check_marks_unknown_then_available() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(
-        app.provider_health
+        app.session
+            .provider_health
             .load(std::sync::atomic::Ordering::Relaxed),
         1
     );
@@ -1678,18 +1695,18 @@ fn needs_periodic_redraw_tracks_every_live_elapsed_source() {
 
     // A working teammate in a visible Teams panel does.
     app.show_teams_window = true;
-    app.active_team = Some(TeamConfig::new("alpha", "s1"));
+    app.session.active_team = Some(TeamConfig::new("alpha", "s1"));
     let mut member = TeamMember::new("writer", "tm-001", "general");
     member.status = MemberStatus::Working;
-    app.team_members.push(member);
+    app.session.team_members.push(member);
     assert!(app.needs_periodic_redraw());
 
     // A stopped teammate does not.
-    app.team_members[0].status = MemberStatus::Stopped;
+    app.session.team_members[0].status = MemberStatus::Stopped;
     assert!(!app.needs_periodic_redraw());
 
     // No active team means the panel is not live even when shown.
-    app.active_team = None;
+    app.session.active_team = None;
     assert!(!app.needs_periodic_redraw());
 }
 
@@ -1748,7 +1765,7 @@ fn poll_active_tasks_reconcile_skips_while_in_flight() {
 #[test]
 fn poll_question_expiry_falls_back_to_the_first_option() {
     let mut app = support::make_app();
-    app.question_queue.push_back(QuestionRequest {
+    app.session.question_queue.push_back(QuestionRequest {
         id: "q1".to_string(),
         session_id: "s1".to_string(),
         question: "choose".to_string(),
@@ -1757,13 +1774,13 @@ fn poll_question_expiry_falls_back_to_the_first_option() {
         expire_at_ms: Some(1),
         secret: false,
     });
-    app.pending_question_input = "half typed".to_string();
+    app.session.pending_question_input = "half typed".to_string();
 
     app.poll_question_expiry();
 
-    assert_eq!(app.question_queue.len(), 0);
-    assert_eq!(app.pending_question_input, "");
-    assert_eq!(app.question_selected_index, 0);
+    assert_eq!(app.session.question_queue.len(), 0);
+    assert_eq!(app.session.pending_question_input, "");
+    assert_eq!(app.session.question_selected_index, 0);
     assert!(app.needs_redraw);
     assert!(
         app.log_entries.iter().any(|e| e

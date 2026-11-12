@@ -90,6 +90,8 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
@@ -124,7 +126,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
 
-    App::new(
+    let mut app = App::new(
         event_bus,
         storage,
         provider_registry,
@@ -132,7 +134,12 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         Arc::unwrap_or_clone(agent_info),
         false,
         std::path::PathBuf::new(),
-    )
+    );
+    // The session sidebar (MULTISESSION M5) is on by default and would take
+    // the left columns of the rendered layout these tests assert on; keep the
+    // full-width chat they were written against, as `support::make_app` does.
+    app.sidebar.visible = false;
+    app
 }
 
 fn make_app() -> App {
@@ -256,7 +263,7 @@ fn test_router_config_report_includes_entries() {
 #[test]
 fn test_provider_model_label_shows_router() {
     let mut app = make_app();
-    app.selected_model = Some("router/router".to_string());
+    app.session.selected_model = Some("router/router".to_string());
     // The provider label uses the configured provider name when the router is not
     // actually enabled in the registry. This test verifies the selected model is
     // reflected; the "Model Router" override is covered by FR-020 integration tests.
@@ -488,7 +495,7 @@ async fn test_router_setup_save_persists_cluster_and_enables_router() {
 
     // The router cluster should also become the active model/provider.
     assert_eq!(
-        app.selected_model.as_deref(),
+        app.session.selected_model.as_deref(),
         Some("router/router"),
         "router should be selected as the active model"
     );
@@ -815,7 +822,12 @@ async fn test_provider_show_renders_router_cluster() {
     ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .await;
 
-    let text = app.messages.last().expect("report message").text_content();
+    let text = app
+        .session
+        .messages
+        .last()
+        .expect("report message")
+        .text_content();
     assert!(text.contains("Model Router"));
     assert!(text.contains("## Tier Mappings"));
     assert!(text.contains("### SIMPLE"));
@@ -840,7 +852,7 @@ async fn test_router_setup_restores_router_state_at_startup() {
     // Simulate a fresh session by resetting in-memory state and re-running the
     // same restore logic `App::new` performs at startup.
     app.router_enabled = false;
-    app.selected_model = Some("router/router".to_string());
+    app.session.selected_model = Some("router/router".to_string());
     app.configured_provider = None;
     app.restore_router_state();
 
@@ -877,7 +889,7 @@ async fn test_router_setup_restores_router_state_at_startup() {
 fn test_router_status_bar_label_when_enabled() {
     let mut app = make_app();
     app.router_enabled = true;
-    app.selected_model = Some("router/router".to_string());
+    app.session.selected_model = Some("router/router".to_string());
     let label = app.provider_model_label().expect("label should exist");
     assert!(
         label.starts_with("Model Router"),
@@ -889,9 +901,9 @@ fn test_router_status_bar_label_when_enabled() {
 fn test_router_status_bar_label_shows_downstream_model_and_tier() {
     let mut app = make_app();
     app.router_enabled = true;
-    app.selected_model = Some("router/router".to_string());
-    app.router_current_model = Some("anthropic:claude-sonnet-4-20250514".to_string());
-    app.router_current_tier = Some("COMPLEX".to_string());
+    app.session.selected_model = Some("router/router".to_string());
+    app.session.router_current_model = Some("anthropic:claude-sonnet-4-20250514".to_string());
+    app.session.router_current_tier = Some("COMPLEX".to_string());
     let label = app.provider_model_label().expect("label should exist");
     assert!(
         label.starts_with("Model Router (anthropic:claude-sonnet-4-20250514) / COMPLEX"),

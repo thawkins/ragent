@@ -83,7 +83,8 @@ fn enter_project(
 
 /// The text of the most recent message in the message window.
 fn last_message(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(ragent_types::message::Message::text_content)
         .unwrap_or_default()
@@ -115,7 +116,7 @@ const AUTOMATION_PROJECT: &str = r#"
 async fn list_shows_configured_automations_with_trigger_and_backend() {
     let (_guard, _env, _temp) = enter_project(AUTOMATION_PROJECT);
     let mut app = support::make_app();
-    app.session_id = Some("automation-test".to_string());
+    app.session.session_id = Some("automation-test".to_string());
 
     app.execute_slash_command("/automation").await;
 
@@ -139,7 +140,7 @@ async fn list_shows_configured_automations_with_trigger_and_backend() {
 async fn runs_reports_empty_history() {
     let (_guard, _env, _temp) = enter_project(AUTOMATION_PROJECT);
     let mut app = support::make_app();
-    app.session_id = Some("automation-test".to_string());
+    app.session.session_id = Some("automation-test".to_string());
 
     app.execute_slash_command("/automation runs on-issue").await;
 
@@ -155,7 +156,7 @@ async fn runs_reports_empty_history() {
 async fn runs_lists_persisted_history() {
     let (_guard, _env, _temp) = enter_project(AUTOMATION_PROJECT);
     let mut app = support::make_app();
-    app.session_id = Some("automation-test".to_string());
+    app.session.session_id = Some("automation-test".to_string());
 
     // Seed a durable run record directly, then read it back through the command.
     let run = ragent_types::AutomationRun::start(
@@ -184,7 +185,7 @@ async fn run_reports_a_disabled_service() {
         r#"{ "defaultAgent": "general", "automation": { "enabled": false, "automations": [] } }"#,
     );
     let mut app = support::make_app();
-    app.session_id = Some("automation-test".to_string());
+    app.session.session_id = Some("automation-test".to_string());
 
     app.execute_slash_command("/automation run on-issue").await;
 
@@ -197,7 +198,7 @@ async fn run_reports_a_disabled_service() {
 async fn unknown_automation_run_is_refused() {
     let (_guard, _env, _temp) = enter_project(AUTOMATION_PROJECT);
     let mut app = support::make_app();
-    app.session_id = Some("automation-test".to_string());
+    app.session.session_id = Some("automation-test".to_string());
 
     app.execute_slash_command("/automation run nosuch").await;
 
@@ -210,7 +211,7 @@ async fn unknown_automation_run_is_refused() {
 async fn help_lists_the_subcommands() {
     let (_guard, _env, _temp) = enter_project(AUTOMATION_PROJECT);
     let mut app = support::make_app();
-    app.session_id = Some("automation-test".to_string());
+    app.session.session_id = Some("automation-test".to_string());
 
     app.execute_slash_command("/automation help").await;
 

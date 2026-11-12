@@ -29,7 +29,7 @@ async fn assert_help(app: &mut App, cmd: &str, expect_status: &str) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_config_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "config", "config: help").await;
     assert!(
         last_output_after_help(&mut app, "config")
@@ -41,10 +41,13 @@ async fn test_slash_config_help() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_init_help_does_not_start_analysis() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "init", "init: help").await;
     // The help arm must not spawn the analysis agent run.
-    assert!(!app.is_processing, "/init help must not start processing");
+    assert!(
+        !app.session.is_processing,
+        "/init help must not start processing"
+    );
     let text = last_output_after_help(&mut app, "init").await;
     assert!(text.contains("/init config"));
 }
@@ -52,14 +55,14 @@ async fn test_slash_init_help_does_not_start_analysis() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_context_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "context", "context: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_mcp_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "mcp", "mcp: help").await;
     assert!(
         last_output_after_help(&mut app, "mcp")
@@ -71,7 +74,7 @@ async fn test_slash_mcp_help() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_mcp_config_lists_locations() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     let text = last_output_after(&mut app, "/mcp config").await;
     assert!(
         text.contains("From: /mcp config"),
@@ -92,100 +95,100 @@ async fn test_slash_mcp_config_lists_locations() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_profile_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "profile", "profile: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_perf_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "perf", "perf: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_model_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "model", "model: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_provider_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "provider", "provider: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_reload_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "reload", "reload: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_mode_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "mode", "mode: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_autopilot_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "autopilot", "autopilot: help").await;
     // Help must not enable autopilot.
-    assert!(!app.autopilot_enabled);
+    assert!(!app.session.autopilot_enabled);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_github_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "github", "github: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_gitlab_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "gitlab", "gitlab: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_update_help_does_not_check_network() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "update", "update: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_mouse_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "mouse", "mouse: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_yolo_help_does_not_toggle() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "yolo", "yolo: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_skills_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "skills", "skills: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_agent_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "agent", "agent: help").await;
     // Help must not open the picker dialog.
     assert!(app.provider_setup.is_none());
@@ -194,49 +197,49 @@ async fn test_slash_agent_help() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_cancel_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "cancel", "cancel: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_system_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "system", "system: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_undo_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "undo", "undo: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_name_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "name", "name: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_resume_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "resume", "resume: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_doctor_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "doctor", "doctor: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_history_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "history", "history: help").await;
     // Help must not open the history picker.
     assert!(app.history_picker.is_none());
@@ -245,14 +248,14 @@ async fn test_slash_history_help() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_template_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "template", "template: help").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_plan_help() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     assert_help(&mut app, "plan", "plan: help").await;
 }
 
@@ -261,7 +264,7 @@ async fn test_slash_help_dash_h_aliases() {
     // `--help` / `-h` spellings resolve to the same help output on families
     // that historically only accepted the bare token.
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
 
     app.execute_slash_command("/loop -h").await;
     assert_eq!(app.status, "loop: help");
@@ -270,9 +273,10 @@ async fn test_slash_help_dash_h_aliases() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_central_help_lists_new_commands() {
     let mut app = make_app();
-    app.session_id = Some("s".to_string());
+    app.session.session_id = Some("s".to_string());
     app.execute_slash_command("/help").await;
     let text = app
+        .session
         .messages
         .last()
         .map(|m| m.text_content())
@@ -316,7 +320,7 @@ fn test_slash_toolchain_menu_suggestions() {
     // The toolchain trigger must appear in the slash menu when the user
     // types the `/toolchain` prefix (FR-001 autocomplete-suggestion map).
     let mut app = make_app();
-    app.input = "/toolchain".to_string();
+    app.session.input = "/toolchain".to_string();
     app.update_slash_menu();
     let menu = app
         .slash_menu
@@ -338,7 +342,8 @@ async fn last_output_after(app: &mut App, input: &str) -> String {
     // which requires the multi-thread reactor; this file's tests therefore run
     // on the multi-thread flavour (`#[tokio::test(flavor = "multi_thread")]`).
     app.execute_slash_command(input).await;
-    app.messages
+    app.session
+        .messages
         .last()
         .map(|m| m.text_content())
         .unwrap_or_default()
@@ -865,7 +870,7 @@ async fn test_toolchain_commands_leave_working_tree_untouched() {
 #[test]
 fn test_toolchain_slash_menu_matches_tool_prefix() {
     let mut app = make_app();
-    app.input = "/tool".to_string();
+    app.session.input = "/tool".to_string();
     app.update_slash_menu();
     let menu = app
         .slash_menu
@@ -895,7 +900,7 @@ fn test_toolchain_slash_menu_matches_tool_prefix() {
 #[test]
 fn test_toolchain_subcommand_suggestions_offer_list_and_help() {
     let mut app = make_app();
-    app.input = "/toolchain".to_string();
+    app.session.input = "/toolchain".to_string();
     app.update_slash_menu();
     let menu = app
         .slash_menu

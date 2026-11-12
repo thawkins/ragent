@@ -151,11 +151,16 @@ async fn test_spec_usage_error_subcommands_report_cause_in_message_window() {
 
     for (command, expected, cause) in cases {
         let mut app = make_app();
-        app.session_id = Some("s1".to_string());
+        app.session.session_id = Some("s1".to_string());
 
         app.execute_slash_command(command).await;
 
-        let text = app.messages.last().expect("usage message").text_content();
+        let text = app
+            .session
+            .messages
+            .last()
+            .expect("usage message")
+            .text_content();
         assert!(
             text.contains(cause),
             "{command} must state the cause '{cause}' in the message window: {text}"

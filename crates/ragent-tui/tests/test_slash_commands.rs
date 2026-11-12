@@ -55,6 +55,8 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
@@ -93,7 +95,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
 
-    App::new(
+    let mut app = App::new(
         event_bus,
         storage,
         provider_registry,
@@ -101,7 +103,12 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         Arc::unwrap_or_clone(agent_info),
         false,
         std::path::PathBuf::new(),
-    )
+    );
+    // The session sidebar (MULTISESSION M5) is on by default and would take
+    // the left columns of the rendered layout these tests assert on; keep the
+    // full-width chat they were written against, as `support::make_app` does.
+    app.sidebar.visible = false;
+    app
 }
 
 struct CwdGuard {
@@ -334,8 +341,8 @@ async fn test_slash_editlog_toggles_and_persists() {
     ragent_config::edit_log::set_enabled(false);
 
     let mut app = make_app_with_storage(storage);
-    app.input = "/editlog on".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "/editlog on".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
 
     app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .await;
@@ -343,8 +350,8 @@ async fn test_slash_editlog_toggles_and_persists() {
     assert!(ragent_config::edit_log::is_enabled());
     assert!(app.status.contains("enabled"));
 
-    app.input = "/editlog off".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "/editlog off".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .await;
     assert!(!ragent_config::edit_log::is_enabled());
@@ -354,8 +361,8 @@ async fn test_slash_editlog_toggles_and_persists() {
 #[test]
 fn test_backfill_model_ctx_window_refreshes_stale_ollama_cloud_cache() {
     let mut app = make_app();
-    app.selected_model = Some("ollama_cloud/deepseek-v4-pro".to_string());
-    app.selected_model_ctx_window = Some(32_768);
+    app.session.selected_model = Some("ollama_cloud/deepseek-v4-pro".to_string());
+    app.session.selected_model_ctx_window = Some(32_768);
     app.storage
         .set_setting("selected_model_ctx_window", "32768")
         .expect("persist stale ctx");
@@ -387,7 +394,7 @@ fn test_backfill_model_ctx_window_refreshes_stale_ollama_cloud_cache() {
 
     app.backfill_model_ctx_window();
 
-    assert_eq!(app.selected_model_ctx_window, Some(1_048_576));
+    assert_eq!(app.session.selected_model_ctx_window, Some(1_048_576));
     assert_eq!(
         app.storage
             .get_setting("selected_model_ctx_window")
@@ -432,16 +439,21 @@ fn test_huggingface_with_token_does_not_fall_back_to_static_defaults_without_dis
 async fn test_slash_clear_empties_messages() {
     let mut app = make_app();
     // Add some dummy messages
-    app.messages
+    app.session
+        .messages
         .push(ragent_agent::message::Message::user_text("s1", "hello"));
-    app.messages
+    app.session
+        .messages
         .push(ragent_agent::message::Message::user_text("s1", "world"));
-    assert_eq!(app.messages.len(), 2);
+    assert_eq!(app.session.messages.len(), 2);
 
     app.execute_slash_command("/clear").await;
 
-    assert!(app.messages.is_empty(), "messages should be cleared");
-    assert_eq!(app.scroll_offset, 0, "scroll should reset");
+    assert!(
+        app.session.messages.is_empty(),
+        "messages should be cleared"
+    );
+    assert_eq!(app.session.scroll_offset, 0, "scroll should reset");
     assert_eq!(app.status, "messages cleared");
     // Should log the command start, the action, and the completion.
     assert!(
@@ -469,14 +481,17 @@ async fn test_slash_clear_empties_messages() {
 async fn test_slash_help_shows_commands() {
     let mut app = make_app();
     // Set a session so append_assistant_text can push messages
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/help").await;
 
     assert_eq!(app.status, "help");
     // Should have created an assistant message with command list
-    assert!(!app.messages.is_empty(), "help should create a message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "help should create a message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("/clear"), "help should mention /clear");
     assert!(text.contains("/quit"), "help should mention /quit");
     assert!(text.contains("/system"), "help should mention /system");
@@ -490,7 +505,7 @@ async fn test_slash_help_shows_commands() {
 #[tokio::test]
 async fn test_slash_help_executes_in_chat_screen() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     // App now starts in Chat mode - home screen has been removed
     assert_eq!(app.current_screen, ScreenMode::Chat);
 
@@ -528,7 +543,7 @@ async fn test_slash_system_sets_prompt() {
         .await;
 
     assert_eq!(
-        app.agent_info.prompt.as_deref(),
+        app.session.agent_info.prompt.as_deref(),
         Some("You are a pirate. Respond in pirate speak.")
     );
     assert_eq!(app.status, "system prompt updated");
@@ -552,16 +567,19 @@ async fn test_slash_system_sets_prompt() {
 #[tokio::test]
 async fn test_slash_system_no_args_shows_current() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-    let original = app.agent_info.prompt.clone();
+    app.session.session_id = Some("s1".to_string());
+    let original = app.session.agent_info.prompt.clone();
 
     app.execute_slash_command("/system").await;
 
     // Should display the current prompt, not change it
-    assert_eq!(app.agent_info.prompt, original);
+    assert_eq!(app.session.agent_info.prompt, original);
     if original.is_some() {
-        assert!(!app.messages.is_empty(), "should show current prompt");
-        let text = app.messages.last().unwrap().text_content();
+        assert!(
+            !app.session.messages.is_empty(),
+            "should show current prompt"
+        );
+        let text = app.session.messages.last().unwrap().text_content();
         assert!(text.contains("Current system prompt"));
     }
 }
@@ -570,10 +588,16 @@ async fn test_slash_system_no_args_shows_current() {
 async fn test_slash_system_replaces_existing() {
     let mut app = make_app();
     app.execute_slash_command("/system First prompt").await;
-    assert_eq!(app.agent_info.prompt.as_deref(), Some("First prompt"));
+    assert_eq!(
+        app.session.agent_info.prompt.as_deref(),
+        Some("First prompt")
+    );
 
     app.execute_slash_command("/system Second prompt").await;
-    assert_eq!(app.agent_info.prompt.as_deref(), Some("Second prompt"));
+    assert_eq!(
+        app.session.agent_info.prompt.as_deref(),
+        Some("Second prompt")
+    );
 }
 
 // -- /agent ----------------------------------------------------------
@@ -581,12 +605,12 @@ async fn test_slash_system_replaces_existing() {
 #[tokio::test]
 async fn test_slash_agent_with_name_switches() {
     let mut app = make_app();
-    assert_eq!(app.agent_name, "general");
+    assert_eq!(app.session.agent_name, "general");
 
     app.execute_slash_command("/agent ask").await;
 
-    assert_eq!(app.agent_name, "ask");
-    assert_eq!(app.agent_info.name, "ask");
+    assert_eq!(app.session.agent_name, "ask");
+    assert_eq!(app.session.agent_info.name, "ask");
     assert!(app.status.contains("ask"));
 }
 
@@ -600,7 +624,7 @@ async fn test_slash_agent_unknown_name_shows_error() {
         "status should warn about unknown agent: {}",
         app.status
     );
-    assert_eq!(app.agent_name, "general", "should not change agent");
+    assert_eq!(app.session.agent_name, "general", "should not change agent");
 }
 
 #[tokio::test]
@@ -910,8 +934,8 @@ async fn test_alt_p_toggles_profiler_panel() {
 #[tokio::test]
 async fn test_slash_llmstats_shows_average_metrics() {
     let mut app = make_app();
-    app.selected_model = Some("openai/gpt-4o".to_string());
-    app.llm_request_stats = vec![
+    app.session.selected_model = Some("openai/gpt-4o".to_string());
+    app.session.llm_request_stats = vec![
         ragent_tui::app::LlmRequestStat {
             model_ref: "openai/gpt-4o".to_string(),
             elapsed_ms: 1000,
@@ -929,8 +953,11 @@ async fn test_slash_llmstats_shows_average_metrics() {
     app.execute_slash_command("/llmstats").await;
 
     assert_eq!(app.status, "llm stats");
-    assert!(!app.messages.is_empty(), "llmstats should create a message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "llmstats should create a message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("From: /llmstats"));
     assert!(text.contains("Model: openai/gpt-4o"));
     assert!(text.contains("Samples: 2"));
@@ -942,13 +969,16 @@ async fn test_slash_llmstats_shows_average_metrics() {
 #[tokio::test]
 async fn test_slash_llmstats_no_samples_shows_message() {
     let mut app = make_app();
-    app.selected_model = Some("openai/gpt-4o".to_string());
+    app.session.selected_model = Some("openai/gpt-4o".to_string());
 
     app.execute_slash_command("/llmstats").await;
 
     assert_eq!(app.status, "llm stats unavailable");
-    assert!(!app.messages.is_empty(), "llmstats should create a message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "llmstats should create a message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("No completed LLM responses yet"));
 }
 
@@ -957,7 +987,7 @@ async fn test_slash_llmstats_no_samples_shows_message() {
 #[tokio::test]
 async fn test_slash_cost_shows_estimated_cost() {
     let mut app = make_app();
-    app.llm_request_stats = vec![
+    app.session.llm_request_stats = vec![
         ragent_tui::app::LlmRequestStat {
             model_ref: "openai/gpt-4o".to_string(),
             elapsed_ms: 1000,
@@ -975,8 +1005,11 @@ async fn test_slash_cost_shows_estimated_cost() {
     app.execute_slash_command("/cost").await;
 
     assert_eq!(app.status, "cost summary");
-    assert!(!app.messages.is_empty(), "cost should create a message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "cost should create a message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("From: /cost"));
     assert!(text.contains("Samples: 2"));
     assert!(text.contains("Total tokens"));
@@ -990,8 +1023,11 @@ async fn test_slash_cost_no_samples_shows_message() {
     app.execute_slash_command("/cost").await;
 
     assert_eq!(app.status, "cost unavailable");
-    assert!(!app.messages.is_empty(), "cost should create a message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "cost should create a message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("No completed LLM responses yet"));
 }
 
@@ -1000,12 +1036,15 @@ async fn test_slash_cost_no_samples_shows_message() {
 #[tokio::test]
 async fn test_slash_clip_copies_rendered_message_lines() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-    app.messages.push(ragent_agent::message::Message::user_text(
-        "s1",
-        "hello world",
-    ));
-    app.messages
+    app.session.session_id = Some("s1".to_string());
+    app.session
+        .messages
+        .push(ragent_agent::message::Message::user_text(
+            "s1",
+            "hello world",
+        ));
+    app.session
+        .messages
         .push(ragent_agent::message::Message::assistant_text(
             "s1", "hi there",
         ));
@@ -1014,17 +1053,20 @@ async fn test_slash_clip_copies_rendered_message_lines() {
     // cache, so the transcript must be rendered at least once first.
     render_app_to_string(&mut app, 100, 30);
     assert!(
-        !app.message_content_lines.is_empty(),
+        !app.session.message_content_lines.is_empty(),
         "render must populate the copy buffer"
     );
-    let expected_chars = app.message_content_lines.join("\n").len();
-    let expected_lines = app.message_content_lines.len();
+    let expected_chars = app.session.message_content_lines.join("\n").len();
+    let expected_lines = app.session.message_content_lines.len();
 
     app.execute_slash_command("/clip").await;
 
     assert_eq!(app.status, format!("clip: copied {expected_chars} chars"));
-    assert!(!app.messages.is_empty(), "clip should create a message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "clip should create a message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("From: /clip"));
     assert!(text.contains(&format!("{expected_chars} characters")));
     assert!(text.contains(&format!("{expected_lines} rendered lines")));
@@ -1036,24 +1078,27 @@ async fn test_slash_clip_copies_rendered_message_lines() {
 #[tokio::test]
 async fn test_slash_clip_registered_in_help() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/help").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("/clip"), "help should document /clip: {text}");
 }
 
 #[tokio::test]
 async fn test_slash_clip_empty_window_shows_hint() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-    assert!(app.message_content_lines.is_empty(), "window starts empty");
+    app.session.session_id = Some("s1".to_string());
+    assert!(
+        app.session.message_content_lines.is_empty(),
+        "window starts empty"
+    );
 
     app.execute_slash_command("/clip").await;
 
     assert_eq!(app.status, "clip: nothing to copy");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("From: /clip"));
     assert!(text.contains("No rendered message content"));
 }
@@ -1063,7 +1108,7 @@ async fn test_slash_clip_empty_window_shows_hint() {
 #[tokio::test]
 async fn test_slash_compact_no_session_shows_warning() {
     let mut app = make_app();
-    assert!(app.session_id.is_none());
+    assert!(app.session.session_id.is_none());
 
     app.execute_slash_command("/compact").await;
     assert!(
@@ -1071,14 +1116,17 @@ async fn test_slash_compact_no_session_shows_warning() {
         "should create session then warn about empty messages: {}",
         app.status
     );
-    assert!(app.session_id.is_some(), "session should be created");
+    assert!(
+        app.session.session_id.is_some(),
+        "session should be created"
+    );
 }
 
 #[tokio::test]
 async fn test_slash_compact_no_messages_shows_warning() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-    assert!(app.messages.is_empty());
+    app.session.session_id = Some("s1".to_string());
+    assert!(app.session.messages.is_empty());
 
     app.execute_slash_command("/compact").await;
     assert!(
@@ -1094,8 +1142,8 @@ async fn test_slash_compact_no_messages_shows_warning() {
 #[tokio::test]
 async fn test_slash_compress_alias_forwards_to_compact() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-    assert!(app.messages.is_empty());
+    app.session.session_id = Some("s1".to_string());
+    assert!(app.session.messages.is_empty());
 
     app.execute_slash_command("/compress").await;
     assert!(
@@ -1110,7 +1158,7 @@ async fn test_slash_compress_alias_forwards_to_compact() {
 #[tokio::test]
 async fn test_slash_undo_no_session_shows_warning() {
     let mut app = make_app();
-    assert!(app.session_id.is_none());
+    assert!(app.session.session_id.is_none());
 
     app.execute_slash_command("/undo").await;
     // The ensure_session() gate runs before the undo handler, so a session
@@ -1120,14 +1168,17 @@ async fn test_slash_undo_no_session_shows_warning() {
         "should warn about no messages after session creation: {}",
         app.status
     );
-    assert!(app.session_id.is_some(), "session should be created");
+    assert!(
+        app.session.session_id.is_some(),
+        "session should be created"
+    );
 }
 
 #[tokio::test]
 async fn test_slash_undo_no_messages_shows_warning() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-    assert!(app.messages.is_empty());
+    app.session.session_id = Some("s1".to_string());
+    assert!(app.session.messages.is_empty());
 
     app.execute_slash_command("/undo").await;
     assert!(
@@ -1140,37 +1191,43 @@ async fn test_slash_undo_no_messages_shows_warning() {
 #[tokio::test]
 async fn test_slash_undo_removes_last_user_assistant_pair() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // Build a conversation: user, assistant, user, assistant
-    app.messages.push(ragent_agent::message::Message::user_text(
-        "s1",
-        "first question",
-    ));
-    app.messages
+    app.session
+        .messages
+        .push(ragent_agent::message::Message::user_text(
+            "s1",
+            "first question",
+        ));
+    app.session
+        .messages
         .push(ragent_agent::message::Message::assistant_text(
             "s1",
             "first answer",
         ));
-    app.messages.push(ragent_agent::message::Message::user_text(
-        "s1",
-        "second question",
-    ));
-    app.messages
+    app.session
+        .messages
+        .push(ragent_agent::message::Message::user_text(
+            "s1",
+            "second question",
+        ));
+    app.session
+        .messages
         .push(ragent_agent::message::Message::assistant_text(
             "s1",
             "second answer",
         ));
 
-    assert_eq!(app.messages.len(), 4);
+    assert_eq!(app.session.messages.len(), 4);
 
     app.execute_slash_command("/undo").await;
 
     // Should have removed the last user message and its assistant response
-    assert_eq!(app.messages.len(), 2);
-    assert_eq!(app.messages[0].text_content(), "first question");
-    assert_eq!(app.messages[1].text_content(), "first answer");
-    assert_eq!(app.scroll_offset, 0);
+    assert_eq!(app.session.messages.len(), 2);
+    assert_eq!(app.session.messages[0].text_content(), "first question");
+    assert_eq!(app.session.messages[1].text_content(), "first answer");
+    assert_eq!(app.session.scroll_offset, 0);
     assert!(app.status.contains("Undid last turn"));
     assert!(app.status.contains("removed 2 message(s)"));
 }
@@ -1178,10 +1235,11 @@ async fn test_slash_undo_removes_last_user_assistant_pair() {
 #[tokio::test]
 async fn test_slash_undo_no_user_message_warns() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // Only assistant messages (no user messages to undo)
-    app.messages
+    app.session
+        .messages
         .push(ragent_agent::message::Message::assistant_text(
             "s1",
             "orphan answer",
@@ -1194,34 +1252,37 @@ async fn test_slash_undo_no_user_message_warns() {
         "should warn about no user message: {}",
         app.status
     );
-    assert_eq!(app.messages.len(), 1); // unchanged
+    assert_eq!(app.session.messages.len(), 1); // unchanged
 }
 
 #[tokio::test]
 async fn test_slash_undo_removes_multiple_following_messages() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // User message followed by multiple assistant messages
-    app.messages
+    app.session
+        .messages
         .push(ragent_agent::message::Message::user_text("s1", "question"));
-    app.messages
+    app.session
+        .messages
         .push(ragent_agent::message::Message::assistant_text(
             "s1",
             "answer part 1",
         ));
-    app.messages
+    app.session
+        .messages
         .push(ragent_agent::message::Message::assistant_text(
             "s1",
             "answer part 2",
         ));
 
-    assert_eq!(app.messages.len(), 3);
+    assert_eq!(app.session.messages.len(), 3);
 
     app.execute_slash_command("/undo").await;
 
     // Should remove user message and all following messages
-    assert_eq!(app.messages.len(), 0);
+    assert_eq!(app.session.messages.len(), 0);
     assert!(app.status.contains("removed 3 message(s)"));
 }
 
@@ -1230,12 +1291,15 @@ async fn test_slash_undo_removes_multiple_following_messages() {
 #[tokio::test]
 async fn test_slash_name_no_session_shows_warning() {
     let mut app = make_app();
-    assert!(app.session_id.is_none());
+    assert!(app.session.session_id.is_none());
 
     app.execute_slash_command("/name My Session").await;
     // The ensure_session() gate runs before the name handler, so a session
     // will be created. The name is then set on that session.
-    assert!(app.session_id.is_some(), "session should be created");
+    assert!(
+        app.session.session_id.is_some(),
+        "session should be created"
+    );
     assert!(
         app.status.contains("Session name set to"),
         "should confirm name was set: {}",
@@ -1246,7 +1310,7 @@ async fn test_slash_name_no_session_shows_warning() {
 #[tokio::test]
 async fn test_slash_name_sets_session_name() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // Create the session in storage first
     let storage = app.session_processor.session_manager.storage();
@@ -1275,7 +1339,7 @@ async fn test_slash_name_sets_session_name() {
 #[tokio::test]
 async fn test_slash_name_clears_with_empty_argument() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     let storage = app.session_processor.session_manager.storage();
     storage
@@ -1309,7 +1373,7 @@ async fn test_slash_name_clears_with_empty_argument() {
 #[tokio::test]
 async fn test_slash_name_trims_whitespace() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     let storage = app.session_processor.session_manager.storage();
     storage
@@ -1336,10 +1400,10 @@ async fn test_slash_name_trims_whitespace() {
 #[tokio::test]
 async fn test_help_shows_name_command() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/help").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("/name"),
         "help should document /name command: {text}"
@@ -1349,10 +1413,10 @@ async fn test_help_shows_name_command() {
 #[tokio::test]
 async fn test_help_lists_compact_not_compress() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/help").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("/compact"),
         "help should document /compact: {text}"
@@ -1387,12 +1451,13 @@ async fn test_slash_model_opens_provider_picker() {
 #[tokio::test]
 async fn test_slash_model_show_without_selected_model_uses_agent_model() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/model show").await;
 
     assert_eq!(app.status, "active model metadata");
     let text = app
+        .session
         .messages
         .last()
         .expect("metadata message")
@@ -1404,14 +1469,14 @@ async fn test_slash_model_show_without_selected_model_uses_agent_model() {
 #[tokio::test]
 async fn test_slash_model_show_displays_metadata_for_active_model() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.configured_provider = Some(ConfiguredProvider {
         id: "openai".to_string(),
         name: "OpenAI (GPT)".to_string(),
         source: ProviderSource::Database,
     });
-    app.selected_model = Some("openai/gpt-4o-mini".to_string());
-    app.selected_model_ctx_window = Some(128_000);
+    app.session.selected_model = Some("openai/gpt-4o-mini".to_string());
+    app.session.selected_model_ctx_window = Some(128_000);
 
     // `OpenAiProvider::default_models` returns an empty catalog (models are
     // discovered at runtime), so seed the gpt-4o-mini entry into the discovery
@@ -1448,6 +1513,7 @@ async fn test_slash_model_show_displays_metadata_for_active_model() {
 
     assert_eq!(app.status, "active model metadata");
     let text = app
+        .session
         .messages
         .last()
         .expect("metadata message")
@@ -1512,8 +1578,8 @@ async fn test_slash_model_ollama_cloud_falls_back_to_selected_model_when_discove
         name: "Ollama Cloud".to_string(),
         source: ProviderSource::Database,
     });
-    app.selected_model = Some("ollama_cloud/deepseek-v4-flash".to_string());
-    app.selected_model_ctx_window = Some(262_144);
+    app.session.selected_model = Some("ollama_cloud/deepseek-v4-flash".to_string());
+    app.session.selected_model_ctx_window = Some(262_144);
 
     app.execute_slash_command("/model").await;
 
@@ -1639,7 +1705,7 @@ async fn test_slash_provider_selection_updates_displayed_provider() {
         name: "OpenAI (GPT)".to_string(),
         source: ProviderSource::Database,
     });
-    app.selected_model = Some("openai/gpt-4".to_string());
+    app.session.selected_model = Some("openai/gpt-4".to_string());
 
     // Simulate selecting a provider/model via the interactive dialog.
     app.provider_setup = Some(ProviderSetupStep::SelectModel {
@@ -1932,15 +1998,15 @@ fn test_telemetry_setup_context_menu_paste_writes_active_field() {
 #[test]
 fn test_paste_text_replaces_keyboard_selection() {
     let mut app = make_app();
-    app.input = "hello world".to_string();
-    app.input_cursor = 5;
-    app.kb_select_anchor = Some(0);
+    app.session.input = "hello world".to_string();
+    app.session.input_cursor = 5;
+    app.session.kb_select_anchor = Some(0);
 
     app.handle_paste_text("pasted");
 
-    assert_eq!(app.input, "pasted world");
-    assert_eq!(app.input_cursor, 6);
-    assert!(app.kb_select_anchor.is_none());
+    assert_eq!(app.session.input, "pasted world");
+    assert_eq!(app.session.input_cursor, 6);
+    assert!(app.session.kb_select_anchor.is_none());
 }
 
 #[test]
@@ -1949,9 +2015,9 @@ fn test_paste_text_replaces_mouse_selection() {
     use ratatui::layout::Rect;
 
     let mut app = make_app();
-    app.input = "hello world".to_string();
-    app.input_cursor = 0;
-    app.kb_select_anchor = None;
+    app.session.input = "hello world".to_string();
+    app.session.input_cursor = 0;
+    app.session.kb_select_anchor = None;
     app.input_area = Rect::new(0, 0, 12, 10);
     app.text_selection = Some(TextSelection {
         pane: SelectionPane::Input,
@@ -1961,7 +2027,7 @@ fn test_paste_text_replaces_mouse_selection() {
 
     app.handle_paste_text("pasted");
 
-    assert_eq!(app.input, "pastedworld");
+    assert_eq!(app.session.input, "pastedworld");
     assert!(app.text_selection.is_none());
 }
 
@@ -1997,15 +2063,15 @@ async fn test_slash_unknown_command_visible_in_message_window() {
     // must ALSO render a visible rejection in the message window (a silently
     // swallowed prompt once looked like a broken agent loop).
     let mut app = make_app();
-    let before = app.messages.len();
+    let before = app.session.messages.len();
     app.execute_slash_command("/simpify all").await;
 
     assert_eq!(
-        app.messages.len(),
+        app.session.messages.len(),
         before + 1,
         "unknown command should append one assistant message"
     );
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("From: /simpify"),
         "message window notice should carry the From header, got: {text}"
@@ -2058,7 +2124,7 @@ async fn test_blueprints_list_empty() {
     let _guard = enter_with_cwd();
     let mut app = make_app();
     app.execute_slash_command("/blueprints").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("From: /blueprints"),
         "list should show header: {text}"
@@ -2077,7 +2143,7 @@ async fn test_blueprints_list_installed() {
 
     let mut app = make_app();
     app.execute_slash_command("/blueprints list").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("## Installed Team Blueprints"),
         "list should show table header: {text}"
@@ -2108,7 +2174,7 @@ async fn test_blueprints_detail() {
 
     let mut app = make_app();
     app.execute_slash_command("/blueprints demo").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("From: /blueprints demo"),
         "detail header: {text}"
@@ -2141,7 +2207,7 @@ async fn test_team_blueprint_still_works_after_refactor() {
 
     let mut app = make_app();
     app.execute_slash_command("/team blueprint demo").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("From: /team blueprint demo"),
         "team blueprint detail header: {text}"
@@ -2158,11 +2224,11 @@ async fn test_team_blueprint_still_works_after_refactor() {
 #[tokio::test]
 async fn test_slash_command_clears_input() {
     let mut app = make_app();
-    app.input = "/help".to_string();
+    app.session.input = "/help".to_string();
 
-    app.execute_slash_command(&app.input.clone()).await;
+    app.execute_slash_command(&app.session.input.clone()).await;
     assert!(
-        app.input.is_empty(),
+        app.session.input.is_empty(),
         "input should be cleared after command"
     );
     assert!(app.slash_menu.is_none(), "slash menu should be closed");
@@ -2171,8 +2237,8 @@ async fn test_slash_command_clears_input() {
 #[tokio::test]
 async fn test_input_cursor_left_right_and_editing() {
     let mut app = make_app();
-    app.input = "abc".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "abc".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
 
     // Move cursor left twice (from end to between 'b' and 'c')
     app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
@@ -2180,64 +2246,64 @@ async fn test_input_cursor_left_right_and_editing() {
     app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
         .await;
 
-    assert_eq!(app.input_cursor, 1);
+    assert_eq!(app.session.input_cursor, 1);
 
     // Insert a character at the cursor position
     app.handle_key_event(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input, "aXbc");
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input, "aXbc");
+    assert_eq!(app.session.input_cursor, 2);
 
     // Move to end and delete the inserted character
     app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input_cursor, 4);
+    assert_eq!(app.session.input_cursor, 4);
 
     // Backspace at end removes the last character.
     app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input, "aXb");
-    assert_eq!(app.input_cursor, 3);
+    assert_eq!(app.session.input, "aXb");
+    assert_eq!(app.session.input_cursor, 3);
 
     // Move left one position and delete the inserted character.
     app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input_cursor, 2);
     app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input, "ab");
-    assert_eq!(app.input_cursor, 1);
+    assert_eq!(app.session.input, "ab");
+    assert_eq!(app.session.input_cursor, 1);
 }
 
 #[tokio::test]
 async fn test_input_editing_handles_unicode_backspace_and_delete() {
     let mut app = make_app();
-    app.input = "a💡b".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "a💡b".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
 
     // Move to between  and b, then backspace removes .
     app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input_cursor, 2);
     app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input, "ab");
-    assert_eq!(app.input_cursor, 1);
+    assert_eq!(app.session.input, "ab");
+    assert_eq!(app.session.input_cursor, 1);
 
     // Delete at cursor should remove the next character.
-    app.input = "a💡b".to_string();
-    app.input_cursor = 1; // before 
+    app.session.input = "a💡b".to_string();
+    app.session.input_cursor = 1; // before 
     app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input, "ab");
-    assert_eq!(app.input_cursor, 1);
+    assert_eq!(app.session.input, "ab");
+    assert_eq!(app.session.input_cursor, 1);
 }
 
 #[tokio::test]
 async fn test_file_menu_mode_editing_respects_midline_cursor() {
     let mut app = make_app();
-    app.input = "ab@cd".to_string();
-    app.input_cursor = 2; // between 'b' and '@'
+    app.session.input = "ab@cd".to_string();
+    app.session.input_cursor = 2; // between 'b' and '@'
     app.file_menu = Some(FileMenuState {
         matches: vec![FileMenuEntry {
             display: "src/main.rs".to_string(),
@@ -2252,13 +2318,13 @@ async fn test_file_menu_mode_editing_respects_midline_cursor() {
 
     app.handle_key_event(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input, "abX@cd");
-    assert_eq!(app.input_cursor, 3);
+    assert_eq!(app.session.input, "abX@cd");
+    assert_eq!(app.session.input_cursor, 3);
 
     app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input, "ab@cd");
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input, "ab@cd");
+    assert_eq!(app.session.input_cursor, 2);
 }
 
 #[tokio::test]
@@ -2274,8 +2340,8 @@ async fn test_history_picker_enter_sets_char_cursor_for_unicode() {
         .await;
 
     assert!(app.history_picker.is_none());
-    assert_eq!(app.input, "éé");
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input, "éé");
+    assert_eq!(app.session.input_cursor, 2);
 }
 
 #[tokio::test]
@@ -2298,76 +2364,81 @@ async fn test_chat_keystrokes_produce_expected_edit_result() {
     }
 
     // Verify the final state
-    assert_eq!(chat.input, "aZ");
-    assert_eq!(chat.input_cursor, 2);
+    assert_eq!(chat.session.input, "aZ");
+    assert_eq!(chat.session.input_cursor, 2);
 }
 
 #[tokio::test]
 async fn test_ctrl_word_navigation_and_deletes() {
     let mut app = make_app();
-    app.input = "hello world again".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "hello world again".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
 
     app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input_cursor, "hello world ".chars().count());
+    assert_eq!(app.session.input_cursor, "hello world ".chars().count());
 
     app.handle_key_event(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input, "hello again");
-    assert_eq!(app.input_cursor, "hello ".chars().count());
+    assert_eq!(app.session.input, "hello again");
+    assert_eq!(app.session.input_cursor, "hello ".chars().count());
 
     app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input, "hello ");
-    assert_eq!(app.input_cursor, "hello ".chars().count());
+    assert_eq!(app.session.input, "hello ");
+    assert_eq!(app.session.input_cursor, "hello ".chars().count());
 }
 
 #[tokio::test]
 async fn test_ctrl_terminal_cursor_movement_bindings() {
     let mut app = make_app();
-    app.input = "abcdef".to_string();
-    app.input_cursor = 3;
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = 3;
 
     app.handle_key_event(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input_cursor, 2);
     app.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input_cursor, 3);
+    assert_eq!(app.session.input_cursor, 3);
 
     // Ctrl+A now selects all: anchor -> 0, cursor -> end.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.kb_select_anchor, Some(0));
-    assert_eq!(app.input_cursor, 6);
+    assert_eq!(app.session.kb_select_anchor, Some(0));
+    assert_eq!(app.session.input_cursor, 6);
     // Ctrl+E moves to end (cursor is already there; clears selection).
     app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input_cursor, 6);
+    assert_eq!(app.session.input_cursor, 6);
 }
 
 #[tokio::test]
 async fn test_ctrl_home_end_bindings() {
     let mut app = make_app();
-    app.input = "abcdef".to_string();
-    app.input_cursor = 3;
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = 3;
 
     app.handle_key_event(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input_cursor, 0);
+    assert_eq!(app.session.input_cursor, 0);
     app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input_cursor, 6);
+    assert_eq!(app.session.input_cursor, 6);
 }
 
 #[test]
 fn test_file_menu_targets_mention_under_cursor_not_last_mention() {
     let _lock = cwd_lock();
     let mut app = make_app();
-    app.input = "compare @first with @second".to_string();
-    let first_cursor = app.input.find("@first").expect("first mention exists") + "@fi".len();
-    app.input_cursor = app.input[..first_cursor].chars().count();
+    app.session.input = "compare @first with @second".to_string();
+    let first_cursor = app
+        .session
+        .input
+        .find("@first")
+        .expect("first mention exists")
+        + "@fi".len();
+    app.session.input_cursor = app.session.input[..first_cursor].chars().count();
 
     app.project_files_cache = Some(vec![
         std::path::PathBuf::from("first_file.rs"),
@@ -2389,9 +2460,14 @@ fn test_file_menu_targets_mention_under_cursor_not_last_mention() {
 fn test_accept_file_menu_replaces_active_mention_span_only() {
     let _lock = cwd_lock();
     let mut app = make_app();
-    app.input = "compare @first with @second".to_string();
-    let first_cursor = app.input.find("@first").expect("first mention exists") + "@first".len();
-    app.input_cursor = app.input[..first_cursor].chars().count();
+    app.session.input = "compare @first with @second".to_string();
+    let first_cursor = app
+        .session
+        .input
+        .find("@first")
+        .expect("first mention exists")
+        + "@first".len();
+    app.session.input_cursor = app.session.input[..first_cursor].chars().count();
 
     app.file_menu = Some(FileMenuState {
         matches: vec![FileMenuEntry {
@@ -2407,9 +2483,12 @@ fn test_accept_file_menu_replaces_active_mention_span_only() {
 
     let closed = app.accept_file_menu_selection();
     assert!(closed);
-    assert_eq!(app.input, "compare @src/first_match.rs with @second");
     assert_eq!(
-        app.input_cursor,
+        app.session.input,
+        "compare @src/first_match.rs with @second"
+    );
+    assert_eq!(
+        app.session.input_cursor,
         "compare @src/first_match.rs".chars().count()
     );
 }
@@ -2418,8 +2497,8 @@ fn test_accept_file_menu_replaces_active_mention_span_only() {
 fn test_file_menu_closes_when_cursor_not_inside_mention() {
     let _lock = cwd_lock();
     let mut app = make_app();
-    app.input = "compare @first with @second".to_string();
-    app.input_cursor = 0;
+    app.session.input = "compare @first with @second".to_string();
+    app.session.input_cursor = 0;
     app.project_files_cache = Some(vec![std::path::PathBuf::from("first.rs")]);
 
     app.update_file_menu();
@@ -2429,8 +2508,8 @@ fn test_file_menu_closes_when_cursor_not_inside_mention() {
 #[tokio::test]
 async fn test_file_menu_mode_supports_cursor_movement_and_delete() {
     let mut app = make_app();
-    app.input = "ab@cd".to_string();
-    app.input_cursor = 3; // between '@' and 'c'
+    app.session.input = "ab@cd".to_string();
+    app.session.input_cursor = 3; // between '@' and 'c'
     app.file_menu = Some(FileMenuState {
         matches: vec![FileMenuEntry {
             display: "src/main.rs".to_string(),
@@ -2445,19 +2524,19 @@ async fn test_file_menu_mode_supports_cursor_movement_and_delete() {
 
     app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input_cursor, 2);
 
     app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
         .await;
-    assert_eq!(app.input, "abcd");
-    assert_eq!(app.input_cursor, 2);
+    assert_eq!(app.session.input, "abcd");
+    assert_eq!(app.session.input_cursor, 2);
 }
 
 #[tokio::test]
 async fn test_file_menu_mode_supports_ctrl_word_actions() {
     let mut app = make_app();
-    app.input = "@hello world".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "@hello world".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.file_menu = Some(FileMenuState {
         matches: vec![FileMenuEntry {
             display: "src/main.rs".to_string(),
@@ -2472,19 +2551,19 @@ async fn test_file_menu_mode_supports_ctrl_word_actions() {
 
     app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input_cursor, "@hello ".chars().count());
+    assert_eq!(app.session.input_cursor, "@hello ".chars().count());
 
     app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))
         .await;
-    assert_eq!(app.input, "@hello ");
-    assert_eq!(app.input_cursor, "@hello ".chars().count());
+    assert_eq!(app.session.input, "@hello ");
+    assert_eq!(app.session.input_cursor, "@hello ".chars().count());
 }
 
 #[tokio::test]
 async fn test_file_menu_enter_accepts_without_sending() {
     let mut app = make_app();
-    app.input = "@first".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "@first".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.file_menu = Some(FileMenuState {
         matches: vec![FileMenuEntry {
             display: "src/first.rs".to_string(),
@@ -2501,7 +2580,7 @@ async fn test_file_menu_enter_accepts_without_sending() {
         ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
             .await;
     assert!(action.is_none(), "enter should accept mention but not send");
-    assert_eq!(app.input, "@src/first.rs");
+    assert_eq!(app.session.input, "@src/first.rs");
     assert!(
         app.file_menu.is_none(),
         "menu should close after file acceptance"
@@ -2512,8 +2591,8 @@ async fn test_file_menu_enter_accepts_without_sending() {
 fn test_file_menu_no_matches_stays_open_for_feedback() {
     let _lock = cwd_lock();
     let mut app = make_app();
-    app.input = "@nomatch".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "@nomatch".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.project_files_cache = Some(vec![std::path::PathBuf::from("src/first.rs")]);
 
     app.update_file_menu();
@@ -2560,8 +2639,8 @@ async fn test_slash_browse_refresh_updates_cache_metadata() {
 fn test_update_file_menu_refreshes_cache_on_cwd_mismatch() {
     let _lock = cwd_lock();
     let mut app = make_app();
-    app.input = "@src".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "@src".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.project_files_cache = Some(vec![]);
     app.project_files_cache_cwd = Some(std::path::PathBuf::from("/definitely/not/current"));
 
@@ -2582,8 +2661,8 @@ fn test_update_file_menu_refreshes_cache_on_cwd_mismatch() {
 fn test_directory_menu_has_back_to_fuzzy_entry() {
     let _lock = cwd_lock();
     let mut app = make_app();
-    app.input = "@src".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "@src".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.file_menu = Some(FileMenuState {
         matches: vec![FileMenuEntry {
             display: "src/".to_string(),
@@ -2608,8 +2687,8 @@ fn test_directory_menu_has_back_to_fuzzy_entry() {
 async fn test_file_menu_ctrl_backslash_toggles_hidden_filter() {
     let _lock = cwd_lock();
     let mut app = make_app();
-    app.input = "@src".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "@src".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.file_menu = Some(FileMenuState {
         matches: vec![FileMenuEntry {
             display: "src/main.rs".to_string(),
@@ -2748,7 +2827,7 @@ async fn test_output_view_paging_shortcuts() {
 #[tokio::test]
 async fn test_output_view_escape_closes_overlay() {
     let mut app = make_app();
-    app.selected_agent_session_id = Some("s1".to_string());
+    app.session.selected_agent_session_id = Some("s1".to_string());
     app.selected_agent_index = Some(1);
     app.output_view = Some(OutputViewState {
         target: OutputViewTarget::Session {
@@ -2769,7 +2848,7 @@ async fn test_output_view_escape_closes_overlay() {
     app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         .await;
     assert!(app.output_view.is_none());
-    assert!(app.selected_agent_session_id.is_none());
+    assert!(app.session.selected_agent_session_id.is_none());
     assert!(app.selected_agent_index.is_none());
 }
 
@@ -2816,7 +2895,7 @@ async fn test_slash_system_preserves_argument_whitespace() {
         .await;
 
     assert_eq!(
-        app.agent_info.prompt.as_deref(),
+        app.session.agent_info.prompt.as_deref(),
         Some("You are   a   helpful   bot"),
         "leading/trailing whitespace trimmed, internal preserved"
     );
@@ -2827,13 +2906,13 @@ async fn test_slash_system_preserves_argument_whitespace() {
 #[tokio::test]
 async fn test_slash_tools_list_renders_every_registered_tool() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/tools list").await;
 
     assert_eq!(app.status, "tools");
-    assert!(!app.messages.is_empty());
-    let text = app.messages.last().unwrap().text_content();
+    assert!(!app.session.messages.is_empty());
+    let text = app.session.messages.last().unwrap().text_content();
     let expected = app.session_processor.tool_registry.definitions().len();
     assert!(
         text.contains(&format!("Tools ({expected} total):")),
@@ -2853,12 +2932,12 @@ async fn test_slash_tools_list_renders_every_registered_tool() {
 #[tokio::test]
 async fn test_slash_tools_default_shows_help() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/tools").await;
 
     assert_eq!(app.status, "tools help");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("`/tools list`"),
         "should document /tools list"
@@ -2872,12 +2951,12 @@ async fn test_slash_tools_default_shows_help() {
 #[tokio::test]
 async fn test_slash_tools_show_alias_lists_registered_tools() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/tools show").await;
 
     assert_eq!(app.status, "tools");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("Tools ("));
     assert!(text.contains("read"));
 }
@@ -2885,11 +2964,11 @@ async fn test_slash_tools_show_alias_lists_registered_tools() {
 #[tokio::test]
 async fn test_slash_tools_help_shows_usage() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/tools help").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("`/tools list`"));
     assert!(text.contains("`/tools help`"));
     assert!(
@@ -2901,7 +2980,7 @@ async fn test_slash_tools_help_shows_usage() {
 #[tokio::test]
 async fn test_slash_tools_rejects_a_removed_visibility_switch() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/tools github").await;
     assert_eq!(app.status, "tools error");
@@ -2913,24 +2992,27 @@ async fn test_slash_tools_rejects_a_removed_visibility_switch() {
 #[tokio::test]
 async fn test_slash_tools_creates_session_if_none() {
     let mut app = make_app();
-    assert!(app.session_id.is_none());
+    assert!(app.session.session_id.is_none());
 
     app.execute_slash_command("/tools list").await;
 
-    assert!(app.session_id.is_some(), "should create session");
+    assert!(app.session.session_id.is_some(), "should create session");
     assert_eq!(app.status, "tools");
-    assert!(!app.messages.is_empty());
+    assert!(!app.session.messages.is_empty());
 }
 
 #[tokio::test]
 async fn test_slash_webapi_help_shows_endpoints() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/webapi help").await;
 
-    assert!(!app.messages.is_empty(), "help should produce a message");
-    let last = app.messages.last().unwrap();
+    assert!(
+        !app.session.messages.is_empty(),
+        "help should produce a message"
+    );
+    let last = app.session.messages.last().unwrap();
     let text = format!("{last:?}");
     assert!(
         text.contains("health") || text.contains("sessions"),
@@ -2941,11 +3023,11 @@ async fn test_slash_webapi_help_shows_endpoints() {
 #[tokio::test]
 async fn test_slash_webapi_disable_when_not_running() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/webapi disable").await;
 
-    let last = app.messages.last().unwrap();
+    let last = app.session.messages.last().unwrap();
     let text = format!("{last:?}");
     assert!(
         text.contains("not running") || text.contains("Disabled"),
@@ -2956,7 +3038,7 @@ async fn test_slash_webapi_disable_when_not_running() {
 #[tokio::test]
 async fn test_slash_webapi_enable_sets_token() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     assert!(
         app.webapi_token.is_none(),
@@ -2982,12 +3064,15 @@ async fn test_slash_webapi_enable_sets_token() {
 #[tokio::test]
 async fn test_slash_spec_no_args_shows_help() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec").await;
 
-    assert!(!app.messages.is_empty(), "spec should create a message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "spec should create a message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("spec help"), "should show spec help: {text}");
     assert!(
         text.contains("spec create"),
@@ -3001,7 +3086,7 @@ async fn test_slash_spec_no_args_shows_help() {
 #[tokio::test]
 async fn test_slash_spec_update_missing_spec_id_shows_usage_error() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec update").await;
 
@@ -3050,11 +3135,12 @@ async fn test_slash_spec_reverse_usage_errors_report_cause() {
 
     for (command, expected) in cases {
         let mut app = make_app();
-        app.session_id = Some("s1".to_string());
+        app.session.session_id = Some("s1".to_string());
 
         app.execute_slash_command(command).await;
 
         let text: String = app
+            .session
             .messages
             .iter()
             .map(|m| m.text_content())
@@ -3079,7 +3165,7 @@ async fn test_slash_spec_reverse_usage_errors_report_cause() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_slash_spec_reverse_folder_scaffolds_project() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     let dir = std::env::temp_dir().join(format!(
         "ragent-reverse-folder-{}-{}",
@@ -3110,6 +3196,7 @@ async fn test_slash_spec_reverse_folder_scaffolds_project() {
     );
 
     let joined: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -3128,7 +3215,7 @@ async fn test_slash_spec_reverse_folder_scaffolds_project() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_slash_spec_reverse_valid_scaffold_reaches_reverse_handler() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command(
         "/spec reverse octocat/Hello-World --create my-spec --depth 2 \
@@ -3180,8 +3267,11 @@ async fn test_slash_spec_task_lists_tasks() {
 
     app.execute_slash_command("/spec task testspec").await;
 
-    assert!(!app.messages.is_empty(), "task should create a message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "task should create a message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Tasks for") || text.contains("No tasks found") || text.contains("Error:"),
         "should list tasks or show empty/error: {text}"
@@ -3191,12 +3281,15 @@ async fn test_slash_spec_task_lists_tasks() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_slash_spec_validate_all() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec validate").await;
 
-    assert!(!app.messages.is_empty(), "validate should create a message");
-    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !app.session.messages.is_empty(),
+        "validate should create a message"
+    );
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Validation") || text.contains("No specs found") || text.contains("Error:"),
         "should show validation results: {text}"
@@ -3211,7 +3304,7 @@ async fn test_slash_spec_validate_all() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_slash_spec_create_starts_generation() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/spec create websocket Add real-time collaborative editing")
         .await;
@@ -3222,12 +3315,12 @@ async fn test_slash_spec_create_starts_generation() {
          specs/websocket/TESTPLAN.md...",
         "status should indicate generation"
     );
-    assert!(app.is_processing, "should set is_processing");
+    assert!(app.session.is_processing, "should set is_processing");
     assert!(
-        !app.messages.is_empty(),
+        !app.session.messages.is_empty(),
         "should push the spec task message"
     );
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("specification writer"),
         "task should contain spec writer prompt"
@@ -3252,16 +3345,16 @@ async fn test_slash_spec_create_starts_generation() {
 #[tokio::test]
 async fn test_slash_config_show_displays_paths() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/config show").await;
 
     assert_eq!(app.status, "config: show");
     assert!(
-        !app.messages.is_empty(),
+        !app.session.messages.is_empty(),
         "config show should create a message"
     );
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Application Paths"),
         "config show should contain Application Paths section"
@@ -3295,14 +3388,14 @@ async fn test_slash_config_show_displays_paths() {
 #[tokio::test]
 async fn test_slash_config_no_args_shows_usage() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/config").await;
 
     // `/config` with no args now shows the help table (same content family as
     // `/config help`); the status reflects help rather than the usage hint.
     assert_eq!(app.status, "config: help");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("/config show"),
         "usage should mention /config show: {text}"
@@ -3326,7 +3419,7 @@ async fn test_slash_config_save_errors_when_no_global_config() {
     // test asserts the error path produces an error status and a message
     // rather than panicking, exercising the slash arm end-to-end.
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/config save").await;
 
@@ -3339,7 +3432,7 @@ async fn test_slash_config_save_errors_when_no_global_config() {
         app.status
     );
     assert!(
-        !app.messages.is_empty(),
+        !app.session.messages.is_empty(),
         "/config save should always produce a message"
     );
 }
@@ -3352,7 +3445,7 @@ async fn test_slash_config_list_no_saves_shows_message() {
     // picker. We cannot easily control the real global config dir, so this
     // test asserts the no-panic contract and that a message is always emitted.
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/config list").await;
 
@@ -3362,12 +3455,12 @@ async fn test_slash_config_list_no_saves_shows_message() {
         app.status
     );
     assert!(
-        !app.messages.is_empty(),
+        !app.session.messages.is_empty(),
         "/config list should always produce a message"
     );
     // When the real global config dir happens to contain saves, the picker
     // must be opened; otherwise it must stay None. Either is acceptable.
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("/config list"),
         "message should be attributed to /config list: {text}"
@@ -3381,8 +3474,8 @@ fn test_slash_config_subcommand_suggestions_include_save_and_list() {
     // `update_slash_menu` build the menu; the selected entry's `suggestions`
     // field is populated by `get_command_suggestions("config")`.
     let mut app = make_app();
-    app.input = "/config".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "/config".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
 
     app.update_slash_menu();
 
@@ -3418,8 +3511,8 @@ fn test_research_completion_and_help_list_papers() {
     // researchnoacc FR-005: `/research` autocomplete and the parameter hint
     // must advertise the canonical `--papers` scholarly-inclusion flag.
     let mut app = make_app();
-    app.input = "/research".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "/research".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
 
     app.update_slash_menu();
 
@@ -3454,8 +3547,8 @@ fn test_research_completion_and_help_list_output_limits() {
     // parameter hint must advertise the `--max-concepts` / `--max-findings`
     // output-limit flags.
     let mut app = make_app();
-    app.input = "/research".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "/research".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
 
     app.update_slash_menu();
 
@@ -3601,8 +3694,8 @@ async fn test_slash_yolo_toggles_and_persists() {
     ragent_config::yolo::set_enabled(false);
 
     let mut app = make_app_with_storage(storage);
-    app.input = "/yolo".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "/yolo".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
 
     app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .await;
@@ -3611,8 +3704,8 @@ async fn test_slash_yolo_toggles_and_persists() {
     assert!(app.status.contains("ENABLED"));
 
     // Running again disables it.
-    app.input = "/yolo".to_string();
-    app.input_cursor = app.input.chars().count();
+    app.session.input = "/yolo".to_string();
+    app.session.input_cursor = app.session.input.chars().count();
     app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .await;
     assert!(!ragent_config::yolo::is_enabled());
@@ -3785,8 +3878,8 @@ async fn test_config_save_picker_intercepts_keys_in_handle_key_event() {
     fs::write(dir.join("ragent.json"), r#"{"defaultAgent":"coder"}"#).expect("write");
 
     let mut app = make_app();
-    app.input.clear();
-    app.input_cursor = 0;
+    app.session.input.clear();
+    app.session.input_cursor = 0;
     app.config_save_picker = Some(ragent_tui::app::ConfigSavePickerState {
         entries: vec![],
         selected: 0,
@@ -3797,7 +3890,7 @@ async fn test_config_save_picker_intercepts_keys_in_handle_key_event() {
     app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty()))
         .await;
     assert!(
-        app.input.is_empty(),
+        app.session.input.is_empty(),
         "keys must be intercepted while config save picker is open"
     );
 }
@@ -3806,11 +3899,11 @@ async fn test_config_save_picker_intercepts_keys_in_handle_key_event() {
 async fn test_slash_memory_no_args_shows_usage() {
     // /memory with an unknown subcommand should list the supported subcommands.
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/memory foobar").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Usage:"),
         "response should show usage: {text}"
@@ -3828,12 +3921,12 @@ async fn test_slash_memory_no_args_shows_usage() {
 #[tokio::test]
 async fn test_slash_actionloop_help_shows_subcommands() {
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/actionloop help").await;
 
     assert_eq!(app.status, "actionloop: help");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("/actionloop help"),
         "help should mention itself: {text}"
@@ -3850,11 +3943,11 @@ async fn test_slash_actionloop_no_samples_reports_hint() {
     // The profiler is shared process-wide, so reset it first for determinism.
     agent_loop_profiler().reset();
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/actionloop").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     if app.status == "actionloop: no samples" {
         assert!(
             text.contains("No action-loop timing samples recorded yet"),
@@ -3879,13 +3972,19 @@ async fn test_slash_actionloop_clip_no_samples_reports_hint() {
     // path deterministic where possible.
     agent_loop_profiler().reset();
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/actionloop clip").await;
 
     // When another test polluted the shared profiler, the clip path reports
     // success instead; either outcome is acceptable, so assert on the message.
-    let text = app.messages.last().unwrap().text_content().to_lowercase();
+    let text = app
+        .session
+        .messages
+        .last()
+        .unwrap()
+        .text_content()
+        .to_lowercase();
     assert!(
         text.contains("action-loop timing")
             && (text.contains("clipboard") || text.contains("no action-loop timing samples")),
@@ -3906,12 +4005,12 @@ async fn test_slash_actionloop_with_samples_shows_timings() {
     profiler.set_enabled(false);
 
     let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/actionloop").await;
 
     assert_eq!(app.status, "actionloop: timings shown");
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("test-op"),
         "report should include the recorded operation: {text}"
@@ -3929,7 +4028,7 @@ async fn test_slash_actionloop_with_samples_shows_timings() {
 async fn test_triggers_list_empty() {
     let mut app = make_app();
     app.execute_slash_command("/triggers list").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("No trigger rules registered"),
         "empty list should say so: {text}"
@@ -3948,7 +4047,7 @@ async fn test_triggers_list_with_rules() {
     app.trigger_runtime = Some(runtime);
 
     app.execute_slash_command("/triggers list").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains(&rule_id[..8]),
         "list should show rule id prefix: {text}"
@@ -3968,7 +4067,7 @@ async fn test_triggers_list_with_rules() {
 async fn test_triggers_no_subcommand_defaults_to_list() {
     let mut app = make_app();
     app.execute_slash_command("/triggers").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("No trigger rules registered"),
         "bare /triggers should default to list: {text}"
@@ -3987,7 +4086,7 @@ async fn test_triggers_enable_existing_rule() {
 
     app.execute_slash_command(&format!("/triggers enable {rule_id}"))
         .await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("enabled"), "enable should confirm: {text}");
     assert_eq!(app.status, "triggers: enabled");
 }
@@ -3997,7 +4096,7 @@ async fn test_triggers_enable_not_found() {
     let mut app = make_app();
     app.execute_slash_command("/triggers enable nonexistent-id")
         .await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found"),
         "enable on missing rule should say not found: {text}"
@@ -4009,7 +4108,7 @@ async fn test_triggers_enable_not_found() {
 async fn test_triggers_enable_no_id() {
     let mut app = make_app();
     app.execute_slash_command("/triggers enable").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Usage"),
         "enable with no id should show usage: {text}"
@@ -4028,7 +4127,7 @@ async fn test_triggers_disable_existing_rule() {
 
     app.execute_slash_command(&format!("/triggers disable {rule_id}"))
         .await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("disabled"), "disable should confirm: {text}");
     assert_eq!(app.status, "triggers: disabled");
 }
@@ -4038,7 +4137,7 @@ async fn test_triggers_disable_not_found() {
     let mut app = make_app();
     app.execute_slash_command("/triggers disable nonexistent-id")
         .await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found"),
         "disable on missing rule should say not found: {text}"
@@ -4058,7 +4157,7 @@ async fn test_triggers_remove_existing_rule() {
 
     app.execute_slash_command(&format!("/triggers remove {rule_id}"))
         .await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("removed"), "remove should confirm: {text}");
     assert_eq!(app.status, "triggers: removed");
     assert_eq!(app.trigger_runtime.as_ref().unwrap().rule_count(), 0);
@@ -4069,7 +4168,7 @@ async fn test_triggers_remove_not_found() {
     let mut app = make_app();
     app.execute_slash_command("/triggers remove nonexistent-id")
         .await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found"),
         "remove on missing rule should say not found: {text}"
@@ -4081,7 +4180,7 @@ async fn test_triggers_remove_not_found() {
 async fn test_triggers_remove_no_id() {
     let mut app = make_app();
     app.execute_slash_command("/triggers remove").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Usage"),
         "remove with no id should show usage: {text}"
@@ -4093,7 +4192,7 @@ async fn test_triggers_remove_no_id() {
 async fn test_triggers_status_empty() {
     let mut app = make_app();
     app.execute_slash_command("/triggers status").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Trigger Runtime Status"),
         "status should show header: {text}"
@@ -4114,7 +4213,7 @@ async fn test_triggers_status_with_rules() {
     app.trigger_runtime = Some(runtime);
 
     app.execute_slash_command("/triggers status").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Total rules") && text.contains('2'),
         "status should show 2 rules: {text}"
@@ -4130,7 +4229,7 @@ async fn test_triggers_status_with_rules() {
 async fn test_triggers_help() {
     let mut app = make_app();
     app.execute_slash_command("/triggers help").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("/triggers"),
         "help should mention /triggers: {text}"
@@ -4150,7 +4249,7 @@ async fn test_triggers_help() {
 async fn test_triggers_unknown_subcommand() {
     let mut app = make_app();
     app.execute_slash_command("/triggers frobnicate").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Unknown sub-command"),
         "unknown sub-command should warn: {text}"
@@ -4165,7 +4264,7 @@ async fn test_inbox_list_empty() {
 
     let mut app = make_app();
     app.execute_slash_command("/inbox list").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Inbox is empty"),
         "empty inbox should say so: {text}"
@@ -4179,7 +4278,7 @@ async fn test_inbox_no_subcommand_defaults_to_list() {
 
     let mut app = make_app();
     app.execute_slash_command("/inbox").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Inbox is empty"),
         "bare /inbox should default to list: {text}"
@@ -4199,7 +4298,7 @@ async fn test_inbox_list_with_entries() {
 
     let mut app = make_app();
     app.execute_slash_command("/inbox list").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Triage Inbox"),
         "list should show header: {text}"
@@ -4230,7 +4329,7 @@ async fn test_inbox_claim_existing() {
     let mut app = make_app();
     app.execute_slash_command(&format!("/inbox claim {entry_id}"))
         .await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("claimed"), "claim should confirm: {text}");
     assert_eq!(app.status, "inbox: claimed");
 
@@ -4246,7 +4345,7 @@ async fn test_inbox_claim_not_found() {
     let mut app = make_app();
     app.execute_slash_command("/inbox claim nonexistent-id")
         .await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found"),
         "claim on missing entry should say not found: {text}"
@@ -4260,7 +4359,7 @@ async fn test_inbox_claim_no_id() {
 
     let mut app = make_app();
     app.execute_slash_command("/inbox claim").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Usage"),
         "claim with no id should show usage: {text}"
@@ -4279,7 +4378,7 @@ async fn test_inbox_dismiss_existing() {
     let mut app = make_app();
     app.execute_slash_command(&format!("/inbox dismiss {entry_id}"))
         .await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(text.contains("dismissed"), "dismiss should confirm: {text}");
     assert_eq!(app.status, "inbox: dismissed");
 
@@ -4295,7 +4394,7 @@ async fn test_inbox_dismiss_not_found() {
     let mut app = make_app();
     app.execute_slash_command("/inbox dismiss nonexistent-id")
         .await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("not found"),
         "dismiss on missing entry should say not found: {text}"
@@ -4309,7 +4408,7 @@ async fn test_inbox_dismiss_no_id() {
 
     let mut app = make_app();
     app.execute_slash_command("/inbox dismiss").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Usage"),
         "dismiss with no id should show usage: {text}"
@@ -4329,7 +4428,7 @@ async fn test_inbox_clear_with_entries() {
 
     let mut app = make_app();
     app.execute_slash_command("/inbox clear").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Cleared 2 finding(s)"),
         "clear should report count: {text}"
@@ -4353,7 +4452,7 @@ async fn test_inbox_clear_empty() {
 
     let mut app = make_app();
     app.execute_slash_command("/inbox clear").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Cleared 0 finding(s)"),
         "clear on empty inbox should report 0: {text}"
@@ -4367,7 +4466,7 @@ async fn test_inbox_help() {
 
     let mut app = make_app();
     app.execute_slash_command("/inbox help").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("/inbox"),
         "help should mention /inbox: {text}"
@@ -4386,7 +4485,7 @@ async fn test_inbox_unknown_subcommand() {
 
     let mut app = make_app();
     app.execute_slash_command("/inbox frobnicate").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("Unknown sub-command"),
         "unknown sub-command should warn: {text}"
@@ -4408,7 +4507,7 @@ async fn test_inbox_list_shows_status() {
 
     let mut app = make_app();
     app.execute_slash_command("/inbox list").await;
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("claimed"),
         "list should show updated status: {text}"
@@ -4458,7 +4557,7 @@ async fn test_slash_task_mutually_excludes_log() {
 async fn test_slash_task_list_shows_items() {
     let mut app = make_app();
     let session_id = "task-list-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.storage
         .create_session(&session_id, ".")
         .expect("create session");
@@ -4491,7 +4590,7 @@ async fn test_slash_task_list_shows_items() {
 
     app.execute_slash_command("/task list").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("From: /task list"),
         "should show /task list header: {text}"
@@ -4511,14 +4610,14 @@ async fn test_slash_task_list_shows_items() {
 async fn test_slash_task_list_empty() {
     let mut app = make_app();
     let session_id = "task-empty-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.storage
         .create_session(&session_id, ".")
         .expect("create session");
 
     app.execute_slash_command("/task list").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("No tasks found"),
         "empty list should say 'No tasks found': {text}"
@@ -4528,11 +4627,11 @@ async fn test_slash_task_list_empty() {
 #[tokio::test]
 async fn test_slash_task_help() {
     let mut app = make_app();
-    app.session_id = Some("help-session".to_string());
+    app.session.session_id = Some("help-session".to_string());
 
     app.execute_slash_command("/task help").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("From: /task help"),
         "help should have header: {text}"
@@ -4555,11 +4654,11 @@ async fn test_slash_task_help() {
 #[tokio::test]
 async fn test_slash_task_add_delegates_hint() {
     let mut app = make_app();
-    app.session_id = Some("add-hint-session".to_string());
+    app.session.session_id = Some("add-hint-session".to_string());
 
     app.execute_slash_command("/task add").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("TaskCreate"),
         "/task add should mention TaskCreate tool: {text}"
@@ -4570,11 +4669,11 @@ async fn test_slash_task_add_delegates_hint() {
 #[tokio::test]
 async fn test_slash_task_update_delegates_hint() {
     let mut app = make_app();
-    app.session_id = Some("update-hint-session".to_string());
+    app.session.session_id = Some("update-hint-session".to_string());
 
     app.execute_slash_command("/task update").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("TaskUpdate"),
         "/task update should mention TaskUpdate tool: {text}"
@@ -4585,11 +4684,11 @@ async fn test_slash_task_update_delegates_hint() {
 #[tokio::test]
 async fn test_slash_task_get_delegates_hint() {
     let mut app = make_app();
-    app.session_id = Some("get-hint-session".to_string());
+    app.session.session_id = Some("get-hint-session".to_string());
 
     app.execute_slash_command("/task get").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("TaskGet"),
         "/task get should mention TaskGet tool: {text}"
@@ -4600,11 +4699,11 @@ async fn test_slash_task_get_delegates_hint() {
 #[tokio::test]
 async fn test_slash_task_create_alias_for_add() {
     let mut app = make_app();
-    app.session_id = Some("create-alias-session".to_string());
+    app.session.session_id = Some("create-alias-session".to_string());
 
     app.execute_slash_command("/task create").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("TaskCreate"),
         "/task create should mention TaskCreate tool: {text}"
@@ -4614,11 +4713,11 @@ async fn test_slash_task_create_alias_for_add() {
 #[tokio::test]
 async fn test_slash_task_unknown_subcommand_shows_help() {
     let mut app = make_app();
-    app.session_id = Some("unknown-sub-session".to_string());
+    app.session.session_id = Some("unknown-sub-session".to_string());
 
     app.execute_slash_command("/task frobnicate").await;
 
-    let text = app.messages.last().unwrap().text_content();
+    let text = app.session.messages.last().unwrap().text_content();
     assert!(
         text.contains("From: /task help"),
         "unknown subcommand should fall through to help: {text}"
@@ -4689,7 +4788,7 @@ async fn test_model_selector_preserves_openrouter_vendor_slug() {
     }
 
     assert_eq!(
-        app.selected_model.as_deref(),
+        app.session.selected_model.as_deref(),
         Some("openrouter/anthropic/claude-sonnet-4"),
         "selected_model must preserve the vendor slug after the provider segment"
     );
@@ -4810,7 +4909,7 @@ async fn test_slash_mcp_list_includes_plugin_contributed_servers() {
     let _guard = with_cwd(root);
     let _xdg = XdgGuard::set(&global_root);
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/mcp list").await;
 
@@ -4821,6 +4920,7 @@ async fn test_slash_mcp_list_includes_plugin_contributed_servers() {
     );
 
     let joined: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -4908,7 +5008,7 @@ async fn test_mcp_list_reports_status_from_shared_client_not_events() {
     use ragent_agent::mcp::{McpClient, McpServer, McpStatus};
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     // Seed the display list exactly as `App::new` does for a plugin-bridged
     // server: present, but with no live status yet.
     app.mcp_servers = vec![McpServer {
@@ -4971,7 +5071,7 @@ async fn test_slash_mcp_list_prints_client_derived_status() {
     // `cwd_path` is captured when the App is built, so re-point it at the
     // tempdir: the `/mcp list` refresh reads the plugin store from here.
     app.cwd_path = dir.path().to_path_buf();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app.mcp_servers = vec![McpServer {
         id: "configured".to_string(),
         config: ragent_agent::McpServerConfig::default(),
@@ -4992,6 +5092,7 @@ async fn test_slash_mcp_list_prints_client_derived_status() {
     app.execute_slash_command("/mcp list").await;
 
     let joined: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5040,7 +5141,7 @@ async fn test_report_mcp_startup_lists_start_and_connect_lines() {
     use ragent_agent::mcp::McpClient;
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     let mut client = McpClient::new();
     client.register_connected_for_tests(
@@ -5061,6 +5162,7 @@ async fn test_report_mcp_startup_lists_start_and_connect_lines() {
     app.report_mcp_startup().await;
 
     let joined: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5101,7 +5203,7 @@ async fn test_report_mcp_startup_is_one_shot() {
     use ragent_agent::mcp::McpClient;
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     let mut client = McpClient::new();
     client.register_connected_for_tests("alpha", Vec::new());
@@ -5113,6 +5215,7 @@ async fn test_report_mcp_startup_is_one_shot() {
 
     app.report_mcp_startup().await;
     let after_first: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5122,6 +5225,7 @@ async fn test_report_mcp_startup_is_one_shot() {
     // A second call must be a no-op: the latch, not the caller, enforces this.
     app.report_mcp_startup().await;
     let after_second: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5142,7 +5246,7 @@ async fn test_report_mcp_startup_defers_while_client_lock_held() {
     use ragent_agent::mcp::McpClient;
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     let mut client = McpClient::new();
     client.register_connected_for_tests("alpha", Vec::new());
@@ -5157,6 +5261,7 @@ async fn test_report_mcp_startup_defers_while_client_lock_held() {
     let guard = shared.write().await;
     app.report_mcp_startup().await;
     let during: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5172,6 +5277,7 @@ async fn test_report_mcp_startup_defers_while_client_lock_held() {
     drop(guard);
     app.report_mcp_startup().await;
     let after: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5193,7 +5299,7 @@ async fn test_report_mcp_startup_labels_sse_and_http_transports() {
     use ragent_config::config::{McpServerConfig, McpTransport};
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     let mut client = McpClient::new();
     for (id, transport) in [
@@ -5220,6 +5326,7 @@ async fn test_report_mcp_startup_labels_sse_and_http_transports() {
     app.report_mcp_startup().await;
 
     let joined: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5248,7 +5355,7 @@ async fn test_report_mcp_startup_surfaces_a_failed_server_reason() {
     use ragent_config::config::{McpServerConfig, McpTransport};
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     let mut client = McpClient::new();
     client.push_server_for_tests(McpServer {
@@ -5272,6 +5379,7 @@ async fn test_report_mcp_startup_surfaces_a_failed_server_reason() {
     app.report_mcp_startup().await;
 
     let joined: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5292,8 +5400,9 @@ async fn test_report_mcp_startup_surfaces_a_failed_server_reason() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_report_mcp_startup_noop_without_client() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     let before: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5303,6 +5412,7 @@ async fn test_report_mcp_startup_noop_without_client() {
     app.report_mcp_startup().await;
 
     let after: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5322,7 +5432,7 @@ async fn test_mcp_servers_settled_on_terminal_servers() {
     use ragent_agent::mcp::{McpClient, McpStatus, McpToolDef};
 
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     let mut client = McpClient::new();
     client.register_connected_for_tests(
         "alpha",
@@ -5389,7 +5499,7 @@ async fn test_slash_mcp_list_shows_tool_counts_not_tool_names() {
     let _guard = with_cwd(dir.path());
     let mut app = make_app();
     app.cwd_path = dir.path().to_path_buf();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     let mut client = McpClient::new();
     client.register_connected_for_tests(
@@ -5418,6 +5528,7 @@ async fn test_slash_mcp_list_shows_tool_counts_not_tool_names() {
     app.execute_slash_command("/mcp list").await;
 
     let joined: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5463,7 +5574,7 @@ async fn test_slash_mcp_list_shows_transport_and_endpoint() {
     let _guard = with_cwd(dir.path());
     let mut app = make_app();
     app.cwd_path = dir.path().to_path_buf();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     // Seed the display list: one stdio server with a known command, one http
     // server with a known URL. No MCP client is wired up, so the refresh keeps
     // these entries as-is (status Disabled).
@@ -5497,6 +5608,7 @@ async fn test_slash_mcp_list_shows_transport_and_endpoint() {
     app.execute_slash_command("/mcp list").await;
 
     let joined: String = app
+        .session
         .messages
         .iter()
         .map(|m| m.text_content())
@@ -5530,7 +5642,7 @@ async fn test_disconnect_drops_mcp_tools_from_registry() {
     let _guard = with_cwd(dir.path());
     let mut app = make_app();
     app.cwd_path = dir.path().to_path_buf();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // Two connected servers; `dying` is the one that will go away.
     let mut client = McpClient::new();

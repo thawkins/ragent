@@ -2247,9 +2247,11 @@ impl TeamManager {
         let processor = self.processor.upgrade().ok_or_else(|| {
             anyhow::anyhow!("session processor unavailable (dropped); cannot spawn teammate")
         })?;
-        let child_session = processor
-            .session_manager
-            .create_session(working_dir.to_path_buf())?;
+        let child_session = processor.session_manager.create_child_session(
+            working_dir.to_path_buf(),
+            &self.lead_session_id,
+            ragent_storage::SessionKind::Teammate,
+        )?;
         let child_sid = child_session.id.clone();
 
         // -- Single config reload: update session, build roster, read memory -

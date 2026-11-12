@@ -32,7 +32,7 @@ fn test_rendering_panel_does_not_mutate_conversation() {
         "panel render must not change the history estimate"
     );
     assert!(
-        app.messages.is_empty(),
+        app.session.messages.is_empty(),
         "panel content must never enter the session message list"
     );
 }
@@ -44,7 +44,7 @@ fn test_panel_cache_is_isolated_from_message_list() {
     // is untouched by it.
     let mut app = support::make_app();
     app.show_context_panel = true;
-    assert!(app.messages.is_empty());
+    assert!(app.session.messages.is_empty());
 
     let backend = ratatui::backend::TestBackend::new(100, 30);
     let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
@@ -58,7 +58,7 @@ fn test_panel_cache_is_isolated_from_message_list() {
         "panel should cache its lines for text selection"
     );
     // ...while the conversation stays empty (nothing to send to the LLM).
-    assert!(app.messages.is_empty());
+    assert!(app.session.messages.is_empty());
     assert_eq!(app.conversation_message_count(), 0);
     assert_eq!(app.conversation_history_token_count(), 0);
 }

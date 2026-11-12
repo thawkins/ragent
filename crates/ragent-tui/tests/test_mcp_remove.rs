@@ -94,12 +94,13 @@ fn enter_project(
 
 fn app() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("mcp-remove".to_string());
+    app.session.session_id = Some("mcp-remove".to_string());
     app
 }
 
 fn last_message(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(ragent_types::message::Message::text_content)
         .unwrap_or_default()

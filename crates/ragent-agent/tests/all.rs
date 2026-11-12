@@ -804,5 +804,9 @@ mod test_model_override_spellings;
 #[path = "test_permission_prompt.rs"]
 mod test_permission_prompt;
 
+#[path = "test_permission_working_dir.rs"]
+mod test_permission_working_dir;
+#[path = "test_project_mcp.rs"]
+mod test_project_mcp;
 #[path = "test_security_analyzer_request.rs"]
 mod test_security_analyzer_request;

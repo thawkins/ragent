@@ -48,7 +48,7 @@ fn task(id: &str, status: TaskStatus) -> TaskEntry {
 
 fn app() -> App {
     let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
+    app.session.session_id = Some(LEAD_SESSION.to_string());
     app.agents_history_cap = 8;
     app
 }

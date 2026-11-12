@@ -125,7 +125,7 @@ fn create_task(
 #[test]
 fn test_tasks_panel_title_shows_tasks() {
     let mut app = support::make_app();
-    app.session_id = Some("title-session".to_string());
+    app.session.session_id = Some("title-session".to_string());
     app.show_tasks_panel = true;
     app.show_log = false;
     app.show_profile = false;
@@ -144,7 +144,7 @@ fn test_tasks_panel_title_shows_tasks() {
 #[test]
 fn test_tasks_panel_empty_shows_no_tasks() {
     let mut app = support::make_app();
-    app.session_id = Some("empty-session".to_string());
+    app.session.session_id = Some("empty-session".to_string());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -162,7 +162,7 @@ fn test_tasks_panel_empty_shows_no_tasks() {
 fn test_tasks_panel_completed_status() {
     let mut app = support::make_app();
     let session_id = "completed-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -189,7 +189,7 @@ fn test_tasks_panel_completed_status() {
 fn test_tasks_panel_pending_status() {
     let mut app = support::make_app();
     let session_id = "pending-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -216,7 +216,7 @@ fn test_tasks_panel_pending_status() {
 fn test_tasks_panel_in_progress_status() {
     let mut app = support::make_app();
     let session_id = "ip-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -245,7 +245,7 @@ fn test_tasks_panel_in_progress_status() {
 fn test_tasks_panel_owner_suffix() {
     let mut app = support::make_app();
     let session_id = "owner-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -272,7 +272,7 @@ fn test_tasks_panel_owner_suffix() {
 fn test_tasks_panel_no_owner_no_suffix() {
     let mut app = support::make_app();
     let session_id = "no-owner-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -299,7 +299,7 @@ fn test_tasks_panel_no_owner_no_suffix() {
 fn test_tasks_panel_empty_owner_no_suffix() {
     let mut app = support::make_app();
     let session_id = "empty-owner-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -329,7 +329,7 @@ fn test_tasks_panel_empty_owner_no_suffix() {
 fn test_tasks_panel_blocked_by_annotation() {
     let mut app = support::make_app();
     let session_id = "blocked-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -369,7 +369,7 @@ fn test_tasks_panel_blocked_by_annotation() {
 fn test_tasks_panel_completed_blocker_no_annotation() {
     let mut app = support::make_app();
     let session_id = "completed-blocker-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -408,7 +408,7 @@ fn test_tasks_panel_completed_blocker_no_annotation() {
 fn test_tasks_panel_multiple_blockers() {
     let mut app = support::make_app();
     let session_id = "multi-blocker-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -460,7 +460,7 @@ fn test_tasks_panel_multiple_blockers() {
 fn test_tasks_panel_in_progress_not_blocked() {
     let mut app = support::make_app();
     let session_id = "ip-blocked-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -500,7 +500,7 @@ fn test_tasks_panel_in_progress_not_blocked() {
 fn test_tasks_panel_active_form_subline() {
     let mut app = support::make_app();
     let session_id = "active-form-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -532,7 +532,7 @@ fn test_tasks_panel_active_form_subline() {
 fn test_tasks_panel_active_form_only_when_in_progress() {
     let mut app = support::make_app();
     let session_id = "pending-active-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -559,7 +559,7 @@ fn test_tasks_panel_active_form_only_when_in_progress() {
 fn test_tasks_panel_no_active_form_no_subline() {
     let mut app = support::make_app();
     let session_id = "no-active-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -586,7 +586,7 @@ fn test_tasks_panel_no_active_form_no_subline() {
 fn test_tasks_panel_empty_active_form_no_subline() {
     let mut app = support::make_app();
     let session_id = "empty-active-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -616,7 +616,7 @@ fn test_tasks_panel_empty_active_form_no_subline() {
 fn test_tasks_panel_combined_owner_and_active_form() {
     let mut app = support::make_app();
     let session_id = "combined-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -654,7 +654,7 @@ fn test_tasks_panel_combined_owner_and_active_form() {
 fn test_tasks_panel_scroll_max_scroll() {
     let mut app = support::make_app();
     let session_id = "scroll-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -746,7 +746,7 @@ fn test_drag_tasks_scrollbar_moves_offset_bottom_semantics() {
 #[test]
 fn test_tasks_panel_sets_area() {
     let mut app = support::make_app();
-    app.session_id = Some("area-session".to_string());
+    app.session.session_id = Some("area-session".to_string());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 
@@ -761,7 +761,7 @@ fn test_tasks_panel_sets_area() {
 #[test]
 fn test_tasks_panel_hidden_clears_area() {
     let mut app = support::make_app();
-    app.session_id = Some("hidden-session".to_string());
+    app.session.session_id = Some("hidden-session".to_string());
     app.show_tasks_panel = false;
     app.current_screen = ScreenMode::Chat;
 
@@ -780,7 +780,7 @@ fn test_tasks_panel_hidden_clears_area() {
 fn test_tasks_panel_does_not_mutate_tasks() {
     let mut app = support::make_app();
     let session_id = "immutable-session".to_string();
-    app.session_id = Some(session_id.clone());
+    app.session.session_id = Some(session_id.clone());
     app.show_tasks_panel = true;
     app.current_screen = ScreenMode::Chat;
 

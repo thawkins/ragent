@@ -27,11 +27,11 @@ fn test_tool_metadata_measures_the_selected_providers_own_envelope() {
     // same definitions. A session measured with the wrong envelope, or one that
     // re-derives the array instead of reading the cache, does not.
     let mut app = support::make_app();
-    app.agent_info.model = None;
-    app.selected_model = Some("openai/gpt-5.6".to_string());
+    app.session.agent_info.model = None;
+    app.session.selected_model = Some("openai/gpt-5.6".to_string());
     let chat = app.tool_metadata_token_count();
 
-    app.selected_model = Some("openai_responses/gpt-5.6".to_string());
+    app.session.selected_model = Some("openai_responses/gpt-5.6".to_string());
     let responses = app.tool_metadata_token_count();
 
     assert!(chat > 0, "the chat envelope has per-tool overhead");

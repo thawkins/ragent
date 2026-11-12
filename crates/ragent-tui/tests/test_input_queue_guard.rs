@@ -32,13 +32,17 @@ fn entry(text: &str) -> QueuedInput {
 /// dispatch once the overlap guard clears.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
 /// Count user messages in the conversation.
 fn user_message_count(app: &App) -> usize {
-    app.messages.iter().filter(|m| m.role == Role::User).count()
+    app.session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::User)
+        .count()
 }
 
 // ---------------------------------------------------------------------------
@@ -48,8 +52,8 @@ fn user_message_count(app: &App) -> usize {
 #[tokio::test]
 async fn test_guard_defers_while_the_primary_agent_is_processing() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("deferred"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("deferred"));
 
     // A running turn cannot be dispatched over; the queue is untouched.
     app.advance_input_queue().await;
@@ -65,10 +69,10 @@ async fn test_guard_defers_while_the_primary_agent_is_processing() {
     );
 
     // The turn finishes: the retained entry runs at the next boundary.
-    app.is_processing = false;
+    app.session.is_processing = false;
     app.advance_input_queue().await;
     assert_eq!(user_message_count(&app), 1);
-    assert_eq!(app.last_prompt, "deferred");
+    assert_eq!(app.session.last_prompt, "deferred");
     assert_eq!(app.input_queue_len(), 0);
 }
 
@@ -79,8 +83,8 @@ async fn test_guard_defers_while_the_primary_agent_is_processing() {
 #[tokio::test]
 async fn test_guard_defers_while_compaction_is_in_progress() {
     let mut app = app_with_session();
-    app.compact_in_progress = true;
-    app.input_queue.push_back(entry("deferred"));
+    app.session.compact_in_progress = true;
+    app.session.input_queue.push_back(entry("deferred"));
 
     app.advance_input_queue().await;
     assert_eq!(
@@ -90,17 +94,17 @@ async fn test_guard_defers_while_compaction_is_in_progress() {
     );
     assert_eq!(user_message_count(&app), 0);
 
-    app.compact_in_progress = false;
+    app.session.compact_in_progress = false;
     app.advance_input_queue().await;
-    assert_eq!(app.last_prompt, "deferred");
+    assert_eq!(app.session.last_prompt, "deferred");
     assert_eq!(app.input_queue_len(), 0);
 }
 
 #[tokio::test]
 async fn test_guard_defers_while_auto_compaction_is_in_progress() {
     let mut app = app_with_session();
-    app.auto_compact_in_progress = true;
-    app.input_queue.push_back(entry("deferred"));
+    app.session.auto_compact_in_progress = true;
+    app.session.input_queue.push_back(entry("deferred"));
 
     app.advance_input_queue().await;
     assert_eq!(
@@ -110,17 +114,17 @@ async fn test_guard_defers_while_auto_compaction_is_in_progress() {
     );
     assert_eq!(user_message_count(&app), 0);
 
-    app.auto_compact_in_progress = false;
+    app.session.auto_compact_in_progress = false;
     app.advance_input_queue().await;
-    assert_eq!(app.last_prompt, "deferred");
+    assert_eq!(app.session.last_prompt, "deferred");
     assert_eq!(app.input_queue_len(), 0);
 }
 
 #[tokio::test]
 async fn test_guard_defers_when_a_post_compact_send_is_pending() {
     let mut app = app_with_session();
-    app.pending_send_after_compact = Some(("in flight".to_string(), Vec::new()));
-    app.input_queue.push_back(entry("deferred"));
+    app.session.pending_send_after_compact = Some(("in flight".to_string(), Vec::new()));
+    app.session.input_queue.push_back(entry("deferred"));
 
     app.advance_input_queue().await;
     assert_eq!(
@@ -130,9 +134,9 @@ async fn test_guard_defers_when_a_post_compact_send_is_pending() {
     );
     assert_eq!(user_message_count(&app), 0);
 
-    app.pending_send_after_compact = None;
+    app.session.pending_send_after_compact = None;
     app.advance_input_queue().await;
-    assert_eq!(app.last_prompt, "deferred");
+    assert_eq!(app.session.last_prompt, "deferred");
     assert_eq!(app.input_queue_len(), 0);
 }
 
@@ -143,25 +147,25 @@ async fn test_guard_defers_when_a_post_compact_send_is_pending() {
 #[tokio::test]
 async fn test_guard_holds_until_every_overlap_signal_clears() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.compact_in_progress = true;
-    app.auto_compact_in_progress = true;
-    app.pending_send_after_compact = Some(("in flight".to_string(), Vec::new()));
-    app.input_queue.push_back(entry("deferred"));
+    app.session.is_processing = true;
+    app.session.compact_in_progress = true;
+    app.session.auto_compact_in_progress = true;
+    app.session.pending_send_after_compact = Some(("in flight".to_string(), Vec::new()));
+    app.session.input_queue.push_back(entry("deferred"));
 
     // Clear the signals one at a time; the guard holds while any remain set.
     app.advance_input_queue().await;
     assert_eq!(app.input_queue_len(), 1, "all four signals set");
 
-    app.is_processing = false;
+    app.session.is_processing = false;
     app.advance_input_queue().await;
     assert_eq!(app.input_queue_len(), 1, "compaction signals remain");
 
-    app.compact_in_progress = false;
+    app.session.compact_in_progress = false;
     app.advance_input_queue().await;
     assert_eq!(app.input_queue_len(), 1, "auto-compaction remains");
 
-    app.auto_compact_in_progress = false;
+    app.session.auto_compact_in_progress = false;
     app.advance_input_queue().await;
     assert_eq!(
         app.input_queue_len(),
@@ -169,14 +173,14 @@ async fn test_guard_holds_until_every_overlap_signal_clears() {
         "pending post-compact send remains"
     );
 
-    app.pending_send_after_compact = None;
+    app.session.pending_send_after_compact = None;
     app.advance_input_queue().await;
     assert_eq!(
         app.input_queue_len(),
         0,
         "FR-016: the entry dispatches only once no overlap signal remains"
     );
-    assert_eq!(app.last_prompt, "deferred");
+    assert_eq!(app.session.last_prompt, "deferred");
 }
 
 // ---------------------------------------------------------------------------
@@ -186,9 +190,9 @@ async fn test_guard_holds_until_every_overlap_signal_clears() {
 #[tokio::test]
 async fn test_guard_defers_pending_next_while_processing() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.queue_next_pending = true;
-    app.input_queue.push_back(entry("next-entry"));
+    app.session.is_processing = true;
+    app.session.queue_next_pending = true;
+    app.session.input_queue.push_back(entry("next-entry"));
 
     app.advance_input_queue().await;
     assert_eq!(
@@ -197,18 +201,18 @@ async fn test_guard_defers_pending_next_while_processing() {
         "FR-016: a pending Next cannot dispatch over a running turn"
     );
     assert!(
-        app.queue_next_pending,
+        app.session.queue_next_pending,
         "FR-030: the pending Next survives the unavailable boundary"
     );
     assert_eq!(user_message_count(&app), 0);
 
     // Safe boundary: the pending dispatch fires exactly once.
-    app.is_processing = false;
+    app.session.is_processing = false;
     app.advance_input_queue().await;
-    assert_eq!(app.last_prompt, "next-entry");
+    assert_eq!(app.session.last_prompt, "next-entry");
     assert_eq!(app.input_queue_len(), 0);
     assert!(
-        !app.queue_next_pending,
+        !app.session.queue_next_pending,
         "the pending flag is consumed at the safe boundary"
     );
 }
@@ -216,14 +220,14 @@ async fn test_guard_defers_pending_next_while_processing() {
 #[tokio::test]
 async fn test_guard_defers_pending_next_during_compaction() {
     let mut app = app_with_session();
-    app.compact_in_progress = true;
-    app.queue_next_pending = true;
-    app.input_queue.push_back(entry("next-entry"));
+    app.session.compact_in_progress = true;
+    app.session.queue_next_pending = true;
+    app.session.input_queue.push_back(entry("next-entry"));
 
     app.advance_input_queue().await;
     assert_eq!(app.input_queue_len(), 1);
     assert!(
-        app.queue_next_pending,
+        app.session.queue_next_pending,
         "FR-016/FR-030: a compaction window defers the pending Next"
     );
     assert_eq!(user_message_count(&app), 0);
@@ -236,7 +240,7 @@ async fn test_guard_defers_pending_next_during_compaction() {
 #[tokio::test]
 async fn test_guard_allows_dispatch_at_a_fully_idle_boundary() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("ready"));
+    app.session.input_queue.push_back(entry("ready"));
 
     app.advance_input_queue().await;
 
@@ -245,5 +249,5 @@ async fn test_guard_allows_dispatch_at_a_fully_idle_boundary() {
         0,
         "FR-016: with no overlap the guard lets the drain proceed"
     );
-    assert_eq!(app.last_prompt, "ready");
+    assert_eq!(app.session.last_prompt, "ready");
 }

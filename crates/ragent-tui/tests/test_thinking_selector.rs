@@ -78,10 +78,13 @@ async fn test_thinking_selector_confirm_persists_selected_level() {
         .await;
 
     assert_eq!(
-        app.selected_model.as_deref(),
+        app.session.selected_model.as_deref(),
         Some("anthropic/claude-sonnet-4-20250514")
     );
-    assert_eq!(app.selected_thinking_level, Some(ThinkingLevel::High));
+    assert_eq!(
+        app.session.selected_thinking_level,
+        Some(ThinkingLevel::High)
+    );
     assert_eq!(
         app.storage
             .get_setting("thinking_level")

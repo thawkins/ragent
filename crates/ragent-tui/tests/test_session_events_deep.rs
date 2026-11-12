@@ -45,7 +45,7 @@ mod support;
 /// An app with a live primary session.
 fn app_with_session(session: &str) -> App {
     let mut app = support::make_app();
-    app.session_id = Some(session.to_string());
+    app.session.session_id = Some(session.to_string());
     app.needs_redraw = false;
     app
 }
@@ -128,7 +128,7 @@ fn open_plugin_store(kind: StoreKind, entries: Vec<StoreEntry>) -> App {
 #[test]
 fn lib_reexports_app_and_stderr_spool_are_nameable() {
     let app: App = support::make_app();
-    assert!(app.session_id.is_none());
+    assert!(app.session.session_id.is_none());
     // Naming the crate-root `StderrSpool` re-export proves it is public; it is a
     // `ragent_types::stderr_spool::Spool` alias.
     let _spool: Option<ragent_tui::StderrSpool> = None;
@@ -152,7 +152,8 @@ fn compute_next_deadline_test_idle_caps_at_idle_redraw_interval() {
 #[test]
 fn compute_next_deadline_test_permission_countdown_wakes_within_a_second() {
     let mut app = support::make_app();
-    app.permission_queue
+    app.session
+        .permission_queue
         .push_back(ragent_agent::permission::PermissionRequest {
             id: "p1".to_string(),
             session_id: "s1".to_string(),
@@ -182,7 +183,7 @@ fn compute_next_deadline_test_status_expiry_shortens_the_wake() {
 #[test]
 fn compute_next_deadline_test_run_cost_banner_shortens_the_wake() {
     let mut app = support::make_app();
-    app.run_cost_banner_at = Some(Instant::now());
+    app.session.run_cost_banner_at = Some(Instant::now());
     let deadline = ragent_tui::compute_next_deadline_test(&app, Instant::now());
     assert!(
         deadline <= Instant::now() + Duration::from_secs(16),
@@ -202,9 +203,10 @@ fn compute_next_deadline_test_housekeeping_window_bounds_the_idle_wake() {
 #[test]
 fn compute_next_deadline_test_pending_message_group_bounds_the_wake() {
     let mut app = support::make_app();
-    app.messages
+    app.session
+        .messages
         .push(ragent_types::message::Message::assistant_text("s1", "hi"));
-    app.message_cache_dirty_from = 0;
+    app.session.message_cache_dirty_from = 0;
     let deadline = ragent_tui::compute_next_deadline_test(&app, Instant::now());
     assert!(
         deadline <= Instant::now() + Duration::from_secs(5),
@@ -226,9 +228,10 @@ fn should_render_is_false_when_clean_and_true_when_dirty() {
 fn should_render_safety_interval_paints_a_pending_message_group() {
     let mut app = support::make_app();
     app.needs_redraw = false;
-    app.messages
+    app.session
+        .messages
         .push(ragent_types::message::Message::assistant_text("s1", "hi"));
-    app.message_cache_dirty_from = 0;
+    app.session.message_cache_dirty_from = 0;
     let past = Instant::now()
         .checked_sub(Duration::from_secs(3))
         .expect("monotonic clock newer than 3s");
@@ -242,7 +245,8 @@ fn should_render_safety_interval_paints_a_pending_message_group() {
 fn should_render_safety_interval_paints_a_live_countdown() {
     let mut app = support::make_app();
     app.needs_redraw = false;
-    app.permission_queue
+    app.session
+        .permission_queue
         .push_back(ragent_agent::permission::PermissionRequest {
             id: "p1".to_string(),
             session_id: "s1".to_string(),
@@ -835,15 +839,15 @@ fn plugin_store_poll_result_noop_when_empty_slot() {
 fn poll_rollback_result_handles_all_three_outcomes() {
     let mut app = support::make_app();
 
-    *app.rollback_result.lock().expect("slot") = Some(Ok(true));
+    *app.session.rollback_result.lock().expect("slot") = Some(Ok(true));
     app.poll_rollback_result();
     assert!(app.status.contains("rollback complete"));
 
-    *app.rollback_result.lock().expect("slot") = Some(Ok(false));
+    *app.session.rollback_result.lock().expect("slot") = Some(Ok(false));
     app.poll_rollback_result();
     assert!(app.status.contains("nothing to restore"));
 
-    *app.rollback_result.lock().expect("slot") = Some(Err("io error".to_string()));
+    *app.session.rollback_result.lock().expect("slot") = Some(Err("io error".to_string()));
     app.poll_rollback_result();
     assert!(app.status.contains("rollback failed"));
     assert!(app.needs_redraw);
@@ -863,7 +867,7 @@ fn poll_rollback_result_recovers_a_poisoned_slot_and_applies_it() {
     // confirm the poll's `recover_poisoned` path still applies the retained
     // value.
     let mut app = support::make_app();
-    let slot = Arc::clone(&app.rollback_result);
+    let slot = Arc::clone(&app.session.rollback_result);
     let _ = std::thread::spawn(move || {
         let mut guard = slot.lock().expect("lock");
         *guard = Some(Ok(true));
@@ -887,6 +891,7 @@ fn poll_websearch_test_result_appends_report_and_sets_status() {
     app.poll_websearch_test_result();
     assert_eq!(app.status, "websearch: engine test complete");
     let text = app
+        .session
         .messages
         .last()
         .map(ragent_types::message::Message::text_content)
@@ -1054,7 +1059,7 @@ async fn permission_requested_for_other_session_is_ignored() {
     })
     .await;
     assert!(
-        app.permission_queue.is_empty(),
+        app.session.permission_queue.is_empty(),
         "a permission request for a non-current session is ignored"
     );
 }
@@ -1068,20 +1073,20 @@ async fn agent_switched_updates_agent_name_for_current_session() {
         to: "architect".to_string(),
     })
     .await;
-    assert_eq!(app.agent_name, "architect");
+    assert_eq!(app.session.agent_name, "architect");
 }
 
 #[tokio::test]
 async fn agent_switched_for_other_session_is_ignored() {
     let mut app = app_with_session("s1");
-    let before = app.agent_name.clone();
+    let before = app.session.agent_name.clone();
     app.handle_event(Event::AgentSwitched {
         session_id: "other".to_string(),
         from: "coder".to_string(),
         to: "architect".to_string(),
     })
     .await;
-    assert_eq!(app.agent_name, before);
+    assert_eq!(app.session.agent_name, before);
 }
 
 #[tokio::test]
@@ -1092,7 +1097,7 @@ async fn shell_cwd_changed_records_the_shell_directory() {
         cwd: "/tmp/work".to_string(),
     })
     .await;
-    assert_eq!(app.shell_cwd.as_deref(), Some("/tmp/work"));
+    assert_eq!(app.session.shell_cwd.as_deref(), Some("/tmp/work"));
 }
 
 #[tokio::test]
@@ -1102,7 +1107,7 @@ async fn session_created_sets_id_and_logs_only_when_unset() {
         session_id: "created-session".to_string(),
     })
     .await;
-    assert_eq!(app.session_id.as_deref(), Some("created-session"));
+    assert_eq!(app.session.session_id.as_deref(), Some("created-session"));
     assert!(
         app.log_entries
             .iter()
@@ -1110,12 +1115,15 @@ async fn session_created_sets_id_and_logs_only_when_unset() {
         "the first SessionCreated is logged"
     );
 
-    let first_id = app.session_id.clone();
+    let first_id = app.session.session_id.clone();
     app.handle_event(Event::SessionCreated {
         session_id: "ignored-session".to_string(),
     })
     .await;
-    assert_eq!(app.session_id, first_id, "the id is not overwritten");
+    assert_eq!(
+        app.session.session_id, first_id,
+        "the id is not overwritten"
+    );
 }
 
 #[tokio::test]
@@ -1127,8 +1135,8 @@ async fn token_usage_accumulates_and_updates_input_tokens() {
         output_tokens: 40,
     })
     .await;
-    assert_eq!(app.last_input_tokens, 100);
-    assert_eq!(app.token_usage, (100, 40));
+    assert_eq!(app.session.last_input_tokens, 100);
+    assert_eq!(app.session.token_usage, (100, 40));
 
     app.handle_event(Event::TokenUsage {
         session_id: "s1".to_string(),
@@ -1136,7 +1144,7 @@ async fn token_usage_accumulates_and_updates_input_tokens() {
         output_tokens: 10,
     })
     .await;
-    assert_eq!(app.token_usage, (150, 50));
+    assert_eq!(app.session.token_usage, (150, 50));
 }
 
 /// An output-only usage event (Anthropic/Bedrock `message_delta`, input 0)
@@ -1156,8 +1164,8 @@ async fn token_usage_output_only_event_keeps_last_input_tokens() {
         output_tokens: 25,
     })
     .await;
-    assert_eq!(app.last_input_tokens, 900);
-    assert_eq!(app.token_usage, (900, 25));
+    assert_eq!(app.session.last_input_tokens, 900);
+    assert_eq!(app.session.token_usage, (900, 25));
 }
 
 #[tokio::test]
@@ -1172,6 +1180,7 @@ async fn loop_terminated_renders_a_banner_with_verification_and_reason() {
     })
     .await;
     let text = app
+        .session
         .messages
         .last()
         .map(ragent_types::message::Message::text_content)
@@ -1183,7 +1192,7 @@ async fn loop_terminated_renders_a_banner_with_verification_and_reason() {
 #[tokio::test]
 async fn loop_terminated_for_other_session_is_ignored() {
     let mut app = app_with_session("s1");
-    let before = app.messages.len();
+    let before = app.session.messages.len();
     app.handle_event(Event::LoopTerminated {
         session_id: "other".to_string(),
         status: "completed".to_string(),
@@ -1192,7 +1201,7 @@ async fn loop_terminated_for_other_session_is_ignored() {
         reason: None,
     })
     .await;
-    assert_eq!(app.messages.len(), before);
+    assert_eq!(app.session.messages.len(), before);
 }
 
 #[tokio::test]
@@ -1263,8 +1272,14 @@ async fn teammate_p2p_message_records_counts_on_both_ends() {
         preview: "hi".to_string(),
     })
     .await;
-    assert_eq!(app.team_message_counts.get("tm-001").copied(), Some((1, 0)));
-    assert_eq!(app.team_message_counts.get("tm-002").copied(), Some((0, 1)));
+    assert_eq!(
+        app.session.team_message_counts.get("tm-001").copied(),
+        Some((1, 0))
+    );
+    assert_eq!(
+        app.session.team_message_counts.get("tm-002").copied(),
+        Some((0, 1))
+    );
 }
 
 #[tokio::test]
@@ -1350,11 +1365,12 @@ async fn background_task_completed_updates_status() {
 #[tokio::test]
 async fn connectors_bare_and_unknown_render_usage_through_the_dispatcher() {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
 
     for invocation in ["/connectors", "/connectors bogus"] {
         app.execute_slash_command(invocation).await;
         let text = app
+            .session
             .messages
             .last()
             .map(ragent_types::message::Message::text_content)
@@ -1371,9 +1387,10 @@ async fn connectors_management_subcommand_without_live_client_reports_refusal() 
     // A management transition with no live MCP client and no published session
     // must report the refusal rather than panicking; no network is touched.
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app.execute_slash_command("/connectors enable demo").await;
     let text = app
+        .session
         .messages
         .last()
         .map(ragent_types::message::Message::text_content)

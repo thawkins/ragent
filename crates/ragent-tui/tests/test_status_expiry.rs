@@ -20,7 +20,7 @@ fn make_app() -> App {
 #[tokio::test]
 async fn test_slash_status_preserved_immediately_after_command() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/help").await;
 
@@ -35,7 +35,7 @@ async fn test_slash_status_preserved_immediately_after_command() {
 #[tokio::test]
 async fn test_slash_status_expires_to_ready() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/help").await;
     assert_eq!(app.status, "help");
@@ -58,7 +58,7 @@ async fn test_slash_status_expires_to_ready() {
 #[tokio::test]
 async fn test_slash_status_expiry_skips_if_status_changed() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/help").await;
     assert_eq!(app.status, "help");
@@ -83,7 +83,7 @@ async fn test_slash_status_expiry_skips_if_status_changed() {
 #[test]
 fn test_slash_status_expiry_not_armed_for_async() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // Simulate a slash command that sets an async status.
     app.status = "[wait] opt/co_star: optimizing…".to_string();
@@ -120,7 +120,7 @@ fn test_slash_status_expiry_not_armed_for_ready() {
 #[tokio::test]
 async fn test_slash_status_expiry_keeps_timer_before_grace_period() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/help").await;
     assert_eq!(app.status, "help");
@@ -136,7 +136,7 @@ async fn test_slash_status_expiry_keeps_timer_before_grace_period() {
 #[tokio::test]
 async fn test_slash_error_status_not_armed() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // /cancel with no argument produces an error status.
     app.execute_slash_command("/cancel").await;
@@ -158,7 +158,7 @@ async fn test_slash_error_status_not_armed() {
 #[test]
 fn test_research_create_status_is_async_in_progress() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     // Simulate the status the `/research create` handler sets.
     app.status = "[wait] research: my-topic…".to_string();

@@ -156,18 +156,23 @@ fn close_clears_the_browser_and_is_idempotent() {
 #[test]
 fn opening_the_panel_leaves_a_running_turn_and_the_queue_untouched() {
     let mut app = support::make_app();
-    app.is_processing = true;
-    app.input = "a live draft".to_string();
-    app.input_queue.push_back(ragent_tui::app::QueuedInput {
-        text: "queued one".to_string(),
-        image_paths: Vec::new(),
-    });
+    app.session.is_processing = true;
+    app.session.input = "a live draft".to_string();
+    app.session
+        .input_queue
+        .push_back(ragent_tui::app::QueuedInput {
+            text: "queued one".to_string(),
+            image_paths: Vec::new(),
+        });
 
     app.open_plugin_store(StoreKind::Codex, "", false);
 
-    assert!(app.is_processing, "a running turn is undisturbed (FR-007)");
-    assert_eq!(app.input, "a live draft");
-    assert_eq!(app.input_queue.len(), 1);
+    assert!(
+        app.session.is_processing,
+        "a running turn is undisturbed (FR-007)"
+    );
+    assert_eq!(app.session.input, "a live draft");
+    assert_eq!(app.session.input_queue.len(), 1);
 }
 
 // -- Key routing while the panel is open (FR-008, FR-009, FR-010, FR-015) ----
@@ -175,7 +180,7 @@ fn opening_the_panel_leaves_a_running_turn_and_the_queue_untouched() {
 #[tokio::test]
 async fn a_printable_key_types_into_the_panel_query_not_the_input_buffer() {
     let mut app = support::make_app();
-    app.input = "draft".to_string();
+    app.session.input = "draft".to_string();
     app.open_plugin_store(StoreKind::Codex, "", false);
 
     let action = handle_key(&mut app, key(KeyCode::Char('w'))).await;
@@ -183,7 +188,7 @@ async fn a_printable_key_types_into_the_panel_query_not_the_input_buffer() {
     assert!(action.is_none(), "the panel consumes the key");
     assert_eq!(query(&app), "w");
     // The message input buffer is untouched while the panel owns the keyboard.
-    assert_eq!(app.input, "draft");
+    assert_eq!(app.session.input, "draft");
 }
 
 #[tokio::test]
@@ -235,12 +240,14 @@ async fn esc_on_a_non_empty_query_edits_rather_than_closing() {
 #[tokio::test]
 async fn esc_on_an_empty_query_dismisses_the_panel_without_side_effects() {
     let mut app = support::make_app();
-    app.input = "draft".to_string();
-    app.input_cursor = 5;
-    app.input_queue.push_back(ragent_tui::app::QueuedInput {
-        text: "queued".to_string(),
-        image_paths: Vec::new(),
-    });
+    app.session.input = "draft".to_string();
+    app.session.input_cursor = 5;
+    app.session
+        .input_queue
+        .push_back(ragent_tui::app::QueuedInput {
+            text: "queued".to_string(),
+            image_paths: Vec::new(),
+        });
     app.open_plugin_store(StoreKind::Codex, "", false);
 
     let action = handle_key(&mut app, key(KeyCode::Esc)).await;
@@ -251,9 +258,9 @@ async fn esc_on_an_empty_query_dismisses_the_panel_without_side_effects() {
         "the panel is dismissed (FR-012)"
     );
     // Dismissal disturbs nothing else (FR-012).
-    assert_eq!(app.input, "draft");
-    assert_eq!(app.input_cursor, 5);
-    assert_eq!(app.input_queue.len(), 1);
+    assert_eq!(app.session.input, "draft");
+    assert_eq!(app.session.input_cursor, 5);
+    assert_eq!(app.session.input_queue.len(), 1);
 }
 
 #[tokio::test]
@@ -299,14 +306,14 @@ async fn up_and_down_move_the_block_cursor_within_the_filtered_set() {
 async fn an_unhandled_key_is_swallowed_and_changes_nothing() {
     let entries = vec![entry("a", "A", "", &[])];
     let mut app = open_with_entries(StoreKind::Codex, entries);
-    app.input = "draft".to_string();
+    app.session.input = "draft".to_string();
 
     let action = handle_key(&mut app, key(KeyCode::Tab)).await;
 
     assert!(action.is_none(), "the panel swallows every other key");
     assert!(app.plugin_store.is_some());
     assert_eq!(query(&app), "");
-    assert_eq!(app.input, "draft");
+    assert_eq!(app.session.input, "draft");
 }
 
 // -- Status transitions (FR-013, FR-016, FR-017) -----------------------------
@@ -462,10 +469,10 @@ async fn enter_on_the_panel_never_reaches_the_message_input() {
     // FR-015: the panel owns the keyboard, so ENTER cannot submit the draft.
     let entries = vec![entry("a", "A", "", &[])];
     let mut app = open_with_entries(StoreKind::Codex, entries);
-    app.input = "draft".to_string();
+    app.session.input = "draft".to_string();
 
     let action = handle_key(&mut app, key(KeyCode::Enter)).await;
 
     assert!(action.is_none());
-    assert_eq!(app.input, "draft", "the draft is untouched");
+    assert_eq!(app.session.input, "draft", "the draft is untouched");
 }

@@ -22,7 +22,7 @@ fn test_conversation_history_counts_messages_and_grows_with_content() {
     let base = app.conversation_history_token_count();
     assert_eq!(base, 0);
 
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "session-1",
         Role::User,
         vec![MessagePart::Text {
@@ -33,7 +33,7 @@ fn test_conversation_history_counts_messages_and_grows_with_content() {
     assert_eq!(app.conversation_message_count(), 1);
     assert!(one > 0, "single small message should still be positive");
 
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "session-1",
         Role::Assistant,
         vec![MessagePart::Text {
@@ -56,7 +56,7 @@ fn test_conversation_history_counts_tool_call_payloads() {
     let json_input: serde_json::Value = serde_json::json!({ "command": "ls -la /tmp" });
     let json_output: serde_json::Value =
         serde_json::json!({ "stdout": "a\nb\nc\nd\ne\nf\ng\nh\ni\nj" });
-    app.messages.push(Message::new(
+    app.session.messages.push(Message::new(
         "session-1",
         Role::Assistant,
         vec![MessagePart::ToolCall {

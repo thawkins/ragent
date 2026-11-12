@@ -65,7 +65,7 @@ async fn ctrl_c_arms_quit_and_copies_with_selection() {
     let action = handle_key(&mut app, kmod(KeyCode::Char('c'), KeyModifiers::CONTROL)).await;
     assert!(matches!(action, Some(InputAction::Quit)));
 
-    app.kb_select_anchor = Some(0);
+    app.session.kb_select_anchor = Some(0);
     let action = handle_key(&mut app, kmod(KeyCode::Char('c'), KeyModifiers::CONTROL)).await;
     assert!(matches!(action, Some(InputAction::CopyToClipboard)));
 }
@@ -117,7 +117,7 @@ async fn router_save_modal_enter_and_esc() {
 #[tokio::test]
 async fn stop_confirm_modal_enter_and_esc() {
     let mut app = support::make_app();
-    app.pending_stop_confirm = true;
+    app.session.pending_stop_confirm = true;
     let action = handle_key(&mut app, key(KeyCode::Enter)).await;
     assert!(matches!(action, Some(InputAction::ConfirmStopAgent)));
     let action = handle_key(&mut app, key(KeyCode::Esc)).await;
@@ -132,7 +132,7 @@ async fn stop_confirm_modal_enter_and_esc() {
 #[tokio::test]
 async fn force_cleanup_modal_enter_and_esc() {
     let mut app = support::make_app();
-    app.pending_forcecleanup = Some(PendingForceCleanup {
+    app.session.pending_forcecleanup = Some(PendingForceCleanup {
         team_name: "alpha".to_string(),
         active_members: vec!["alice".to_string()],
     });
@@ -145,7 +145,7 @@ async fn force_cleanup_modal_enter_and_esc() {
 #[tokio::test]
 async fn rollback_offer_modal_enter_and_esc() {
     let mut app = support::make_app();
-    app.pending_rollback = Some(RollbackOfferState {
+    app.session.pending_rollback = Some(RollbackOfferState {
         session_id: "s1".to_string(),
         status: "completed".to_string(),
         iterations: 1,
@@ -202,7 +202,7 @@ async fn memory_clear_confirm_modal() {
 #[tokio::test]
 async fn plan_approval_cursor_and_actions() {
     let mut app = support::make_app();
-    app.plan_approval_pending = Some(PlanApprovalState {
+    app.session.plan_approval_pending = Some(PlanApprovalState {
         plan_text: "the plan".to_string(),
         cursor_approve: true,
     });
@@ -211,7 +211,7 @@ async fn plan_approval_cursor_and_actions() {
     let action = handle_key(&mut app, key(KeyCode::Enter)).await;
     assert!(matches!(action, Some(InputAction::ApprovePlan)));
 
-    app.plan_approval_pending = Some(PlanApprovalState {
+    app.session.plan_approval_pending = Some(PlanApprovalState {
         plan_text: "the plan".to_string(),
         cursor_approve: false,
     });
@@ -230,7 +230,7 @@ async fn plan_approval_cursor_and_actions() {
 #[tokio::test]
 async fn question_dialog_with_options() {
     let mut app = support::make_app();
-    app.question_queue.push_back(QuestionRequest {
+    app.session.question_queue.push_back(QuestionRequest {
         id: "q1".to_string(),
         session_id: "s1".to_string(),
         question: "Pick".to_string(),
@@ -240,35 +240,35 @@ async fn question_dialog_with_options() {
         secret: false,
     });
     assert!(handle_key(&mut app, key(KeyCode::Down)).await.is_none());
-    assert_eq!(app.question_selected_index, 1);
+    assert_eq!(app.session.question_selected_index, 1);
     assert!(
         handle_key(&mut app, key(KeyCode::Char('j')))
             .await
             .is_none()
     );
-    assert_eq!(app.question_selected_index, 2);
+    assert_eq!(app.session.question_selected_index, 2);
     assert!(handle_key(&mut app, key(KeyCode::Up)).await.is_none());
-    assert_eq!(app.question_selected_index, 1);
+    assert_eq!(app.session.question_selected_index, 1);
     assert!(
         handle_key(&mut app, key(KeyCode::Char('k')))
             .await
             .is_none()
     );
-    assert_eq!(app.question_selected_index, 0);
+    assert_eq!(app.session.question_selected_index, 0);
     // Clamp at the top.
     assert!(handle_key(&mut app, key(KeyCode::Up)).await.is_none());
-    assert_eq!(app.question_selected_index, 0);
+    assert_eq!(app.session.question_selected_index, 0);
 
     // Enter answers the highlighted option and pops the queue.
     assert!(handle_key(&mut app, key(KeyCode::Enter)).await.is_none());
-    assert!(app.question_queue.is_empty());
-    assert_eq!(app.question_selected_index, 0);
+    assert!(app.session.question_queue.is_empty());
+    assert_eq!(app.session.question_selected_index, 0);
 }
 
 #[tokio::test]
 async fn question_dialog_with_options_esc_dismisses() {
     let mut app = support::make_app();
-    app.question_queue.push_back(QuestionRequest {
+    app.session.question_queue.push_back(QuestionRequest {
         id: "q1".to_string(),
         session_id: "s1".to_string(),
         question: "Pick".to_string(),
@@ -278,13 +278,13 @@ async fn question_dialog_with_options_esc_dismisses() {
         secret: false,
     });
     assert!(handle_key(&mut app, key(KeyCode::Esc)).await.is_none());
-    assert!(app.question_queue.is_empty());
+    assert!(app.session.question_queue.is_empty());
 }
 
 #[tokio::test]
 async fn question_dialog_free_text_edit_and_submit() {
     let mut app = support::make_app();
-    app.question_queue.push_back(QuestionRequest {
+    app.session.question_queue.push_back(QuestionRequest {
         id: "q2".to_string(),
         session_id: "s1".to_string(),
         question: "Type".to_string(),
@@ -303,28 +303,28 @@ async fn question_dialog_free_text_edit_and_submit() {
             .await
             .is_none()
     );
-    assert_eq!(app.pending_question_input, "hi");
+    assert_eq!(app.session.pending_question_input, "hi");
     assert!(
         handle_key(&mut app, key(KeyCode::Backspace))
             .await
             .is_none()
     );
-    assert_eq!(app.pending_question_input, "h");
+    assert_eq!(app.session.pending_question_input, "h");
     // Whitespace-only input does not submit; the dialog stays open.
-    app.pending_question_input = "   ".to_string();
+    app.session.pending_question_input = "   ".to_string();
     assert!(handle_key(&mut app, key(KeyCode::Enter)).await.is_none());
-    assert_eq!(app.question_queue.len(), 1);
+    assert_eq!(app.session.question_queue.len(), 1);
     // A real answer submits and clears the input.
-    app.pending_question_input = "yes".to_string();
+    app.session.pending_question_input = "yes".to_string();
     assert!(handle_key(&mut app, key(KeyCode::Enter)).await.is_none());
-    assert!(app.question_queue.is_empty());
-    assert_eq!(app.pending_question_input, "");
+    assert!(app.session.question_queue.is_empty());
+    assert_eq!(app.session.pending_question_input, "");
 }
 
 #[tokio::test]
 async fn question_dialog_free_text_esc_dismisses() {
     let mut app = support::make_app();
-    app.question_queue.push_back(QuestionRequest {
+    app.session.question_queue.push_back(QuestionRequest {
         id: "q3".to_string(),
         session_id: "s1".to_string(),
         question: "Type".to_string(),
@@ -333,10 +333,10 @@ async fn question_dialog_free_text_esc_dismisses() {
         expire_at_ms: None,
         secret: false,
     });
-    app.pending_question_input = "typed".to_string();
+    app.session.pending_question_input = "typed".to_string();
     assert!(handle_key(&mut app, key(KeyCode::Esc)).await.is_none());
-    assert!(app.question_queue.is_empty());
-    assert_eq!(app.pending_question_input, "");
+    assert!(app.session.question_queue.is_empty());
+    assert_eq!(app.session.pending_question_input, "");
 }
 
 // ===========================================================================
@@ -358,13 +358,13 @@ fn permission_req() -> PermissionRequest {
 async fn permission_dialog_y_a_n() {
     for c in ['y', 'a', 'n'] {
         let mut app = support::make_app();
-        app.permission_queue.push_back(permission_req());
+        app.session.permission_queue.push_back(permission_req());
         assert!(handle_key(&mut app, key(KeyCode::Char(c))).await.is_none());
-        assert_eq!(app.permission_queue.len(), 1);
+        assert_eq!(app.session.permission_queue.len(), 1);
     }
     // Any other key is swallowed and changes nothing.
     let mut app = support::make_app();
-    app.permission_queue.push_back(permission_req());
+    app.session.permission_queue.push_back(permission_req());
     assert!(
         handle_key(&mut app, key(KeyCode::Char('z')))
             .await
@@ -450,7 +450,7 @@ async fn context_menu_navigation_and_actions() {
 #[tokio::test]
 async fn slash_menu_navigation_select_and_escape() {
     let mut app = support::make_app();
-    app.input = "/".to_string();
+    app.session.input = "/".to_string();
     app.slash_menu = Some(SlashMenuState {
         matches: vec![slash_entry("help"), slash_entry("history")],
         selected: 0,
@@ -472,8 +472,8 @@ async fn slash_menu_navigation_select_and_escape() {
 
     // Typing routes into the input buffer through the menu branch.
     let mut app = support::make_app();
-    app.input = "/".to_string();
-    app.input_cursor = 1;
+    app.session.input = "/".to_string();
+    app.session.input_cursor = 1;
     app.slash_menu = Some(SlashMenuState {
         matches: vec![slash_entry("help")],
         selected: 0,
@@ -484,7 +484,7 @@ async fn slash_menu_navigation_select_and_escape() {
             .await
             .is_none()
     );
-    assert!(app.input.contains('x'));
+    assert!(app.session.input.contains('x'));
 
     // Esc closes the menu.
     let mut app = support::make_app();
@@ -500,7 +500,7 @@ async fn slash_menu_navigation_select_and_escape() {
 #[tokio::test]
 async fn file_menu_navigation_and_editing_keys() {
     let mut app = support::make_app();
-    app.input = "@/x".to_string();
+    app.session.input = "@/x".to_string();
     app.file_menu = Some(FileMenuState {
         matches: (0..12)
             .map(|i| FileMenuEntry {
@@ -727,8 +727,8 @@ async fn backend_panel_keys_route() {
 async fn queue_show_panel_keys_route() {
     let mut app = support::make_app();
     app.queue_show_open = true;
-    app.input_queue.push_back(queued("one"));
-    app.input_queue.push_back(queued("two"));
+    app.session.input_queue.push_back(queued("one"));
+    app.session.input_queue.push_back(queued("two"));
     assert!(handle_key(&mut app, key(KeyCode::Down)).await.is_none());
     assert_eq!(app.queue_show_selected, 1);
     assert!(handle_key(&mut app, key(KeyCode::Up)).await.is_none());
@@ -743,7 +743,7 @@ async fn queue_show_panel_keys_route() {
 async fn queue_menu_keys_route() {
     let mut app = support::make_app();
     app.queue_menu_open = true;
-    app.input_queue.push_back(queued("one"));
+    app.session.input_queue.push_back(queued("one"));
     assert!(handle_key(&mut app, key(KeyCode::Down)).await.is_none());
     assert!(handle_key(&mut app, key(KeyCode::Up)).await.is_none());
     // Esc closes the menu.
@@ -816,46 +816,46 @@ async fn enter_on_empty_input_is_noop() {
 #[tokio::test]
 async fn shift_enter_inserts_newline() {
     let mut app = support::make_app();
-    app.input = "abc".to_string();
-    app.input_cursor = 3;
+    app.session.input = "abc".to_string();
+    app.session.input_cursor = 3;
     assert!(
         handle_key(&mut app, kmod(KeyCode::Enter, KeyModifiers::SHIFT))
             .await
             .is_none()
     );
-    assert_eq!(app.input, "abc\n");
+    assert_eq!(app.session.input, "abc\n");
 }
 
 #[tokio::test]
 async fn alt_enter_inserts_newline() {
     let mut app = support::make_app();
-    app.input = "xy".to_string();
-    app.input_cursor = 2;
+    app.session.input = "xy".to_string();
+    app.session.input_cursor = 2;
     assert!(
         handle_key(&mut app, kmod(KeyCode::Enter, KeyModifiers::ALT))
             .await
             .is_none()
     );
-    assert_eq!(app.input, "xy\n");
+    assert_eq!(app.session.input, "xy\n");
 }
 
 #[tokio::test]
 async fn enter_sends_and_bang_and_slash() {
     let mut app = support::make_app();
-    app.input = "hello".to_string();
-    app.input_cursor = 5;
+    app.session.input = "hello".to_string();
+    app.session.input_cursor = 5;
     let action = handle_key(&mut app, key(KeyCode::Enter)).await;
     assert!(matches!(action, Some(InputAction::SendMessage(ref s)) if s == "hello"));
 
     let mut app = support::make_app();
-    app.input = "! ls".to_string();
-    app.input_cursor = 4;
+    app.session.input = "! ls".to_string();
+    app.session.input_cursor = 4;
     let action = handle_key(&mut app, key(KeyCode::Enter)).await;
     assert!(matches!(action, Some(InputAction::BangCommand(_))));
 
     let mut app = support::make_app();
-    app.input = "/help".to_string();
-    app.input_cursor = 5;
+    app.session.input = "/help".to_string();
+    app.session.input_cursor = 5;
     let action = handle_key(&mut app, key(KeyCode::Enter)).await;
     assert!(matches!(action, Some(InputAction::SlashCommand(_))));
 }
@@ -863,7 +863,7 @@ async fn enter_sends_and_bang_and_slash() {
 #[tokio::test]
 async fn ctrl_x_cancels_while_processing_else_cuts() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
     let action = handle_key(&mut app, kmod(KeyCode::Char('x'), KeyModifiers::CONTROL)).await;
     assert!(matches!(action, Some(InputAction::CancelAgent)));
 
@@ -939,13 +939,13 @@ async fn alt_toggle_keys_map_to_actions() {
 #[tokio::test]
 async fn alt_x_opens_stop_confirm_only_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
     assert!(
         handle_key(&mut app, kmod(KeyCode::Char('x'), KeyModifiers::ALT))
             .await
             .is_none()
     );
-    assert!(app.pending_stop_confirm);
+    assert!(app.session.pending_stop_confirm);
 
     let mut app = support::make_app();
     assert!(
@@ -953,7 +953,7 @@ async fn alt_x_opens_stop_confirm_only_while_processing() {
             .await
             .is_none()
     );
-    assert!(!app.pending_stop_confirm);
+    assert!(!app.session.pending_stop_confirm);
 }
 
 #[tokio::test]
@@ -1056,7 +1056,7 @@ async fn arrow_and_motion_keys_map_to_actions() {
 #[tokio::test]
 async fn esc_cancels_only_while_processing() {
     let mut app = support::make_app();
-    app.is_processing = true;
+    app.session.is_processing = true;
     assert!(matches!(
         handle_key(&mut app, key(KeyCode::Esc)).await,
         Some(InputAction::CancelAgent)
@@ -1083,39 +1083,39 @@ async fn memory_panel_up_down_routes_to_cursor() {
 #[tokio::test]
 async fn delete_with_active_selection_removes_range() {
     let mut app = support::make_app();
-    app.input = "abcdef".to_string();
-    app.input_cursor = 6;
-    app.kb_select_anchor = Some(0);
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = 6;
+    app.session.kb_select_anchor = Some(0);
     assert!(handle_key(&mut app, key(KeyCode::Delete)).await.is_none());
-    assert!(app.input.is_empty(), "got: {:?}", app.input);
+    assert!(app.session.input.is_empty(), "got: {:?}", app.session.input);
 }
 
 #[tokio::test]
 async fn backspace_with_active_selection_removes_range() {
     let mut app = support::make_app();
-    app.input = "abcdef".to_string();
-    app.input_cursor = 6;
-    app.kb_select_anchor = Some(0);
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = 6;
+    app.session.kb_select_anchor = Some(0);
     assert!(
         handle_key(&mut app, key(KeyCode::Backspace))
             .await
             .is_none()
     );
-    assert!(app.input.is_empty(), "got: {:?}", app.input);
+    assert!(app.session.input.is_empty(), "got: {:?}", app.session.input);
 }
 
 #[tokio::test]
 async fn typing_replaces_active_selection() {
     let mut app = support::make_app();
-    app.input = "abcdef".to_string();
-    app.input_cursor = 6;
-    app.kb_select_anchor = Some(0);
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = 6;
+    app.session.kb_select_anchor = Some(0);
     assert!(
         handle_key(&mut app, key(KeyCode::Char('Z')))
             .await
             .is_none()
     );
-    assert_eq!(app.input, "Z");
+    assert_eq!(app.session.input, "Z");
 }
 
 // ===========================================================================

@@ -153,7 +153,7 @@ fn test_countdown_formats_correctly() {
 #[tokio::test]
 async fn test_permission_requested_event_queues_120_second_timeout() {
     let mut app = make_app();
-    app.session_id = Some("session-1".to_string());
+    app.session.session_id = Some("session-1".to_string());
 
     app.handle_event(Event::PermissionRequested {
         session_id: "session-1".to_string(),
@@ -165,6 +165,7 @@ async fn test_permission_requested_event_queues_120_second_timeout() {
     .await;
 
     let request = app
+        .session
         .permission_queue
         .front()
         .expect("permission request should be queued");
@@ -192,7 +193,7 @@ fn test_permission_dialog_renders_initial_120_second_countdown() {
         .unwrap_or_default()
         .as_secs();
     let mut app = make_app();
-    app.permission_queue.push_back(PermissionRequest {
+    app.session.permission_queue.push_back(PermissionRequest {
         id: "req-1".to_string(),
         session_id: "session-1".to_string(),
         permission: "file:write".to_string(),

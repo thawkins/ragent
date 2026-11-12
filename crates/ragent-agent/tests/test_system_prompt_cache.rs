@@ -37,6 +37,8 @@ fn test_processor() -> SessionProcessor {
         connector_session: tokio::sync::RwLock::new(None),
         connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
+        project_code_indexes: Default::default(),
+        project_tool_registries: Default::default(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),

@@ -125,9 +125,9 @@ async fn test_alt_g_never_inserts_g_into_input_buffer() {
         .await;
 
     assert!(
-        app.input.is_empty(),
+        app.session.input.is_empty(),
         "Alt+G must not insert `g` into the input buffer; input was: {:?}",
-        app.input
+        app.session.input
     );
 }
 

@@ -37,7 +37,7 @@ const fn mouse(kind: MouseEventKind, col: u16, row: u16) -> MouseEvent {
 
 fn app_with_session(session: &str) -> ragent_tui::App {
     let mut app = support::make_app();
-    app.session_id = Some(session.to_string());
+    app.session.session_id = Some(session.to_string());
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app
 }
@@ -98,11 +98,11 @@ fn wheel_scrolls_the_memory_panel() {
 fn wheel_over_the_input_pane_is_a_noop() {
     let mut app = app_with_session("s1");
     app.input_area = Rect::new(0, 40, 80, 3);
-    app.scroll_offset = 5;
+    app.session.scroll_offset = 5;
 
     app.handle_mouse_event(mouse(MouseEventKind::ScrollUp, 5, 41));
     // The input pane does not scroll the message view.
-    assert_eq!(app.scroll_offset, 5);
+    assert_eq!(app.session.scroll_offset, 5);
 }
 
 // ===========================================================================
@@ -201,7 +201,7 @@ fn execute_context_action_copy_clears_the_menu() {
         selected: 0,
         items: vec![(ContextAction::Copy, true)],
     });
-    app.message_content_lines = vec!["hello world".to_string()];
+    app.session.message_content_lines = vec!["hello world".to_string()];
 
     app.execute_context_action(ContextAction::Copy);
     assert!(app.context_menu.is_none(), "the menu closes on dispatch");
@@ -211,8 +211,8 @@ fn execute_context_action_copy_clears_the_menu() {
 fn execute_context_action_cut_on_non_input_pane_only_copies() {
     // Cut outside the input pane copies but does not mutate the buffer.
     let mut app = app_with_session("s1");
-    app.input = "abcdef".to_string();
-    app.input_cursor = 6;
+    app.session.input = "abcdef".to_string();
+    app.session.input_cursor = 6;
     app.message_area = Rect::new(0, 1, 80, 20);
     app.text_selection = Some(TextSelection {
         pane: SelectionPane::Messages,
@@ -229,13 +229,13 @@ fn execute_context_action_cut_on_non_input_pane_only_copies() {
 
     app.execute_context_action(ContextAction::Cut);
     assert!(app.context_menu.is_none());
-    assert_eq!(app.input, "abcdef", "the input buffer is untouched");
+    assert_eq!(app.session.input, "abcdef", "the input buffer is untouched");
 }
 
 #[test]
 fn execute_context_action_paste_on_non_input_pane_is_a_noop() {
     let mut app = app_with_session("s1");
-    app.input = "keep".to_string();
+    app.session.input = "keep".to_string();
     app.context_menu = Some(ContextMenuState {
         x: 2,
         y: 2,
@@ -247,7 +247,7 @@ fn execute_context_action_paste_on_non_input_pane_is_a_noop() {
     app.execute_context_action(ContextAction::Paste);
     assert!(app.context_menu.is_none());
     assert_eq!(
-        app.input, "keep",
+        app.session.input, "keep",
         "paste into a non-input pane does nothing"
     );
 }
@@ -346,15 +346,15 @@ async fn history_picker_down_and_enter_restores_entry() {
 
     app.handle_key_event(key(KeyCode::Enter)).await;
     assert!(app.history_picker.is_none(), "Enter closes the picker");
-    assert_eq!(app.input, "second");
-    assert_eq!(app.input_cursor, app.input.chars().count());
+    assert_eq!(app.session.input, "second");
+    assert_eq!(app.session.input_cursor, app.session.input.chars().count());
 }
 
 #[tokio::test]
 async fn history_picker_escape_and_q_close_without_change() {
     for close in [KeyCode::Esc, KeyCode::Char('q')] {
         let mut app = app_with_session("s1");
-        app.input = "keep".to_string();
+        app.session.input = "keep".to_string();
         app.history_picker = Some(HistoryPickerState {
             entries: vec!["x".to_string()],
             selected: 0,
@@ -365,7 +365,7 @@ async fn history_picker_escape_and_q_close_without_change() {
             app.history_picker.is_none(),
             "key {close:?} closes the picker"
         );
-        assert_eq!(app.input, "keep", "the input is untouched");
+        assert_eq!(app.session.input, "keep", "the input is untouched");
     }
 }
 
@@ -439,28 +439,28 @@ async fn space_in_the_teams_window_with_no_teammates_is_a_consumed_no_op() {
 #[tokio::test]
 async fn non_character_key_dismisses_run_cost_banner_and_is_consumed() {
     let mut app = app_with_session("s1");
-    app.run_cost_banner = Some("banner".to_string());
-    app.run_cost_banner_at = Some(std::time::Instant::now());
+    app.session.run_cost_banner = Some("banner".to_string());
+    app.session.run_cost_banner_at = Some(std::time::Instant::now());
 
     // A non-character key only clears the banner and is consumed.
     app.handle_key_event(key(KeyCode::Esc)).await;
-    assert!(app.run_cost_banner.is_none());
-    assert!(app.run_cost_banner_at.is_none());
+    assert!(app.session.run_cost_banner.is_none());
+    assert!(app.session.run_cost_banner_at.is_none());
 }
 
 #[tokio::test]
 async fn printable_char_dismisses_banner_and_is_typed() {
     let mut app = app_with_session("s1");
-    app.input.clear();
-    app.run_cost_banner = Some("banner".to_string());
-    app.run_cost_banner_at = Some(std::time::Instant::now());
+    app.session.input.clear();
+    app.session.run_cost_banner = Some("banner".to_string());
+    app.session.run_cost_banner_at = Some(std::time::Instant::now());
 
     app.handle_key_event(key(KeyCode::Char('x'))).await;
-    assert!(app.run_cost_banner.is_none(), "banner cleared");
+    assert!(app.session.run_cost_banner.is_none(), "banner cleared");
     assert!(
-        app.input.contains('x'),
+        app.session.input.contains('x'),
         "the first keystroke still reaches the input, got: {:?}",
-        app.input
+        app.session.input
     );
 }
 

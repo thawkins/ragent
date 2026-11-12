@@ -37,7 +37,7 @@ fn render_app_to_string(app: &mut App) -> String {
 #[tokio::test]
 async fn test_multiple_choice_question_renders_options() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::QuestionRequested {
         session_id: "s1".to_string(),
@@ -70,7 +70,7 @@ async fn test_multiple_choice_question_renders_options() {
 #[tokio::test]
 async fn test_multiple_choice_question_shows_selected_option() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::QuestionRequested {
         session_id: "s1".to_string(),
@@ -91,7 +91,7 @@ async fn test_multiple_choice_question_shows_selected_option() {
 #[tokio::test]
 async fn test_multiple_choice_selection_navigates_down() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::QuestionRequested {
         session_id: "s1".to_string(),
@@ -119,7 +119,7 @@ async fn test_multiple_choice_selection_navigates_down() {
 #[tokio::test]
 async fn test_free_text_question_does_not_show_options() {
     let mut app = make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
 
     app.handle_event(Event::QuestionRequested {
         session_id: "s1".to_string(),

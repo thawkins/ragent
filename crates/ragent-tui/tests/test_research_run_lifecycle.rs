@@ -15,7 +15,8 @@ mod support;
 
 /// The first text part of every assistant message in the window.
 fn assistant_texts(app: &App) -> Vec<String> {
-    app.messages
+    app.session
+        .messages
         .iter()
         .filter(|message| message.role == ragent_types::message::Role::Assistant)
         .filter_map(|message| message.parts.first())
@@ -28,7 +29,7 @@ fn assistant_texts(app: &App) -> Vec<String> {
 
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("s1".to_string());
+    app.session.session_id = Some("s1".to_string());
     app
 }
 

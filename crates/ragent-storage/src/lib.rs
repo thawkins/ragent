@@ -9,18 +9,20 @@
 #![deny(unsafe_code)]
 
 pub mod activity_log;
+pub mod project;
 pub mod snapshot;
 pub mod storage;
 
 // Re-export commonly used types
 pub use activity_log::{ActivityLog, AppendError};
+pub use project::project_root;
 pub use snapshot::{IncrementalSnapshot, Snapshot};
 pub use storage::{
     BackgroundTaskRow, ConversationStats, CronEventRow, CycleError, InitiativeMilestone,
-    InitiativeRow, KgEntityRow, KgRelationshipRow, MemoryRow, MessageSearchResult,
-    RunCostSummaryRow, SCHEMA_VERSION, SessionRow, SessionSearchParams, Storage, TaskDerived,
-    TaskRow, TaskUpdateParams, TaskView, compute_task_dag, decrypt_key, deobfuscate_key,
-    detect_cycle, encrypt_key, obfuscate_key,
+    InitiativeRow, KgEntityRow, KgRelationshipRow, MemoryRow, MessageSearchResult, ProjectSessions,
+    RunCostSummaryRow, SCHEMA_VERSION, SessionKind, SessionRow, SessionSearchParams, Storage,
+    TaskDerived, TaskRow, TaskUpdateParams, TaskView, compute_task_dag, decrypt_key,
+    deobfuscate_key, detect_cycle, encrypt_key, obfuscate_key,
 };
 
 // Backward-compatible aliases for code that has not yet migrated (e.g.

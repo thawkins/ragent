@@ -30,18 +30,23 @@ fn entry(text: &str) -> QueuedInput {
 /// Build an app with an active session.
 fn app_with_session() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("test-session".to_string());
+    app.session.session_id = Some("test-session".to_string());
     app
 }
 
 /// Count user messages in the conversation.
 fn user_message_count(app: &App) -> usize {
-    app.messages.iter().filter(|m| m.role == Role::User).count()
+    app.session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::User)
+        .count()
 }
 
 /// The text of the last assistant message appended by a command.
 fn last_assistant_text(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .iter()
         .rev()
         .find(|m| m.role == Role::Assistant)
@@ -73,8 +78,8 @@ fn test_queue_command_is_registered() {
 #[tokio::test]
 async fn test_queue_list_names_entries_in_order() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("QUEUE-CMD-1"));
-    app.input_queue.push_back(entry("QUEUE-CMD-2"));
+    app.session.input_queue.push_back(entry("QUEUE-CMD-1"));
+    app.session.input_queue.push_back(entry("QUEUE-CMD-2"));
 
     app.execute_slash_command("/queue list").await;
 
@@ -99,7 +104,7 @@ async fn test_queue_list_names_entries_in_order() {
 #[tokio::test]
 async fn test_bare_queue_defaults_to_list() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("BARE-QUEUE"));
+    app.session.input_queue.push_back(entry("BARE-QUEUE"));
 
     app.execute_slash_command("/queue").await;
 
@@ -131,8 +136,8 @@ async fn test_queue_list_empty_reports_empty() {
 #[tokio::test]
 async fn test_queue_clear_empties_the_queue() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("QUEUE-CMD-1"));
-    app.input_queue.push_back(entry("QUEUE-CMD-2"));
+    app.session.input_queue.push_back(entry("QUEUE-CMD-1"));
+    app.session.input_queue.push_back(entry("QUEUE-CMD-2"));
     let before = user_message_count(&app);
 
     app.execute_slash_command("/queue clear").await;
@@ -158,16 +163,16 @@ async fn test_queue_clear_empties_the_queue() {
 #[tokio::test]
 async fn test_queue_clear_leaves_the_running_turn_untouched() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("QUEUE-CMD-1"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("QUEUE-CMD-1"));
 
     app.execute_slash_command("/queue clear").await;
 
     assert!(
-        app.is_processing,
+        app.session.is_processing,
         "clearing the queue must not disturb the executing turn"
     );
-    assert!(app.cancel_flag.is_none(), "no cancel must be armed");
+    assert!(app.session.cancel_flag.is_none(), "no cancel must be armed");
     assert_eq!(app.input_queue_len(), 0);
 }
 
@@ -192,8 +197,8 @@ async fn test_queue_clear_on_empty_queue_is_a_noop() {
 #[tokio::test]
 async fn test_queue_next_dispatches_oldest_entry_when_free() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("NEXT-QUEUE-1"));
-    app.input_queue.push_back(entry("NEXT-QUEUE-2"));
+    app.session.input_queue.push_back(entry("NEXT-QUEUE-1"));
+    app.session.input_queue.push_back(entry("NEXT-QUEUE-2"));
 
     app.execute_slash_command("/queue next").await;
 
@@ -203,11 +208,12 @@ async fn test_queue_next_dispatches_oldest_entry_when_free() {
         "/queue next pops exactly one entry"
     );
     assert_eq!(
-        app.last_prompt, "NEXT-QUEUE-1",
+        app.session.last_prompt, "NEXT-QUEUE-1",
         "FIFO: the oldest entry must be dispatched first"
     );
     assert!(
-        app.messages
+        app.session
+            .messages
             .iter()
             .any(|m| m.role == Role::User && m.text_content() == "NEXT-QUEUE-1"),
         "the dispatched entry is added to the conversation"
@@ -218,8 +224,8 @@ async fn test_queue_next_dispatches_oldest_entry_when_free() {
 #[tokio::test]
 async fn test_queue_next_deferrs_while_the_agent_is_executing() {
     let mut app = app_with_session();
-    app.is_processing = true;
-    app.input_queue.push_back(entry("DEFER-QUEUE-1"));
+    app.session.is_processing = true;
+    app.session.input_queue.push_back(entry("DEFER-QUEUE-1"));
     let before = user_message_count(&app);
 
     app.execute_slash_command("/queue next").await;
@@ -286,7 +292,7 @@ async fn test_queue_help_accepts_flag_aliases() {
 #[tokio::test]
 async fn test_queue_unknown_subcommand_is_rejected() {
     let mut app = app_with_session();
-    app.input_queue.push_back(entry("UNTOUCHED-QUEUE"));
+    app.session.input_queue.push_back(entry("UNTOUCHED-QUEUE"));
 
     app.execute_slash_command("/queue bogus").await;
 

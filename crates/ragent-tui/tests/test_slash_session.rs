@@ -13,13 +13,14 @@ mod support;
 /// Build an app with a live session.
 fn app() -> App {
     let mut app = support::make_app();
-    app.session_id = Some("slash-session".to_string());
+    app.session.session_id = Some("slash-session".to_string());
     app
 }
 
 /// Text of the most recent message in the message window.
 fn last_message(app: &App) -> String {
-    app.messages
+    app.session
+        .messages
         .last()
         .map(ragent_types::message::Message::text_content)
         .unwrap_or_default()
@@ -54,10 +55,11 @@ async fn plan_with_task_delegates_to_plan_agent() {
         "expected plan delegation, got {}",
         app.status
     );
-    assert_eq!(app.agent_name, "plan");
+    assert_eq!(app.session.agent_name, "plan");
     // The delegated task appears in the transcript as a user message.
     assert!(
-        app.messages
+        app.session
+            .messages
             .iter()
             .any(|m| m.text_content().contains("refactor the storage layer"))
     );
@@ -87,19 +89,22 @@ async fn autopilot_on_with_budgets_then_status_then_off() {
     let mut app = app();
     app.execute_slash_command("/autopilot on --max-tokens 5000 --max-time 60")
         .await;
-    assert!(app.autopilot_enabled, "autopilot should be enabled");
-    assert_eq!(app.autopilot_token_budget, Some(5000));
-    assert_eq!(app.autopilot_time_limit_secs, Some(60));
-    assert!(app.autopilot_started_at.is_some());
+    assert!(app.session.autopilot_enabled, "autopilot should be enabled");
+    assert_eq!(app.session.autopilot_token_budget, Some(5000));
+    assert_eq!(app.session.autopilot_time_limit_secs, Some(60));
+    assert!(app.session.autopilot_started_at.is_some());
 
     app.execute_slash_command("/autopilot status").await;
     assert!(last_message(&app).contains("Autopilot: **ON**"));
 
     app.execute_slash_command("/autopilot off").await;
-    assert!(!app.autopilot_enabled, "autopilot should be disabled");
-    assert_eq!(app.autopilot_token_budget, None);
-    assert_eq!(app.autopilot_time_limit_secs, None);
-    assert!(app.autopilot_started_at.is_none());
+    assert!(
+        !app.session.autopilot_enabled,
+        "autopilot should be disabled"
+    );
+    assert_eq!(app.session.autopilot_token_budget, None);
+    assert_eq!(app.session.autopilot_time_limit_secs, None);
+    assert!(app.session.autopilot_started_at.is_none());
 }
 
 #[tokio::test]
@@ -109,7 +114,7 @@ async fn autopilot_on_rejects_non_numeric_budget() {
         .await;
     assert_eq!(app.status, "autopilot: invalid argument");
     assert!(
-        !app.autopilot_enabled,
+        !app.session.autopilot_enabled,
         "invalid arg must not enable autopilot"
     );
     assert!(last_message(&app).contains("expected a positive integer"));
