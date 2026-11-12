@@ -528,7 +528,10 @@ pub struct ClarificationMarker {
 /// Detect all `[NEEDS CLARIFICATION: <question>]` markers in SPEC.md content.
 ///
 /// Matching is case-insensitive. Each marker is returned with its 1-based
-/// line number and the captured question text. Markers are **not** reported
+/// line number and the captured question text. Text inside Markdown code -
+/// fenced blocks (```` ``` ```` / `~~~`) and inline code spans - is skipped,
+/// so a spec can quote the marker syntax as an example without blocking its
+/// own approval (#63). Markers are **not** reported
 /// as validation errors by this function - callers (e.g. T-008) decide
 /// whether to add them to the [`Report`].
 ///
@@ -544,8 +547,32 @@ pub struct ClarificationMarker {
 /// ```
 pub fn detect_clarification_markers(content: &str) -> Vec<ClarificationMarker> {
     let mut markers = Vec::new();
+    // Open fence as (fence char, run length); a closing fence uses the same
+    // char with at least the same length (CommonMark).
+    let mut fence: Option<(u8, usize)> = None;
     for (i, line) in content.lines().enumerate() {
+        if let Some((ch, len)) = fence_run(line) {
+            match fence {
+                None => {
+                    fence = Some((ch, len));
+                    continue;
+                }
+                Some((open_ch, open_len)) if open_ch == ch && len >= open_len => {
+                    fence = None;
+                    continue;
+                }
+                Some(_) => {}
+            }
+        }
+        if fence.is_some() {
+            continue;
+        }
+        let spans = inline_code_spans(line);
         for caps in RE_NEEDS_CLARIFICATION.captures_iter(line) {
+            let start = caps.get(0).map_or(0, |m| m.start());
+            if spans.iter().any(|&(s, e)| start >= s && start < e) {
+                continue;
+            }
             markers.push(ClarificationMarker {
                 line: i + 1,
                 question: caps[1].trim().to_string(),
@@ -553,6 +580,64 @@ pub fn detect_clarification_markers(content: &str) -> Vec<ClarificationMarker> {
         }
     }
     markers
+}
+
+/// If `line` is a Markdown code-fence line (up to three spaces of indent,
+/// then three or more backticks or tildes), return the fence char and run
+/// length.
+fn fence_run(line: &str) -> Option<(u8, usize)> {
+    let indent = line.len() - line.trim_start_matches(' ').len();
+    if indent > 3 {
+        return None;
+    }
+    let rest = &line.as_bytes()[indent..];
+    let ch = *rest.first()?;
+    if ch != b'`' && ch != b'~' {
+        return None;
+    }
+    let len = rest.iter().take_while(|&&b| b == ch).count();
+    (len >= 3).then_some((ch, len))
+}
+
+/// Byte ranges of the inline code spans in `line`.
+///
+/// A span opens with a run of N backticks and closes at the next run of
+/// exactly N backticks; an opening run with no matching close is literal
+/// text, so it hides nothing.
+fn inline_code_spans(line: &str) -> Vec<(usize, usize)> {
+    let bytes = line.as_bytes();
+    let run_at = |pos: usize| bytes[pos..].iter().take_while(|&&b| b == b'`').count();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let open = run_at(i);
+        let mut j = i + open;
+        let mut close = None;
+        while j < bytes.len() {
+            if bytes[j] == b'`' {
+                let run = run_at(j);
+                if run == open {
+                    close = Some(j + run);
+                    break;
+                }
+                j += run;
+            } else {
+                j += 1;
+            }
+        }
+        match close {
+            Some(end) => {
+                spans.push((i, end));
+                i = end;
+            }
+            None => i += open,
+        }
+    }
+    spans
 }
 
 // -- Ambiguity detection (T-026, FR-015) -------------------------------------

@@ -8,6 +8,8 @@
 
 #[path = "test_backward_compat.rs"]
 mod test_backward_compat;
+#[path = "test_clarification_code_spans.rs"]
+mod test_clarification_code_spans;
 #[path = "test_git_branch.rs"]
 mod test_git_branch;
 #[path = "test_govcreate_authoring.rs"]
