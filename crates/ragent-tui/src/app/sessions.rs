@@ -430,6 +430,69 @@ impl App {
         self.sid_to_display_name.remove(&short);
     }
 
+    /// Prints the session startup block into the focused session's
+    /// transcript: the ragent banner, version and links, the session id, and
+    /// the config files the session's directory resolves to. Then announces
+    /// the project instruction files (AGENTS.md and the like) for the
+    /// session; that discovery walks the project tree, so it runs on a
+    /// blocking thread and its notice arrives over the event bus. No model
+    /// call is made - the files already reach the model through the system
+    /// prompt (#38).
+    ///
+    /// Called for every newly created session: at startup, `/session new`,
+    /// `Ctrl+N`, the sidebar's `+ New session`, and the replacement created
+    /// when the last session is closed.
+    pub fn announce_session_startup(&mut self) {
+        let Some(session_id) = self.session.session_id.clone() else {
+            return;
+        };
+        let banner = crate::logo::LOGO.join("\n");
+        self.append_assistant_text(&banner);
+        self.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
+        self.append_assistant_text("\n  Created by Tim Hawkins <tim.thawkins@gmail.com>");
+        self.append_assistant_text("\n  https://github.com/thawkins/ragent");
+        self.append_assistant_text("\n");
+        self.append_assistant_text(&format!(
+            "\n[ok] Session created: `{}`",
+            super::helpers::short_id(&session_id)
+        ));
+        // The config this session runs under (MULTISESSION M6): its own
+        // project file, or the launch configuration it inherits.
+        let config_paths = match ragent_agent::Config::load_for(&self.cwd_path) {
+            Ok(config) => config.config_paths,
+            Err(e) => {
+                tracing::warn!(error = %e, "could not load session config for the startup block");
+                self.config_paths.clone()
+            }
+        };
+        if config_paths.is_empty() {
+            self.append_assistant_text("\n[i] No config file found; using defaults");
+        } else {
+            let home = std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned());
+            let mut paths_text = config_paths
+                .iter()
+                .map(|p| {
+                    let s = p.display().to_string();
+                    match home.as_deref().and_then(|h| s.strip_prefix(h)) {
+                        Some(rest) => format!("~{rest}"),
+                        None => s,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("`\n  ");
+            if config_paths.len() > 1 {
+                paths_text = format!("\n  {paths_text}");
+            }
+            self.append_assistant_text(&format!("\n[ok] Loaded config file: `{paths_text}`"));
+        }
+        let processor = std::sync::Arc::clone(&self.session_processor);
+        drop(tokio::task::spawn_blocking(move || {
+            if let Err(e) = processor.announce_instruction_files(&session_id) {
+                tracing::warn!(error = %e, "Instruction-file announcement failed");
+            }
+        }));
+    }
+
     /// Checks a `/session new <path>` directory (FR-01, M6).
     ///
     /// The path (with `~` expanded) must be an existing directory inside the
@@ -508,6 +571,7 @@ impl App {
         }
         self.park_session(previous);
         self.after_focus_change();
+        self.announce_session_startup();
         Ok(())
     }
 
@@ -570,6 +634,7 @@ impl App {
             return Err("this session is running; press Esc to stop it first".to_string());
         }
         let closing = self.session.session_id.clone();
+        let mut created_replacement = false;
         match self.background.remove(0) {
             Some(next) => self.session = next,
             None => {
@@ -579,12 +644,16 @@ impl App {
                     self.session = previous;
                     return Err("could not create a replacement session".to_string());
                 }
+                created_replacement = true;
             }
         }
         if let Some(id) = closing {
             self.forget_session_step_state(&id);
         }
         self.after_focus_change();
+        if created_replacement {
+            self.announce_session_startup();
+        }
         Ok(())
     }
 

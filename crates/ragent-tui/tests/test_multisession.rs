@@ -520,3 +520,37 @@ async fn test_multisession_bench_output_lands_in_the_session_that_started_it() {
     assert_eq!(transcript(&app.session), focused_before);
     assert!(app.bench_origin_session.is_none());
 }
+
+#[tokio::test]
+async fn test_multisession_new_session_prints_startup_block_but_children_do_not() {
+    let (app, a, b) = app_with_two_sessions().await;
+
+    let created = transcript(&app.session);
+    assert!(
+        created.contains(&format!("Version {}", env!("CARGO_PKG_VERSION"))),
+        "the new session shows the banner: {created}"
+    );
+    assert!(created.contains("[ok] Session created:"));
+    assert!(
+        !transcript(background(&app, &a)).contains("[ok] Session created:"),
+        "the earlier session's transcript is untouched"
+    );
+
+    // A sub-agent session is created by the agent, not the TUI: no banner.
+    let child = app
+        .session_processor
+        .session_manager
+        .create_child_session(
+            app.cwd_path.clone(),
+            &b,
+            ragent_storage::SessionKind::Subagent,
+        )
+        .expect("child session");
+    assert!(
+        app.storage
+            .get_messages(&child.id)
+            .expect("messages")
+            .is_empty(),
+        "sub-agent sessions get no startup block"
+    );
+}
