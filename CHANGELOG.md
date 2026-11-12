@@ -9,6 +9,19 @@
   and recorded cost counted the prompt once per chunk. The Gemini stream now
   emits a single usage event per response with the final totals.
 
+### Fixed - auto-compaction and context usage tracking
+
+- Anthropic and Bedrock send a second, output-only usage event with
+  `input_tokens: 0`. It no longer overwrites the real input count, so
+  auto-compaction can fire mid-turn (it previously only fired at the start of
+  a turn) and the TUI context gauge no longer drops to 0 after each response.
+- The pre-send compaction check now adds the reply and tool results appended
+  since the last request to the provider-reported count, instead of using
+  the previous request's count alone.
+- After a compaction that shrinks the history, and once the next provider
+  usage report confirms usage is back under the threshold,
+  auto-compaction can run again in the same turn.
+
 ### Fixed - clarification gate ignores markers inside code
 
 - The `approved` gate no longer counts `[NEEDS CLARIFICATION: ...]` text

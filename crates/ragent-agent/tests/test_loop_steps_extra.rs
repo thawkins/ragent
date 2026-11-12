@@ -754,3 +754,144 @@ async fn test_completed_turn_records_end_reason() -> Result<()> {
     );
     Ok(())
 }
+
+/// Anthropic and Bedrock report usage twice per response: `message_start`
+/// carries the input count and `message_delta` carries `input_tokens: 0` with
+/// the output count. The trailing zero must not erase the real input count
+/// that the next compaction check and the TUI context gauge rely on.
+#[tokio::test]
+async fn test_output_only_usage_event_keeps_reported_input_tokens() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(256));
+    let (processor, working_dir, _captured, _dir) = make_processor(
+        event_bus,
+        vec![ScriptedReply::Events(vec![
+            StreamEvent::Usage {
+                input_tokens: 1234,
+                output_tokens: 0,
+            },
+            StreamEvent::TextDelta {
+                text: "hello".to_string(),
+            },
+            StreamEvent::Usage {
+                input_tokens: 0,
+                output_tokens: 7,
+            },
+            StreamEvent::Finish {
+                reason: LlmFinishReason::Stop,
+            },
+        ])],
+    )?;
+    let session = processor.session_manager.create_session(working_dir)?;
+
+    processor
+        .process_message(
+            &session.id,
+            "hi",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await?;
+
+    let cached = processor
+        .session_manager
+        .session_state_cache(&session.id)
+        .lock()
+        .expect("session state lock")
+        .last_reported_input_tokens();
+    assert_eq!(
+        cached, 1234,
+        "the output-only usage event must not reset the input count"
+    );
+    Ok(())
+}
+
+/// A tool-call step whose provider usage reports `input_tokens` - used to push
+/// the provider-reported context load over the compaction threshold.
+fn tool_call_with_usage(id: &str, input_tokens: u64) -> ScriptedReply {
+    ScriptedReply::Events(vec![
+        StreamEvent::ToolCallStart {
+            id: id.to_string(),
+            name: "Bash".to_string(),
+        },
+        StreamEvent::ToolCallDelta {
+            id: id.to_string(),
+            args_json: r#"{"command": "echo hi"}"#.to_string(),
+        },
+        StreamEvent::ToolCallEnd { id: id.to_string() },
+        StreamEvent::Usage {
+            input_tokens,
+            output_tokens: 5,
+        },
+        StreamEvent::Finish {
+            reason: LlmFinishReason::ToolUse,
+        },
+    ])
+}
+
+/// Run one turn against `replies` and count the `"auto"` compactions started.
+async fn count_auto_compactions(replies: Vec<ScriptedReply>) -> Result<usize> {
+    let event_bus = Arc::new(EventBus::new(4096));
+    let mut rx = event_bus.subscribe();
+    let (processor, working_dir, _captured, _dir) = make_processor(event_bus.clone(), replies)?;
+    let session = processor.session_manager.create_session(working_dir)?;
+    processor
+        .process_message(
+            &session.id,
+            "run echo several times",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await?;
+    let mut auto_compactions = 0;
+    while let Ok(event) = rx.try_recv() {
+        if let Event::CompressionStarted { reason, .. } = event
+            && reason == "auto"
+        {
+            auto_compactions += 1;
+        }
+    }
+    Ok(auto_compactions)
+}
+
+/// Auto-compaction re-arms within a turn once the provider's first report
+/// after a compaction confirms usage is back under the threshold, so a
+/// tool-heavy turn that fills up again compacts again. The scripted model has
+/// a 128k window; the default 70% threshold is 89.6k.
+#[tokio::test]
+async fn test_pre_send_compaction_rearms_within_one_turn() -> Result<()> {
+    let auto_compactions = count_auto_compactions(vec![
+        tool_call_with_usage("call_1", 100_000),
+        ScriptedReply::TextOnly("summary one"),
+        // Post-compaction report: recovered below the threshold -> re-arm.
+        tool_call_with_usage("call_2", 1_000),
+        tool_call_with_usage("call_3", 100_000),
+        ScriptedReply::TextOnly("summary two"),
+        ScriptedReply::TextOnly("done"),
+    ])
+    .await?;
+    assert_eq!(
+        auto_compactions, 2,
+        "a confirmed recovery re-arms compaction for the next fill-up"
+    );
+    Ok(())
+}
+
+/// When the provider's first report after a compaction is still over the
+/// threshold (the local estimate undercounted), the trigger stays disarmed
+/// for the rest of the turn instead of re-summarising every step.
+#[tokio::test]
+async fn test_pre_send_compaction_stays_disarmed_without_recovery() -> Result<()> {
+    let auto_compactions = count_auto_compactions(vec![
+        tool_call_with_usage("call_1", 100_000),
+        ScriptedReply::TextOnly("summary one"),
+        tool_call_with_usage("call_2", 100_000),
+        tool_call_with_usage("call_3", 100_000),
+        ScriptedReply::TextOnly("done"),
+    ])
+    .await?;
+    assert_eq!(
+        auto_compactions, 1,
+        "an unconfirmed recovery must not re-arm compaction"
+    );
+    Ok(())
+}
