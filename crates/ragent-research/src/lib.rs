@@ -198,10 +198,10 @@ pub use run_request::{InvocationParseError, ResearchRunRequest, build_session_co
 pub use scoreboard::{GradeBand, METER_CELLS, render_meter_bar};
 pub use search_budget::{SearchBudget, SharedQueryCache};
 pub use session::{
-    AnalysisConfig, AnalysisEvent, DEFAULT_WEB_PHASE_TIMEOUT_SECS, InputConfig, LocalConfig,
-    NoopObserver, OutputConfig, ResearchSession, ResilienceConfig, RunEngineConfig, RunOutcome,
-    SessionConfig, SessionEvent, SessionObserver, SessionPhase, SupervisorConfig, SynthesisEvent,
-    SynthesizeOutcome, WebConfig,
+    AnalysisConfig, AnalysisEngineFactory, AnalysisEvent, DEFAULT_WEB_PHASE_TIMEOUT_SECS,
+    InputConfig, LocalConfig, NoopObserver, OutputConfig, ResearchSession, ResilienceConfig,
+    RunEngineConfig, RunOutcome, SessionConfig, SessionEvent, SessionObserver, SessionPhase,
+    SupervisorConfig, SynthesisEvent, SynthesizeOutcome, WebConfig, parse_model_ref,
 };
 pub use source::{LocalSourceKind, Source};
 pub use source_age::{AgeSpan, AgeSpanError, AgeUnit};

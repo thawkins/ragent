@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed - research per-phase models are used
+
+- `research.models.research_model`, `compression_model` and
+  `final_report_model` (and `--research-model`, `--compression-model`,
+  `--final-report-model`) now select the model for their phase: the sub-topic
+  research loop, researcher compression, and the final report synthesis. They
+  were previously recorded but every phase called the active model. Values
+  accept `provider:model` or `provider/model` (#55).
+- `--summarization-model` now accepts the documented `provider:model` form
+  (e.g. `ollama:phi4`). Only `provider/model` worked before; the colon form
+  silently fell back to the active model.
+
 ### Removed - AGENTS.md acknowledgement exchange
 
 - A new session no longer asks the model to acknowledge `AGENTS.md`. That

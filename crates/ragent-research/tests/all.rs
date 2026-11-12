@@ -117,6 +117,8 @@ mod test_no_percall_regex;
 mod test_open_access_helpers;
 #[path = "test_output_limits_ordering.rs"]
 mod test_output_limits_ordering;
+#[path = "test_parse_model_ref.rs"]
+mod test_parse_model_ref;
 #[path = "test_patcher_extra.rs"]
 mod test_patcher_extra;
 #[path = "test_property.rs"]
@@ -131,6 +133,7 @@ mod test_research_baseline;
 mod test_research_config_event;
 #[path = "test_research_config_fallbacks.rs"]
 mod test_research_config_fallbacks;
+
 #[path = "test_research_create_synthesis.rs"]
 mod test_research_create_synthesis;
 #[path = "test_research_e2e.rs"]

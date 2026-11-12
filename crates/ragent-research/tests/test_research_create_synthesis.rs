@@ -667,3 +667,130 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
         "References Index must list the captured web source, got:\n{body}"
     );
 }
+
+/// Records every `(provider, model)` the session asks the engine factory for.
+type FactoryCalls = Arc<Mutex<Vec<(String, String)>>>;
+
+/// An engine factory that hands out [`WellFormedMockEngine`] and records the
+/// requested model, standing in for the adapter's provider-backed factory.
+fn recording_factory(calls: FactoryCalls) -> ragent_research::AnalysisEngineFactory {
+    Arc::new(move |provider: &str, model: &str| {
+        calls
+            .lock()
+            .unwrap()
+            .push((provider.to_string(), model.to_string()));
+        Arc::new(WellFormedMockEngine) as Arc<dyn AnalysisEngine>
+    })
+}
+
+/// #55: `final_report_model` routes the final synthesis to that model's engine.
+/// The default engine is the malformed mock, so an `Llm` outcome proves the
+/// synthesis request went to the engine built for `fr-provider:fr-model`.
+#[tokio::test]
+async fn final_report_model_routes_synthesis_to_its_engine() {
+    let tmp = TempDir::new().unwrap();
+    let research_root = tmp.path().join("research");
+    tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+    let calls: FactoryCalls = Arc::default();
+    let session = session_with_engine(&research_root, Arc::new(MalformedMockEngine))
+        .with_analysis_engine_factory(recording_factory(calls.clone()));
+    let observer = Arc::new(CaptureSynthesize::default());
+    let mut cfg = cfg_with_topic("Rust async");
+    cfg.models.final_report_model = Some("fr-provider:fr-model".to_string());
+
+    session
+        .run("final-model", "Final Model", &cfg, observer.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        calls.lock().unwrap().as_slice(),
+        [("fr-provider".to_string(), "fr-model".to_string())],
+        "the final-report engine is built for the configured model"
+    );
+    assert!(
+        observer
+            .outcomes
+            .lock()
+            .unwrap()
+            .contains(&SynthesizeOutcome::Llm),
+        "synthesis must run on the final-report engine, got {:?}",
+        observer.outcomes.lock().unwrap()
+    );
+}
+
+/// #55: with no per-phase model set, the factory is never consulted and the
+/// session's own engine performs the synthesis.
+#[tokio::test]
+async fn unset_phase_models_keep_the_default_engine() {
+    let tmp = TempDir::new().unwrap();
+    let research_root = tmp.path().join("research");
+    tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+    let calls: FactoryCalls = Arc::default();
+    let session = session_with_engine(&research_root, Arc::new(MalformedMockEngine))
+        .with_analysis_engine_factory(recording_factory(calls.clone()));
+    let observer = Arc::new(CaptureSynthesize::default());
+
+    session
+        .run(
+            "default-model",
+            "Default Model",
+            &cfg_with_topic("Rust async"),
+            observer.clone(),
+        )
+        .await
+        .unwrap();
+
+    assert!(calls.lock().unwrap().is_empty(), "factory not consulted");
+    assert!(
+        observer
+            .outcomes
+            .lock()
+            .unwrap()
+            .contains(&SynthesizeOutcome::FallbackEmpty),
+        "the default engine performs the synthesis"
+    );
+}
+
+/// #55 review: with a no-op run engine (no active model) and a
+/// `final_report_model`, synthesis runs on the override, so the outcome is
+/// `Llm`, not `NoLlm`, and `RESEARCH.md` records the override's model.
+#[tokio::test]
+async fn final_report_model_over_noop_engine_reports_llm_and_its_model() {
+    let tmp = TempDir::new().unwrap();
+    let research_root = tmp.path().join("research");
+    tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+    let calls: FactoryCalls = Arc::default();
+    let session = session_with_engine(&research_root, Arc::new(NoopAnalysisEngine))
+        .with_model("active/run-model")
+        .with_analysis_engine_factory(recording_factory(calls.clone()));
+    let observer = Arc::new(CaptureSynthesize::default());
+    let mut cfg = cfg_with_topic("Rust async");
+    cfg.models.final_report_model = Some("fr-provider:fr-model".to_string());
+
+    session
+        .run("noop-final", "Noop Final", &cfg, observer.clone())
+        .await
+        .unwrap();
+
+    let outcomes = observer.outcomes.lock().unwrap().clone();
+    assert!(
+        outcomes.contains(&SynthesizeOutcome::Llm) && !outcomes.contains(&SynthesizeOutcome::NoLlm),
+        "synthesis on the override must be classified Llm, got {outcomes:?}"
+    );
+    let body =
+        tokio::fs::read_to_string(crate::research_report_path(&research_root, "noop-final").await)
+            .await
+            .unwrap();
+    assert!(
+        body.contains("fr-provider/fr-model"),
+        "RESEARCH.md must record the final-report model:\n{body}"
+    );
+    assert!(
+        !body.contains("active/run-model"),
+        "RESEARCH.md must not attribute the report to the run model:\n{body}"
+    );
+}

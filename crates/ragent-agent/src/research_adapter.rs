@@ -146,7 +146,31 @@ pub fn build_research_session(
         None => session,
     };
     let session = match provider_registry {
-        Some(reg) => session.with_provider_registry(reg),
+        Some(reg) => {
+            // FR-013: per-phase model overrides (`research.models.*`) are
+            // built here, where credentials and base URLs resolve, with the
+            // same wiring as the run's own engine.
+            let factory_reg = reg.clone();
+            let factory_storage = storage.clone();
+            let factory_config = config.clone();
+            let factory: ragent_research::AnalysisEngineFactory =
+                Arc::new(move |provider_id: &str, model_id: &str| {
+                    let api_key = resolve_api_key(provider_id, factory_storage.as_deref());
+                    let base_url = resolve_base_url(
+                        provider_id,
+                        factory_storage.as_deref(),
+                        factory_config.as_deref(),
+                    );
+                    Arc::new(
+                        LlmAnalysisEngine::new(factory_reg.clone(), provider_id, model_id)
+                            .with_api_key(api_key)
+                            .with_base_url(base_url),
+                    ) as Arc<dyn AnalysisEngine>
+                });
+            session
+                .with_provider_registry(reg)
+                .with_analysis_engine_factory(factory)
+        }
         None => session,
     };
     let session = match research_name.map(|n| {
