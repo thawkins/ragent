@@ -271,3 +271,95 @@ fn test_session_worktree_prune_removes_clean_and_keeps_dirty() {
     assert!(second.removed.is_empty());
     assert_eq!(second.skipped.len(), 1);
 }
+
+#[test]
+fn test_session_worktree_prune_keeps_a_worktree_a_live_session_works_in() {
+    let base = fixture_dir("worktree_prune_live_guest");
+    let m = managers();
+    let project = project_in(&m, &base);
+    let root = base.join("trees");
+    let owner = m
+        .projects
+        .create_session(&m.sessions, &project.id, Some("shared"), &root)
+        .expect("owner");
+    let worktree = owner.worktree.clone().expect("worktree");
+    std::fs::create_dir_all(worktree.join("src")).expect("subdir");
+    // A plain session started from inside the worktree: it works there but
+    // does not own it. One in the root, one in a subdirectory.
+    let guest = m.sessions.create_session(worktree.clone()).expect("guest");
+    let deep_guest = m
+        .sessions
+        .create_session(worktree.join("src"))
+        .expect("guest in a subdirectory");
+    assert_eq!(guest.worktree, None);
+    m.sessions
+        .archive_session(&owner.id)
+        .expect("archive owner");
+
+    let report = prune_worktrees(&m.storage, &project).expect("prune");
+    assert_eq!(report, Default::default(), "nothing may be touched");
+    assert!(
+        worktree.is_dir(),
+        "the checkout under the live sessions is kept"
+    );
+
+    // With only the subdirectory session left it is still in use.
+    m.sessions
+        .archive_session(&guest.id)
+        .expect("archive guest");
+    let report = prune_worktrees(&m.storage, &project).expect("prune");
+    assert!(report.removed.is_empty());
+    assert!(worktree.is_dir());
+
+    // Once no live session works in it, it goes.
+    m.sessions
+        .archive_session(&deep_guest.id)
+        .expect("archive deep guest");
+    // `src` is untracked and empty; git does not count an empty directory.
+    let report = prune_worktrees(&m.storage, &project).expect("prune");
+    assert_eq!(report.removed, vec![worktree.clone()]);
+    assert!(!worktree.exists());
+}
+
+#[test]
+fn test_session_worktree_prune_moves_sessions_to_a_directory_that_exists() {
+    let base = fixture_dir("worktree_prune_relocate");
+    let m = managers();
+    let project = project_in(&m, &base);
+    let root = base.join("trees");
+    let owner = m
+        .projects
+        .create_session(&m.sessions, &project.id, Some("done"), &root)
+        .expect("owner");
+    let worktree = owner.worktree.clone().expect("worktree");
+    let guest = m.sessions.create_session(worktree.clone()).expect("guest");
+    m.sessions
+        .archive_session(&owner.id)
+        .expect("archive owner");
+    m.sessions
+        .archive_session(&guest.id)
+        .expect("archive guest");
+
+    let report = prune_worktrees(&m.storage, &project).expect("prune");
+    assert_eq!(report.removed, vec![worktree.clone()]);
+
+    // Bringing either session back must not leave it in a deleted checkout.
+    for id in [&owner.id, &guest.id] {
+        m.storage.unarchive_session(id).expect("unarchive");
+        let session = m.sessions.get_session(id).expect("get").expect("session");
+        assert_eq!(session.directory, project.worktree, "{id}");
+        assert!(session.directory.is_dir());
+        assert_eq!(session.worktree, None);
+        assert_eq!(session.project_id, project.id);
+    }
+    let owner = m
+        .sessions
+        .get_session(&owner.id)
+        .expect("get")
+        .expect("owner");
+    assert_eq!(
+        owner.branch.as_deref(),
+        Some("done"),
+        "the branch is remembered"
+    );
+}

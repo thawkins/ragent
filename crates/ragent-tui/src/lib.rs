@@ -988,6 +988,9 @@ pub async fn run_tui(
             // `projects`); the fetch itself runs on a background task.
             app.poll_request_counts();
 
+            // Focus sessions whose branch worktrees finished being created.
+            app.poll_pending_project_sessions();
+
             // Refresh cached stats on their throttled intervals.
             app.refresh_code_index_stats();
             app.refresh_memory_stats();

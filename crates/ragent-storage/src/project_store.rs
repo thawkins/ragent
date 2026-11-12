@@ -458,16 +458,26 @@ impl Storage {
     /// The session worktrees of a project that only archived sessions use,
     /// as `(session_id, worktree)` pairs.
     ///
+    /// A worktree is in use, and so not returned, while any live session
+    /// owns it or works in it: a session started with a plain `/session new`
+    /// from inside a branch worktree inherits the directory without owning
+    /// the worktree, and one may work in a subdirectory of it.
+    ///
     /// # Errors
     ///
     /// Returns an error if the query fails.
     pub fn prunable_session_worktrees(&self, project_id: &str) -> Result<Vec<(String, String)>> {
         let conn = lock_conn_read!(self)?;
+        // `substr` rather than `LIKE`: a path may contain `%` or `_`.
         let mut stmt = conn.prepare_cached(
             "SELECT id, worktree FROM sessions s \
              WHERE project_id = ?1 AND archived_at IS NOT NULL AND worktree IS NOT NULL \
              AND NOT EXISTS (SELECT 1 FROM sessions live \
-                 WHERE live.worktree = s.worktree AND live.archived_at IS NULL) \
+                 WHERE live.archived_at IS NULL \
+                 AND (live.worktree = s.worktree \
+                      OR live.directory = s.worktree \
+                      OR substr(live.directory, 1, length(s.worktree) + 1) \
+                         = s.worktree || '/')) \
              ORDER BY id",
         )?;
         let rows = stmt
@@ -476,17 +486,28 @@ impl Storage {
         Ok(rows)
     }
 
-    /// Forgets a session's worktree after it was removed from disk; the
-    /// branch is kept.
+    /// Records that the session worktree at `worktree` was removed from
+    /// disk.
+    ///
+    /// Every session that owned it forgets it (the branch is kept), and
+    /// every session whose directory was the worktree or inside it is moved
+    /// to `fallback_directory` (the project worktree), so a session that is
+    /// unarchived later still has a working directory that exists.
     ///
     /// # Errors
     ///
-    /// Returns an error if the update fails.
-    pub fn clear_session_worktree(&self, id: &str) -> Result<()> {
+    /// Returns an error if an update fails.
+    pub fn forget_removed_worktree(&self, worktree: &str, fallback_directory: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         conn.execute(
-            "UPDATE sessions SET worktree = NULL WHERE id = ?1",
-            params![id],
+            "UPDATE sessions SET directory = ?2 \
+             WHERE directory = ?1 \
+                OR substr(directory, 1, length(?1) + 1) = ?1 || '/'",
+            params![worktree, fallback_directory],
+        )?;
+        conn.execute(
+            "UPDATE sessions SET worktree = NULL WHERE worktree = ?1",
+            params![worktree],
         )?;
         Ok(())
     }
@@ -514,6 +535,22 @@ impl Storage {
             params![count, project_id, branch],
         )?;
         Ok(changed)
+    }
+
+    /// The largest stored request count of a project's sessions on
+    /// `branch`, or `None` when none is known.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn branch_pr_count(&self, project_id: &str, branch: &str) -> Result<Option<i64>> {
+        let conn = lock_conn_read!(self)?;
+        let count = conn.query_row(
+            "SELECT MAX(pr_count) FROM sessions WHERE project_id = ?1 AND branch = ?2",
+            params![project_id, branch],
+            |r| r.get(0),
+        )?;
+        Ok(count)
     }
 
     /// The distinct branches of a project's non-archived sessions.

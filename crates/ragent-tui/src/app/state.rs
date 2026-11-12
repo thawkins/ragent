@@ -3056,6 +3056,10 @@ pub struct App {
     pub sidebar: crate::sessions_sidebar::SidebarState,
     /// Pull/merge request counts per session branch (spec `projects`).
     pub request_counts: Arc<ragent_agent::project::requests::PullRequestCounts>,
+    /// Sessions whose worktrees were created on a background task and are
+    /// waiting to be focused (spec `projects`).
+    pub pending_project_sessions:
+        Arc<std::sync::Mutex<Vec<crate::app::projects::PendingProjectSession>>>,
     /// When the poll loop last looked for projects with due request counts.
     pub last_request_sweep: Option<std::time::Instant>,
     /// Where session worktrees are created; `None` uses the ragent data

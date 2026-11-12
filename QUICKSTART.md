@@ -1403,7 +1403,8 @@ checkout.
 ```
 
 With `--branch` the session gets its own `git worktree` at that branch, so
-it does not disturb the project's main checkout. The sidebar shows `Y` and
+it does not disturb the project's main checkout. Quote a project name that
+contains spaces: `/session new --project "My App"`. The sidebar shows `Y` and
 the number of pull/merge requests for that branch beside the session.
 
 The same data is available outside the TUI:

@@ -23,7 +23,7 @@ use anyhow::Result;
 use ragent_storage::{ProjectRow, Storage};
 use serde::{Deserialize, Serialize};
 
-pub use remote::{ProjectRemote, RemoteKind, detect_remote, parse_remote_url};
+pub use remote::{ProjectRemote, RemoteKind, detect_remote, parse_remote_url, split_instance_url};
 
 use crate::agent::ModelRef;
 use crate::event::{Event, EventBus};

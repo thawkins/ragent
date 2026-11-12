@@ -36,8 +36,20 @@ pub const NUDGE_GAP: Duration = Duration::from_mins(1);
 /// Requests per page; the maximum both APIs allow.
 const PER_PAGE: usize = 100;
 /// Pages read per project per refresh. A repository with more requests than
-/// this gets counts for its newest `MAX_PAGES * PER_PAGE` requests.
+/// `MAX_PAGES * PER_PAGE` yields an incomplete result (see
+/// [`RequestCountsPage::complete`]).
 const MAX_PAGES: u32 = 10;
+
+/// Request counts by source branch, and whether every request was read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RequestCountsPage {
+    /// Requests seen per source branch.
+    pub counts: HashMap<String, i64>,
+    /// `false` when the repository has more requests than one refresh
+    /// reads. The counts are then lower bounds, and a branch that is absent
+    /// may still have requests.
+    pub complete: bool,
+}
 
 /// An API client able to list a project's pull/merge requests.
 pub enum RequestSource {
@@ -83,7 +95,9 @@ impl FetchError {
 /// Counts the pull/merge requests of the repository at `remote`, by source
 /// branch. Requests in every state (open, merged, closed) are counted;
 /// requests whose source branch lives in a fork are not, because a fork's
-/// branch of the same name is a different branch.
+/// branch of the same name is a different branch. At most
+/// `MAX_PAGES * PER_PAGE` requests are read; the result says whether that
+/// was all of them.
 ///
 /// # Errors
 ///
@@ -92,8 +106,11 @@ impl FetchError {
 pub async fn fetch_request_counts(
     source: &RequestSource,
     remote: &ProjectRemote,
-) -> std::result::Result<HashMap<String, i64>, FetchError> {
+) -> std::result::Result<RequestCountsPage, FetchError> {
     let mut counts: HashMap<String, i64> = HashMap::new();
+    // Set when the last page was reached; stays false if the page limit
+    // stopped the read first.
+    let mut complete = false;
     match source {
         RequestSource::GitHub(client) => {
             for page in 1..=MAX_PAGES {
@@ -115,6 +132,7 @@ pub async fn fetch_request_counts(
                     }
                 }
                 if items.len() < PER_PAGE {
+                    complete = true;
                     break;
                 }
             }
@@ -149,9 +167,10 @@ pub async fn fetch_request_counts(
                 read += 1;
                 page = next;
             }
+            complete = page.is_none();
         }
     }
-    Ok(counts)
+    Ok(RequestCountsPage { counts, complete })
 }
 
 /// What one call to [`PullRequestCounts::refresh`] did.
@@ -188,6 +207,26 @@ pub struct PullRequestCounts {
     storage: Arc<Storage>,
     event_bus: Arc<EventBus>,
     schedule: Mutex<HashMap<String, Schedule>>,
+    /// Projects with a refresh running; guarded separately from the schedule
+    /// only because the two are never needed together.
+    in_flight: Mutex<std::collections::HashSet<String>>,
+}
+
+/// Marks a project's refresh as running until dropped, so a refresh that is
+/// cancelled or panics still releases the project.
+struct InFlight<'a> {
+    service: &'a PullRequestCounts,
+    project_id: String,
+}
+
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        self.service
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.project_id);
+    }
 }
 
 impl std::fmt::Debug for PullRequestCounts {
@@ -204,12 +243,35 @@ impl PullRequestCounts {
             storage,
             event_bus,
             schedule: Mutex::new(HashMap::new()),
+            in_flight: Mutex::new(std::collections::HashSet::new()),
         }
     }
 
-    /// Whether `project_id` may be refreshed now.
+    /// Reserves `project_id` for one refresh. Returns `None` when a refresh
+    /// of that project is already running.
+    fn begin(&self, project_id: &str) -> Option<InFlight<'_>> {
+        self.in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(project_id.to_string())
+            .then(|| InFlight {
+                service: self,
+                project_id: project_id.to_string(),
+            })
+    }
+
+    /// Whether `project_id` may be refreshed now: its interval has passed
+    /// and no refresh of it is running.
     #[must_use]
     pub fn is_due(&self, project_id: &str) -> bool {
+        if self
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(project_id)
+        {
+            return false;
+        }
         self.schedule
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -292,11 +354,10 @@ impl PullRequestCounts {
                 .map(|token| RequestSource::GitHub(GitHubClient::with_token(token))),
             RemoteKind::GitLab => {
                 let client = GitLabClient::new(self.storage.as_ref()).ok()?;
-                let instance = client.instance_url().to_ascii_lowercase();
-                let instance_host = instance
-                    .split_once("://")
-                    .map_or(instance.as_str(), |(_, rest)| rest)
-                    .trim_end_matches('/');
+                // Compare hosts only: the instance may be served under a
+                // path (`https://host/gitlab`), which the client keeps in its
+                // base URL and the remote's host never contains.
+                let (instance_host, _prefix) = super::split_instance_url(client.instance_url());
                 (instance_host == remote.host).then_some(RequestSource::GitLab(client))
             }
         }
@@ -327,6 +388,11 @@ impl PullRequestCounts {
         if !self.is_due(&project.id) {
             return RefreshOutcome::NotDue;
         }
+        // One refresh per project at a time: a slow fetch must not be
+        // joined by the next sweep or by an explicit refresh.
+        let Some(_running) = self.begin(&project.id) else {
+            return RefreshOutcome::NotDue;
+        };
         let branches = match self.storage.project_session_branches(&project.id) {
             Ok(branches) => branches,
             Err(e) => {
@@ -344,9 +410,9 @@ impl PullRequestCounts {
             return RefreshOutcome::NoCredentials;
         };
         match fetch_request_counts(source, remote).await {
-            Ok(counts) => {
+            Ok(page) => {
                 self.reschedule(&project.id, false);
-                match self.store(&project.id, &branches, &counts) {
+                match self.store(&project.id, &branches, &page) {
                     Ok(changed) => {
                         if changed > 0 {
                             self.event_bus.publish(Event::ProjectUpdated {
@@ -372,15 +438,31 @@ impl PullRequestCounts {
         }
     }
 
+    /// Stores the fetched counts for the project's session branches.
+    ///
+    /// A complete result is authoritative: a branch it does not mention has
+    /// no requests and is stored as zero. An incomplete result only raises
+    /// what is known: a branch it mentions gets that count unless a larger
+    /// one is already stored, and a branch it does not mention keeps its
+    /// last known count.
     fn store(
         &self,
         project_id: &str,
         branches: &[String],
-        counts: &HashMap<String, i64>,
+        page: &RequestCountsPage,
     ) -> Result<usize> {
         let mut changed = 0;
         for branch in branches {
-            let count = counts.get(branch).copied().unwrap_or(0);
+            let fetched = page.counts.get(branch).copied();
+            let count = if page.complete {
+                fetched.unwrap_or(0)
+            } else {
+                let Some(fetched) = fetched else {
+                    continue;
+                };
+                let known = self.storage.branch_pr_count(project_id, branch)?;
+                fetched.max(known.unwrap_or(0))
+            };
             changed += self
                 .storage
                 .set_branch_pr_count(project_id, branch, Some(count))?;

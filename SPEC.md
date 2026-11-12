@@ -2082,9 +2082,15 @@ on first use. Design and tasks: `specs/projects/PLAN.md`.
   (`worktrees/<project>-<id>/<branch>`) and runs the session there. The
   branch is an existing local branch, else the remote's branch of that name
   (tracked), else a new branch from the remote's default branch (or `HEAD`).
-  The session still belongs to the owning project. Archiving a session
-  leaves its worktree on disk; `/project prune` removes the worktrees of
-  archived sessions that have no uncommitted changes, without `--force`.
+  The session still belongs to the owning project. The worktree is created
+  on a blocking task, because it may fetch from the remote; the session is
+  focused when that finishes and a failure is reported on the status line.
+  Archiving a session leaves its worktree on disk; `/project prune` removes
+  the worktrees of archived sessions that have no uncommitted changes,
+  without `--force`. A worktree is kept while any live session owns it or
+  works in it or in a subdirectory of it. Sessions that worked in a removed
+  worktree are moved to the project worktree and keep their branch, so an
+  unarchived session still has a directory that exists.
   Each checkout keeps its own project services (code index, MCP client),
   because the index must describe the files of that branch.
 - **Pull/merge request counts.** The number beside a session's branch
@@ -2093,8 +2099,11 @@ on first use. Design and tasks: `specs/projects/PLAN.md`.
   forks are not counted. It is fetched with one paginated list call per
   project on a background task: when the sidebar is visible, at most every
   5 minutes per project, sooner (after 1 minute) when a turn ends or the
-  project is focused, and on `/project refresh`. A rate limit doubles the
-  interval up to 1 hour. The last known count is stored in
+  project is focused, and on `/project refresh`. Only one refresh of a
+  project runs at a time. A rate limit doubles the interval up to 1 hour.
+  At most 1,000 requests are read per refresh; for a larger repository the
+  result is partial, so it only raises counts for the branches it saw and
+  leaves every other branch's last known count alone. The last known count is stored in
   `sessions.pr_count`; a failure leaves it unchanged. A GitLab token is only
   sent to the configured GitLab instance.
 - **Surfaces.** `/project`, `ragent project list|show|add|remove`,

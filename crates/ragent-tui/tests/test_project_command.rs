@@ -60,6 +60,23 @@ fn app_with_project(name: &str) -> (App, Project, PathBuf) {
     (app, project, base)
 }
 
+/// Waits for a branch session's worktree, which is created on a background
+/// task, until `done` holds (the session is focused, or the failure is on
+/// the status line).
+async fn settle(app: &mut App, done: impl Fn(&App) -> bool) {
+    for _ in 0..1000 {
+        app.poll_pending_project_sessions();
+        if done(app) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!(
+        "the background session did not finish; status: {}",
+        app.status
+    );
+}
+
 fn last_message(app: &App) -> String {
     app.session
         .messages
@@ -265,9 +282,22 @@ async fn test_project_command_session_new_in_a_named_project() {
 #[tokio::test]
 async fn test_project_command_session_new_with_a_branch_gets_its_own_worktree() {
     let (mut app, project, base) = app_with_project("branched");
+    app.execute_slash_command("/session list").await;
+    let before = app.session.session_id.clone();
 
     app.execute_slash_command("/session new --project branched --branch feature/login")
         .await;
+    // The worktree is created off the UI thread; nothing has switched yet.
+    assert_eq!(
+        app.session.session_id, before,
+        "the UI is not blocked on git"
+    );
+    assert!(
+        app.status.contains("creating a worktree"),
+        "status: {}",
+        app.status
+    );
+    settle(&mut app, |app| app.session.session_id != before).await;
 
     let id = app.session.session_id.clone().expect("new session");
     let checkout = app
@@ -309,11 +339,7 @@ async fn test_project_command_session_new_with_a_branch_gets_its_own_worktree() 
     // A second session on the same branch is refused and nothing changes.
     app.execute_slash_command("/session new --project branched --branch feature/login")
         .await;
-    assert!(
-        app.status.contains("already exists"),
-        "status: {}",
-        app.status
-    );
+    settle(&mut app, |app| app.status.contains("already exists")).await;
     assert_eq!(app.session.session_id.as_deref(), Some(id.as_str()));
 }
 
@@ -330,10 +356,7 @@ async fn test_project_command_session_new_rejects_bad_options() {
         ("/session new --bogus", "unknown option"),
         ("/session new --project nope", "no project named"),
         ("/session new src --project bad_options", "not both"),
-        (
-            "/session new --project bad_options --branch bad..name",
-            "not a valid branch",
-        ),
+        ("/session new --project \"bad_options", "unclosed quote"),
     ] {
         app.execute_slash_command(command).await;
         assert!(
@@ -343,13 +366,100 @@ async fn test_project_command_session_new_rejects_bad_options() {
         );
         assert_eq!(app.session.session_id, before, "{command} must not switch");
     }
+
+    // A bad branch name is found when the worktree is created.
+    app.execute_slash_command("/session new --project bad_options --branch bad..name")
+        .await;
+    settle(&mut app, |app| app.status.contains("not a valid branch")).await;
+    assert_eq!(
+        app.session.session_id, before,
+        "a failed branch session must not switch"
+    );
+}
+
+#[tokio::test]
+async fn test_project_command_session_new_keeps_paths_and_names_with_spaces() {
+    let mut app = support::make_app();
+    app.execute_slash_command("/session list").await;
+
+    // Without options the whole argument is the path, spaces included, as it
+    // was before options existed: the error names the whole path.
+    app.execute_slash_command("/session new /no such dir/My App")
+        .await;
+    assert!(
+        app.status.contains("`/no such dir/My App`"),
+        "status: {}",
+        app.status
+    );
+
+    // A project name with a space works when quoted.
+    let other = app
+        .storage
+        .ensure_project("/nonexistent/project_command/quoted")
+        .expect("project");
+    app.storage
+        .rename_project(&other.id, "Other App")
+        .expect("rename");
+    let before = app.session.session_id.clone();
+    for command in [
+        "/session new --project \"Other App\"",
+        "/session new --project 'Other App'",
+    ] {
+        app.execute_slash_command(command).await;
+        let id = app.session.session_id.clone().expect("session");
+        assert_ne!(Some(&id), before.as_ref(), "{command}: {}", app.status);
+        assert_eq!(
+            app.storage
+                .get_session(&id)
+                .expect("get")
+                .expect("row")
+                .project_id,
+            other.id,
+            "{command}"
+        );
+    }
+    // Unquoted, the second word is a stray argument, not part of the name.
+    app.execute_slash_command("/session new --project Other App")
+        .await;
+    assert!(
+        app.status.contains("quote a value"),
+        "status: {}",
+        app.status
+    );
+}
+
+#[test]
+fn test_project_command_clone_errors_never_carry_the_url_credentials() {
+    let base = fixture_dir("clone_scrub");
+    let app = support::make_app();
+    // Nothing listens on port 1, so the clone fails at once.
+    let url = "https://someone:s3cr3t-t0ken@127.0.0.1:1/acme/app.git";
+    let clean = "https://127.0.0.1:1/acme/app.git";
+
+    let error = app
+        .clone_project_for_test(url, clean, &base, "app")
+        .expect_err("the clone cannot succeed");
+
+    let text = format!("{error:#}");
+    assert!(
+        text.contains("git clone failed") || text.contains("timed out"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("s3cr3t-t0ken"),
+        "the credential leaked: {text}"
+    );
+    assert!(!text.contains("someone:"), "the user info leaked: {text}");
 }
 
 #[tokio::test]
 async fn test_project_command_prune_removes_archived_clean_worktrees() {
     let (mut app, _project, _base) = app_with_project("pruned");
+    app.execute_slash_command("/session list").await;
+    let before = app.session.session_id.clone();
     app.execute_slash_command("/session new --project pruned --branch done")
         .await;
+    settle(&mut app, |app| app.session.session_id != before).await;
     let id = app.session.session_id.clone().expect("session");
     let worktree = app.session.directory.clone();
     assert!(worktree.is_dir());
@@ -374,4 +484,9 @@ async fn test_project_command_prune_removes_archived_clean_worktrees() {
             .worktree,
         None
     );
+    // The archived session can be brought back: it now works in the
+    // project's own checkout, which exists.
+    let row = app.storage.get_session(&id).expect("get").expect("row");
+    assert_eq!(PathBuf::from(&row.directory), app.session.directory);
+    assert!(app.session.directory.is_dir());
 }

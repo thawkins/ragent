@@ -4,7 +4,7 @@
 mod project_fixture;
 
 use project_fixture::{fixture_dir, git, init_repo};
-use ragent_agent::project::{RemoteKind, detect_remote, parse_remote_url};
+use ragent_agent::project::{RemoteKind, detect_remote, parse_remote_url, split_instance_url};
 
 #[test]
 fn test_project_remote_github_https_and_ssh() {
@@ -166,4 +166,55 @@ fn test_project_remote_detects_origin_and_default_branch() {
 #[test]
 fn test_project_remote_none_outside_a_checkout() {
     assert!(detect_remote(std::path::Path::new("/"), None).is_none());
+}
+
+#[test]
+fn test_project_remote_gitlab_instance_under_a_path_prefix() {
+    assert_eq!(
+        split_instance_url("https://GitLab.example.com/gitlab/"),
+        ("gitlab.example.com".to_string(), "gitlab".to_string())
+    );
+    assert_eq!(
+        split_instance_url("code.example.org:8443"),
+        ("code.example.org:8443".to_string(), String::new())
+    );
+
+    for instance in [
+        "https://code.example.org/gl",
+        "https://code.example.org/gl/",
+    ] {
+        // Over http(s) the prefix is part of every clone URL, not of the
+        // project path.
+        let https = parse_remote_url(
+            "https://code.example.org/gl/team/platform/api.git",
+            "origin",
+            Some(instance),
+        )
+        .unwrap_or_else(|| panic!("classified with {instance}"));
+        assert_eq!(https.kind, RemoteKind::GitLab);
+        assert_eq!(https.host, "code.example.org");
+        assert_eq!(https.path, "team/platform/api");
+        assert_eq!(
+            https.url, "https://code.example.org/gl/team/platform/api.git",
+            "the stored URL still works as a clone URL"
+        );
+
+        // An ssh remote carries no prefix.
+        let ssh = parse_remote_url(
+            "git@code.example.org:team/api.git",
+            "origin",
+            Some(instance),
+        )
+        .unwrap_or_else(|| panic!("ssh classified with {instance}"));
+        assert_eq!(ssh.path, "team/api");
+    }
+
+    // A group that merely shares the prefix's first letters is left alone.
+    let other = parse_remote_url(
+        "https://code.example.org/glue/api.git",
+        "origin",
+        Some("https://code.example.org/gl"),
+    )
+    .expect("classified");
+    assert_eq!(other.path, "glue/api");
 }

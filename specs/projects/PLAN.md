@@ -276,6 +276,31 @@ Where the delivered code differs from the plan above, and why:
     (the report functions the CLI prints); T-013 has
     `test_session_archive_project.rs`.
 
+### Changes after review of the pull request
+
+11. **Prune never removes a checkout a live session works in.** A session
+    started with a plain `/session new` from inside a branch worktree
+    inherits the directory without owning the worktree; the prunable query
+    now excludes a worktree while any live session's directory is the
+    worktree or inside it.
+12. **Prune relocates the sessions of a removed worktree** to the project
+    worktree and keeps their branch, so an unarchived session has a
+    directory that exists. It does not recreate the worktree.
+13. **Truncated request listings are partial.** A repository with more
+    requests than one refresh reads (1,000) only raises the counts of the
+    branches it saw; it never writes zero and never lowers a known count.
+14. **One refresh per project at a time**, reserved until the fetch ends or
+    is dropped.
+15. **A GitLab instance served under a path** (`https://host/gitlab`) is
+    matched by host only, and the prefix is removed from the project path
+    of an http(s) remote.
+16. **`/session new` arguments.** With no option the whole text is the path,
+    spaces included, as before. With options, a value with spaces is quoted.
+17. **Branch sessions are created off the UI thread**, since creating the
+    worktree may fetch from the remote.
+18. **Clone errors are scrubbed**: the URL as typed is replaced by its
+    credential-free form before an error is shown.
+
 ## Open Questions
 
 These were not answered before implementation; the plan's assumption was

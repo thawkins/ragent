@@ -41,6 +41,10 @@ this directory and register it |\n\
 Start a session in a project with `/session new --project <name> [--branch <branch>]`. \
 With `--branch` the session gets its own git worktree at that branch.";
 
+/// The outcome of creating a session with its own worktree in the
+/// background: the session and its project, or why it failed.
+pub type PendingProjectSession = Result<(ragent_agent::session::Session, Project), String>;
+
 /// Options of `/session new` that name a project or branch.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct NewSessionOptions {
@@ -52,23 +56,74 @@ pub(super) struct NewSessionOptions {
     pub path: Option<String>,
 }
 
+/// Splits a command line into words, honouring single and double quotes so
+/// a value may contain spaces (`--project "My App"`).
+///
+/// # Errors
+///
+/// Returns a message when a quote is not closed.
+fn split_quoted(args: &str) -> Result<Vec<String>, String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut quote: Option<char> = None;
+    for c in args.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => current.push(c),
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                in_word = true;
+            }
+            None if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut current));
+                    in_word = false;
+                }
+            }
+            None => {
+                current.push(c);
+                in_word = true;
+            }
+        }
+    }
+    if quote.is_some() {
+        return Err("unclosed quote".to_string());
+    }
+    if in_word {
+        words.push(current);
+    }
+    Ok(words)
+}
+
 /// Parses the arguments of `/session new`.
+///
+/// With no `--` option the whole text is the directory, spaces included,
+/// as it was before options existed. With options, words are split on
+/// whitespace and a value with spaces must be quoted.
 ///
 /// # Errors
 ///
 /// Returns a usage message for a flag without a value, an unknown flag, more
-/// than one path, or a path combined with `--project`.
+/// than one path, an unclosed quote, or a path combined with `--project`.
 pub(super) fn parse_new_session_args(args: &str) -> Result<NewSessionOptions, String> {
     let mut options = NewSessionOptions::default();
-    let mut words = args.split_whitespace();
+    let words = split_quoted(args)?;
+    if !words.iter().any(|w| w.starts_with("--")) {
+        let path = args.trim();
+        if !path.is_empty() {
+            options.path = Some(path.to_string());
+        }
+        return Ok(options);
+    }
+    let mut words = words.into_iter();
     while let Some(word) = words.next() {
-        match word {
+        match word.as_str() {
             "--project" | "--branch" => {
                 let value = words
                     .next()
                     .filter(|v| !v.starts_with("--"))
-                    .ok_or_else(|| format!("{word} needs a value"))?
-                    .to_string();
+                    .ok_or_else(|| format!("{word} needs a value"))?;
                 if word == "--project" {
                     options.project = Some(value);
                 } else {
@@ -80,16 +135,20 @@ pub(super) fn parse_new_session_args(args: &str) -> Result<NewSessionOptions, St
                     "unknown option `{flag}`; use --project <name> or --branch <branch>"
                 ));
             }
-            path if options.path.is_none() => options.path = Some(path.to_string()),
+            _ if options.path.is_none() => options.path = Some(word),
             _ => {
                 return Err(
-                    "usage: /session new [path] [--project <name>] [--branch <branch>]".to_string(),
+                    "usage: /session new [path] [--project <name>] [--branch <branch>] \
+                     (quote a value that contains spaces)"
+                        .to_string(),
                 );
             }
         }
     }
     if options.path.is_some() && options.project.is_some() {
-        return Err("give a path or --project, not both".to_string());
+        return Err(
+            "give a path or --project, not both (quote a value that contains spaces)".to_string(),
+        );
     }
     Ok(options)
 }
@@ -121,6 +180,23 @@ impl App {
     #[doc(hidden)]
     pub fn focused_project_for_test(&self) -> Result<Project, String> {
         self.focused_project()
+    }
+
+    /// The clone step of `/project add <url>` for the consolidated test
+    /// target; not part of the crate's public API surface.
+    ///
+    /// # Errors
+    ///
+    /// Returns the scrubbed clone or registration error.
+    #[doc(hidden)]
+    pub fn clone_project_for_test(
+        &self,
+        url: &str,
+        clean_url: &str,
+        parent: &Path,
+        name: &str,
+    ) -> anyhow::Result<Project> {
+        clone_and_register(&self.project_manager(), url, clean_url, parent, name)
     }
 
     /// The directory session worktrees are created under.
@@ -175,6 +251,12 @@ impl App {
     /// Starts a new session in `project` and focuses it; the previous
     /// session keeps running in the background.
     ///
+    /// Without a branch the session is created and focused at once. With a
+    /// branch, creating the git worktree may fetch from the remote, so it
+    /// runs on a blocking task and the session is focused when it finishes
+    /// (see [`App::poll_pending_project_sessions`]); the UI stays responsive
+    /// meanwhile and a failure is reported on the status line.
+    ///
     /// # Arguments
     ///
     /// * `project` - the owning project.
@@ -183,22 +265,69 @@ impl App {
     ///
     /// # Errors
     ///
-    /// Returns a message when the worktree or the session cannot be created;
-    /// the previous session stays focused.
+    /// Returns a message when the session cannot be created or, for a
+    /// branch, when the work cannot be started; the previous session stays
+    /// focused.
     pub fn open_new_session_in_project(
         &mut self,
         project: &Project,
         branch: Option<&str>,
     ) -> Result<(), String> {
-        let created = self
-            .project_manager()
-            .create_session(
-                &self.session_processor.session_manager,
-                &project.id,
-                branch,
-                &self.session_worktree_root(),
-            )
-            .map_err(|e| e.to_string())?;
+        let manager = self.project_manager();
+        let sessions = Arc::clone(&self.session_processor.session_manager);
+        let root = self.session_worktree_root();
+        let Some(branch) = branch else {
+            let created = manager
+                .create_session(&sessions, &project.id, None, &root)
+                .map_err(|e| e.to_string())?;
+            self.focus_created_session(&created, project);
+            return Ok(());
+        };
+        let runtime = tokio::runtime::Handle::try_current().map_err(|e| e.to_string())?;
+        let pending = Arc::clone(&self.pending_project_sessions);
+        let project = project.clone();
+        let branch = branch.to_string();
+        self.status = format!("session: creating a worktree for {branch}...");
+        runtime.spawn_blocking(move || {
+            let result = manager
+                .create_session(&sessions, &project.id, Some(&branch), &root)
+                .map(|session| (session, project))
+                .map_err(|e| e.to_string());
+            pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(result);
+        });
+        Ok(())
+    }
+
+    /// Focuses the sessions whose worktrees finished being created in the
+    /// background, and reports the ones that failed. Called from the poll
+    /// loop.
+    pub fn poll_pending_project_sessions(&mut self) {
+        let finished: Vec<PendingProjectSession> = std::mem::take(
+            &mut *self
+                .pending_project_sessions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        for result in finished {
+            match result {
+                Ok((created, project)) => self.focus_created_session(&created, &project),
+                Err(message) => self.status = format!("session: {message}"),
+            }
+            self.sidebar.dirty = true;
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Makes a session that already exists in storage the focused one,
+    /// parking the previous session.
+    fn focus_created_session(
+        &mut self,
+        created: &ragent_agent::session::Session,
+        project: &Project,
+    ) {
         let mut fresh = self.fresh_session_view();
         fresh.directory = created.directory.clone();
         fresh.session_id = Some(created.id.clone());
@@ -214,7 +343,6 @@ impl App {
         // Every newly created session prints the startup block.
         self.announce_session_startup();
         self.request_counts.nudge(&project.id);
-        Ok(())
     }
 
     /// `/session new [path] [--project <name>] [--branch <branch>]`.
@@ -386,13 +514,14 @@ impl App {
         let manager = self.project_manager();
         let parent = self.cwd_path.clone();
         let url = target.to_string();
+        let clean_url = remote.url.clone();
         let events = Arc::clone(&self.event_bus);
         let session_id = self.session.session_id.clone().unwrap_or_default();
         let runtime = tokio::runtime::Handle::try_current().map_err(|e| e.to_string())?;
         // Cloning can take a while; keep it off the UI thread and report the
         // result as a notice in this session.
         runtime.spawn_blocking(move || {
-            let message = match clone_and_register(&manager, &url, &parent, &name) {
+            let message = match clone_and_register(&manager, &url, &clean_url, &parent, &name) {
                 Ok(project) => format!(
                     "Project {} cloned to {}",
                     project.name,
@@ -533,18 +662,28 @@ impl App {
 }
 
 /// Clones `url` into `parent/name` and registers the result as a project.
+///
+/// `url` is used for the clone as typed, so a credential embedded in it
+/// keeps working. It must never reach the transcript: the git runner quotes
+/// its arguments in a timeout error and git may echo the URL on stderr, so
+/// every error leaves here with `url` replaced by `clean_url` (the same URL
+/// without credentials) and any remaining secret-shaped text redacted.
 fn clone_and_register(
     manager: &ProjectManager,
     url: &str,
+    clean_url: &str,
     parent: &Path,
     name: &str,
 ) -> anyhow::Result<Project> {
-    ragent_tools_vcs::git::reject_option_like(url, "url")?;
-    let output = ragent_tools_vcs::git::run_git_output(&["clone", "--", url, name], parent)?;
+    let scrub = |text: &str| ragent_types::sanitize::redact_secrets(&text.replace(url, clean_url));
+    ragent_tools_vcs::git::reject_option_like(url, "url")
+        .map_err(|e| anyhow::anyhow!("{}", scrub(&e.to_string())))?;
+    let output = ragent_tools_vcs::git::run_git_output(&["clone", "--", url, name], parent)
+        .map_err(|e| anyhow::anyhow!("{}", scrub(&format!("{e:#}"))))?;
     anyhow::ensure!(
         output.success,
         "git clone failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        scrub(String::from_utf8_lossy(&output.stderr).trim())
     );
     manager.resolve_for_dir(&parent.join(name))
 }

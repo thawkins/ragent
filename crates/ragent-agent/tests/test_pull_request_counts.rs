@@ -106,6 +106,8 @@ async fn test_pull_request_counts_github_groups_by_branch_across_pages() {
     let counts = fetch_request_counts(&github(&server), &remote(RemoteKind::GitHub, "acme/app"))
         .await
         .expect("counts");
+    assert!(counts.complete, "the last page was reached");
+    let counts = counts.counts;
 
     assert_eq!(
         counts.get("feature/a"),
@@ -158,6 +160,8 @@ async fn test_pull_request_counts_gitlab_follows_next_page() {
     let counts = fetch_request_counts(&source, &remote(RemoteKind::GitLab, "group/sub/project"))
         .await
         .expect("counts");
+    assert!(counts.complete, "the last page was reached");
+    let counts = counts.counts;
 
     assert_eq!(
         counts.get("feature/a"),
@@ -322,5 +326,195 @@ async fn test_pull_request_counts_skips_projects_with_nothing_to_show() {
     assert_eq!(
         service.refresh_with(&no_branches, None).await,
         RefreshOutcome::NoBranches
+    );
+}
+
+#[tokio::test]
+async fn test_pull_request_counts_truncated_fetch_keeps_last_known_counts() {
+    let server = MockServer::start().await;
+    // Every page is full, so the page limit stops the read before the end.
+    let mut page: Vec<Value> = (0..98).map(|_| github_pull("other", "acme/app")).collect();
+    page.push(github_pull("feature/recent", "acme/app"));
+    page.push(github_pull("feature/busy", "acme/app"));
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/app/pulls"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page))
+        .expect(10)
+        .mount(&server)
+        .await;
+    let m = managers();
+    let project = project_with_sessions(
+        &m,
+        "truncated",
+        RemoteKind::GitHub,
+        &[
+            "feature/recent",
+            "feature/busy",
+            "feature/old",
+            "feature/never",
+        ],
+    );
+    for (branch, known) in [
+        ("feature/recent", 4),
+        ("feature/busy", 50),
+        ("feature/old", 7),
+    ] {
+        m.storage
+            .set_branch_pr_count(&project.id, branch, Some(known))
+            .expect("last known count");
+    }
+
+    let fetched = fetch_request_counts(&github(&server), &remote(RemoteKind::GitHub, "acme/app"))
+        .await
+        .expect("counts");
+    assert!(
+        !fetched.complete,
+        "1,000 requests were read and more remain"
+    );
+    server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/app/pulls"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                (0..100)
+                    .map(|i| {
+                        github_pull(
+                            match i {
+                                0 => "feature/recent",
+                                1 => "feature/busy",
+                                _ => "other",
+                            },
+                            "acme/app",
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        )
+        .mount(&server)
+        .await;
+    let service = PullRequestCounts::new(m.storage.clone(), m.events.clone());
+
+    let outcome = service.refresh_with(&project, Some(&github(&server))).await;
+
+    assert_eq!(outcome, RefreshOutcome::Updated(1));
+    assert_eq!(
+        stored_counts(&m),
+        vec![
+            // Seen 10 times in the pages that were read; 50 were already known.
+            ("feature/busy".to_string(), Some(50)),
+            // Never fetched and not in the partial result: still unknown, not zero.
+            ("feature/never".to_string(), None),
+            // Older than the pages that were read: the last known count stays.
+            ("feature/old".to_string(), Some(7)),
+            // Seen 10 times, more than the 4 known: raised.
+            ("feature/recent".to_string(), Some(10)),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_pull_request_counts_overlapping_refreshes_make_one_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/app/pulls"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(300))
+                .set_body_json(json!([github_pull("feature/a", "acme/app")])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let m = managers();
+    let project = project_with_sessions(&m, "overlap", RemoteKind::GitHub, &["feature/a"]);
+    let service = PullRequestCounts::new(m.storage.clone(), m.events.clone());
+    let source = github(&server);
+
+    // A sweep that arrives while the first fetch is still waiting.
+    let slow = service.refresh_with(&project, Some(&source));
+    let second = async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!service.is_due(&project.id), "a running refresh is not due");
+        // An explicit refresh does not start a second fetch either.
+        service.force_due(&project.id);
+        service.refresh_with(&project, Some(&source)).await
+    };
+    let (first, second) = tokio::join!(slow, second);
+
+    assert_eq!(first, RefreshOutcome::Updated(1));
+    assert_eq!(second, RefreshOutcome::NotDue);
+    assert_eq!(stored_counts(&m), vec![("feature/a".to_string(), Some(1))]);
+}
+
+#[tokio::test]
+async fn test_pull_request_counts_cancelled_refresh_releases_the_project() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/app/pulls"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_secs(30))
+                .set_body_json(json!([])),
+        )
+        .mount(&server)
+        .await;
+    let m = managers();
+    let project = project_with_sessions(&m, "cancelled", RemoteKind::GitHub, &["feature/a"]);
+    let service = PullRequestCounts::new(m.storage.clone(), m.events.clone());
+    let source = github(&server);
+
+    let cancelled = tokio::time::timeout(
+        Duration::from_millis(100),
+        service.refresh_with(&project, Some(&source)),
+    )
+    .await;
+
+    assert!(cancelled.is_err(), "the refresh was dropped mid-fetch");
+    assert!(
+        service.is_due(&project.id),
+        "a dropped refresh must not leave the project reserved forever"
+    );
+}
+
+#[test]
+fn test_pull_request_counts_gitlab_token_only_goes_to_the_configured_host() {
+    use ragent_tools_vcs::gitlab::auth::{GitLabConfig, load_config, save_config, save_token};
+    let m = managers();
+    // An instance served under a path prefix.
+    let instance = "https://gitlab.example.com/gitlab";
+    save_config(
+        m.storage.as_ref(),
+        &GitLabConfig {
+            instance_url: instance.to_string(),
+            username: "tester".to_string(),
+        },
+    )
+    .expect("config");
+    save_token(m.storage.as_ref(), "glpat-test").expect("token");
+    // Environment or file configuration outranks the database; the test
+    // only speaks for the configuration it wrote.
+    if load_config(m.storage.as_ref())
+        .map(|c| c.instance_url)
+        .as_deref()
+        != Some(instance)
+    {
+        return;
+    }
+    let service = PullRequestCounts::new(m.storage.clone(), m.events.clone());
+    let mut on_instance = remote(RemoteKind::GitLab, "group/project");
+    on_instance.host = "gitlab.example.com".to_string();
+    let mut elsewhere = remote(RemoteKind::GitLab, "group/project");
+    elsewhere.host = "gitlab.other.example".to_string();
+
+    assert!(
+        matches!(
+            service.source_for(&on_instance),
+            Some(RequestSource::GitLab(_))
+        ),
+        "the path prefix of the instance URL must not stop the host matching"
+    );
+    assert!(
+        service.source_for(&elsewhere).is_none(),
+        "the token is never offered to another host"
     );
 }

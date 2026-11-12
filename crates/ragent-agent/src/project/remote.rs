@@ -154,21 +154,39 @@ fn split_remote_url(url: &str) -> Option<RemoteUrl> {
     })
 }
 
+/// The host (with port) and path prefix of a configured GitLab instance.
+///
+/// `https://gitlab.example.com/gitlab/` yields
+/// `("gitlab.example.com", "gitlab")`; a bare `code.example.org` yields
+/// `("code.example.org", "")`.
+#[must_use]
+pub fn split_instance_url(instance: &str) -> (String, String) {
+    let lower = instance.trim().to_ascii_lowercase();
+    let rest = lower.split_once("://").map_or(lower.as_str(), |(_, r)| r);
+    let rest = rest.rsplit_once('@').map_or(rest, |(_, host)| host);
+    let (host, prefix) = rest.split_once('/').unwrap_or((rest, ""));
+    (host.to_string(), prefix.trim_matches('/').to_string())
+}
+
+/// Whether `host` (with an optional port) is the configured instance host.
+/// A configured host without a port matches the remote host on any port,
+/// because an ssh remote and the web UI rarely share one.
+fn is_instance_host(host: &str, instance_host: &str) -> bool {
+    let name = host.split(':').next().unwrap_or(host);
+    !instance_host.is_empty()
+        && (instance_host == host || instance_host.split(':').next() == Some(name))
+}
+
 /// Classifies a host. `gitlab_host` is the configured self-hosted GitLab
-/// host, if any.
+/// host or base URL, if any.
 fn classify_host(host: &str, gitlab_host: Option<&str>) -> Option<RemoteKind> {
     let name = host.split(':').next().unwrap_or(host);
     let name = name.strip_prefix("www.").unwrap_or(name);
     if name == "github.com" {
         return Some(RemoteKind::GitHub);
     }
-    let configured = gitlab_host
-        .map(|h| h.trim().trim_end_matches('/').to_ascii_lowercase())
-        .map(|h| match h.find("://") {
-            Some(i) => h[i + 3..].to_string(),
-            None => h,
-        })
-        .is_some_and(|h| h == host || h.split(':').next() == Some(name));
+    let configured =
+        gitlab_host.is_some_and(|instance| is_instance_host(host, &split_instance_url(instance).0));
     if name == "gitlab.com" || name.starts_with("gitlab.") || configured {
         return Some(RemoteKind::GitLab);
     }
@@ -206,8 +224,28 @@ pub fn parse_remote_url(
     remote_name: &str,
     gitlab_host: Option<&str>,
 ) -> Option<ProjectRemote> {
-    let parts = split_remote_url(url)?;
+    let mut parts = split_remote_url(url)?;
     let kind = classify_host(&parts.host, gitlab_host)?;
+    // An instance served under a path (`https://host/gitlab`) puts that
+    // prefix in front of every http(s) clone path; it is not part of the
+    // project path. ssh remotes do not carry it.
+    let mut url_prefix = String::new();
+    if let (RemoteKind::GitLab, false, Some(instance)) = (kind, parts.scp_like, gitlab_host) {
+        let (instance_host, prefix) = split_instance_url(instance);
+        if !prefix.is_empty()
+            && parts.scheme.starts_with("http")
+            && is_instance_host(&parts.host, &instance_host)
+        {
+            if let Some(rest) = parts
+                .path
+                .strip_prefix(prefix.as_str())
+                .and_then(|r| r.strip_prefix('/'))
+            {
+                parts.path = rest.to_string();
+                url_prefix = format!("{prefix}/");
+            }
+        }
+    }
     let segments = parts.path.split('/').filter(|s| !s.is_empty()).count();
     let valid = match kind {
         RemoteKind::GitHub => segments == 2,
@@ -225,8 +263,14 @@ pub fn parse_remote_url(
     } else {
         // Over http(s) a user part is a credential; over ssh it is the login.
         match user.filter(|_| parts.scheme == "ssh://") {
-            Some(user) => format!("{}{user}@{}/{}.git", parts.scheme, parts.host, parts.path),
-            None => format!("{}{}/{}.git", parts.scheme, parts.host, parts.path),
+            Some(user) => format!(
+                "{}{user}@{}/{url_prefix}{}.git",
+                parts.scheme, parts.host, parts.path
+            ),
+            None => format!(
+                "{}{}/{url_prefix}{}.git",
+                parts.scheme, parts.host, parts.path
+            ),
         }
     };
     Some(ProjectRemote {

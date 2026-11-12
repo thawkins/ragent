@@ -229,7 +229,9 @@ pub struct PruneReport {
 ///
 /// A worktree with uncommitted or untracked changes is kept and reported. A
 /// worktree whose directory is already gone is forgotten. Removal uses
-/// `git worktree remove` without `--force`.
+/// `git worktree remove` without `--force`. The sessions that worked in a
+/// removed worktree are moved to the project worktree and keep their branch,
+/// so an unarchived session still has a directory that exists.
 ///
 /// # Errors
 ///
@@ -237,7 +239,13 @@ pub struct PruneReport {
 /// reported in [`PruneReport::skipped`] and does not stop the others.
 pub fn prune_worktrees(storage: &Storage, project: &Project) -> Result<PruneReport> {
     let mut report = PruneReport::default();
-    for (session_id, worktree) in storage.prunable_session_worktrees(&project.id)? {
+    let fallback = project.worktree.display().to_string();
+    // Several archived sessions can share one worktree; handle it once.
+    let mut seen = std::collections::HashSet::new();
+    for (_session_id, worktree) in storage.prunable_session_worktrees(&project.id)? {
+        if !seen.insert(worktree.clone()) {
+            continue;
+        }
         let path = PathBuf::from(&worktree);
         if path.exists() {
             let dirty = match git(&["status", "--porcelain"], &path) {
@@ -271,7 +279,7 @@ pub fn prune_worktrees(storage: &Storage, project: &Project) -> Result<PruneRepo
                 tracing::debug!(error = %e, "git worktree prune failed");
             }
         }
-        storage.clear_session_worktree(&session_id)?;
+        storage.forget_removed_worktree(&worktree, &fallback)?;
     }
     Ok(report)
 }
