@@ -366,12 +366,13 @@ impl SessionProcessor {
         // so we reuse it directly instead of re-wrapping.
         //
         // FR-033: an automation run installs a per-session execution-backend
-        // override before its first turn. When one is present it is applied here
-        // so the whole turn (and every tool dispatch in it) is confined to the
-        // automation's configured backend. A run with no override keeps the
-        // shared `Arc` unchanged so the common path stays allocation-free.
+        // override before its first turn; a session created in a project with
+        // its own backend runs on that. Either is applied here so the whole
+        // turn (and every tool dispatch in it) uses it, the automation's
+        // winning. A session with neither keeps the shared `Arc` unchanged
+        // so the common path stays allocation-free.
         let session_config: Arc<ragent_config::Config> =
-            crate::automation::apply_session_backend_override(&cfg, session_id);
+            self.session_config_for(&cfg, session_id).await;
         // FR-033: configured hooks run first, then hooks contributed by enabled
         // plugins, so a user's own hooks always precede a plugin's at the same
         // trigger.

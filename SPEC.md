@@ -2183,9 +2183,13 @@ saves all three and `Esc` discards.
 A session copies its project's backend into `sessions.execution_backend`
 when it is created (a sub-agent session copies its parent's, a fork its
 source's), so changing the project's backend affects new sessions only.
-Tool dispatch runs a session with a stored kind on that kind, using the
-configured descriptor for it (`Config::with_backend_kind`), and the status
-bar shows it. `/backend <kind>` on such a session switches that session
+Each turn resolves the session's backend once
+(`SessionProcessor::session_config_for`): an automation's override
+(FR-033) wins, then the stored kind with the configured descriptor for it
+(`Config::with_backend_kind`), then the global one. Remote routing and
+every tool dispatch in the turn read that one result, and the status bar
+shows it. Availability and the `Global (...)` label are read from the
+project's own configuration. `/backend <kind>` on such a session switches that session
 only and leaves the global backend as it is. The same settings are
 available as `/project describe`, `/project backend` and `/project model`,
 each with an optional `--project <id>`.

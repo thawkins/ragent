@@ -160,12 +160,13 @@ impl SessionProcessor {
     /// The session's execution-backend override is applied first (FR-033), so an
     /// automation run confined to a `remote` backend relays its turn even when
     /// the global configuration does not select `remote`.
-    #[must_use]
-    pub(crate) fn remote_backend_for_active(&self, session_id: &str) -> Option<BackendConfig> {
-        let config = crate::automation::apply_session_backend_override(
-            &self.load_config_cached(),
-            session_id,
-        );
+    pub(crate) async fn remote_backend_for_active(
+        &self,
+        session_id: &str,
+    ) -> Option<BackendConfig> {
+        let config = self
+            .session_config_for(&self.load_config_cached(), session_id)
+            .await;
         remote_backend_for_config(&config)
     }
 

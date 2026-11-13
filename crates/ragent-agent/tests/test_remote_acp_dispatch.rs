@@ -718,3 +718,109 @@ async fn acp_turn_failure_on_missing_command_is_a_spawn_error() {
         .expect("structured ACP failure");
     assert_eq!(acp_error.kind(), ragent_agent::acp::AcpErrorKind::Spawn);
 }
+
+// ---------------------------------------------------------------------------
+// Session backend from project Properties (`sessions.execution_backend`)
+// ---------------------------------------------------------------------------
+
+/// A config whose global backend is `local` and whose `backends` list has a
+/// `remote` entry at `url`.
+fn local_config_with_remote(url: &str) -> RagentConfig {
+    let mut config = RagentConfig::default();
+    config.backends.push(ragent_config::BackendConfig {
+        id: uid(),
+        name: Some("Listed remote".to_string()),
+        kind: "remote".to_string(),
+        url: Some(url.to_string()),
+        api_key: Some("test-key".to_string()),
+        ..ragent_config::BackendConfig::default()
+    });
+    config
+}
+
+#[tokio::test]
+async fn remote_turn_uses_the_session_stored_backend() {
+    // A session created in a project set to `remote` relays even though the
+    // global backend is `local`.
+    let (url, handle) = start_mock_server(REMOTE_ALL_UPDATES.to_string()).await;
+    let processor = make_processor(local_config_with_remote(&url));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = new_session(&processor, dir.path());
+    processor
+        .session_manager
+        .storage()
+        .set_session_backend(&session_id, Some("remote"))
+        .expect("store backend");
+    let agent = AgentInfo::new("general", "General");
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let result = processor
+        .process_message(&session_id, "go", &agent, cancel)
+        .await;
+    assert!(result.is_ok(), "the stored backend relays: {result:?}");
+    assert_eq!(assistant_text(&processor, &session_id), "Hello world");
+    handle.abort();
+}
+
+#[tokio::test]
+async fn no_relay_when_the_session_stored_backend_is_local() {
+    // A session pinned to `local` runs locally even though the global
+    // backend is `remote`: local preparation fails for want of a model.
+    let (url, handle) = start_mock_server(REMOTE_ALL_UPDATES.to_string()).await;
+    let processor = make_processor(remote_config(&uid(), &url));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = new_session(&processor, dir.path());
+    processor
+        .session_manager
+        .storage()
+        .set_session_backend(&session_id, Some("local"))
+        .expect("store backend");
+    let agent = AgentInfo::new("general", "General");
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let error = processor
+        .process_message(&session_id, "go", &agent, cancel)
+        .await
+        .expect_err("no model => local prep fails");
+    assert!(
+        error.to_string().contains("no model configured"),
+        "unexpected error: {error}"
+    );
+    handle.abort();
+}
+
+#[tokio::test]
+async fn automation_override_wins_over_the_session_stored_backend() {
+    // FR-033: an automation's backend is kept even when the session's
+    // project pins another kind.
+    let (url, handle) = start_mock_server(REMOTE_ALL_UPDATES.to_string()).await;
+    let processor = make_processor(RagentConfig::default());
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = new_session(&processor, dir.path());
+    processor
+        .session_manager
+        .storage()
+        .set_session_backend(&session_id, Some("local"))
+        .expect("store backend");
+    register_session_backend(
+        &session_id,
+        ragent_config::BackendConfig {
+            id: uid(),
+            name: Some("Automation remote".to_string()),
+            kind: "remote".to_string(),
+            url: Some(url),
+            api_key: Some("test-key".to_string()),
+            ..ragent_config::BackendConfig::default()
+        },
+    );
+    let agent = AgentInfo::new("general", "General");
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let result = processor
+        .process_message(&session_id, "go", &agent, cancel)
+        .await;
+    clear_session_backend(&session_id);
+    assert!(result.is_ok(), "the automation's backend wins: {result:?}");
+    assert_eq!(assistant_text(&processor, &session_id), "Hello world");
+    handle.abort();
+}

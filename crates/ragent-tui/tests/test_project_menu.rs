@@ -699,3 +699,40 @@ async fn test_project_menu_backend_switch_on_a_project_session_is_its_own() {
         .unwrap_or_default();
     assert!(last.contains("This session now runs tools on"), "{last}");
 }
+
+#[tokio::test]
+async fn test_project_menu_properties_paste_and_long_description_stay_in_view() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project = project_of(&mut app, &a);
+    app.session.input = "draft".to_string();
+    open_project_menu(&mut app, &project).await;
+    app.handle_key_event(key(KeyCode::Char('p'))).await;
+
+    // A paste goes into the description, not the chat draft behind it.
+    let long = format!("{}TAIL", "word ".repeat(14));
+    app.handle_paste_text(&format!("{long}\nmore"));
+
+    let dialog = app.sidebar.properties.clone().expect("open");
+    assert_eq!(app.session.input, "draft", "the chat draft is untouched");
+    assert!(
+        dialog.description.starts_with(&long),
+        "{}",
+        dialog.description
+    );
+    assert!(!dialog.description.contains('\n'));
+    assert!(dialog.description.chars().count() <= 80);
+
+    // The caret is past the visible width; the field shows the text around it.
+    let rows = draw(&mut app);
+    assert!(
+        rows.iter().any(|r| r.contains("more_")),
+        "the caret end is visible: {rows:#?}"
+    );
+
+    // On a choice field a paste changes nothing.
+    app.handle_key_event(key(KeyCode::Tab)).await;
+    app.handle_paste_text("ignored");
+    let after = app.sidebar.properties.clone().expect("open");
+    assert_eq!(after.description, dialog.description);
+    assert_eq!(app.session.input, "draft");
+}

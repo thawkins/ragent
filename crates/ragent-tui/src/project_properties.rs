@@ -126,7 +126,11 @@ pub fn open(app: &mut App, project_id: &str) -> Result<(), String> {
         .find(|g| g.project_id == project_id)
         .map(|g| g.project.clone())
         .ok_or_else(|| "that project is no longer listed".to_string())?;
-    let (backends, backend) = backend_choices(app, project.execution_backend.as_deref());
+    let (backends, backend) = backend_choices(
+        app,
+        std::path::Path::new(&project.worktree),
+        project.execution_backend.as_deref(),
+    );
     let stored_model = match (&project.provider_id, &project.model_id) {
         (Some(provider), Some(model)) => Some(format!("{provider}/{model}")),
         _ => None,
@@ -150,11 +154,13 @@ pub fn open(app: &mut App, project_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The backend choices and the index of `stored` (`Global` when unset).
-fn backend_choices(app: &App, stored: Option<&str>) -> (Vec<Choice>, usize) {
+/// The backend choices for the project at `dir` (its own configuration
+/// decides the global kind and what can run) and the index of `stored`
+/// (`Global` when unset).
+fn backend_choices(app: &App, dir: &std::path::Path, stored: Option<&str>) -> (Vec<Choice>, usize) {
     let global = app
         .session_processor
-        .load_config_for(&app.cwd_path)
+        .load_config_for(dir)
         .effective_execution_backend();
     let mut choices = vec![Choice {
         label: format!("Global ({})", global.as_str()),
@@ -162,7 +168,7 @@ fn backend_choices(app: &App, stored: Option<&str>) -> (Vec<Choice>, usize) {
         enabled: true,
     }];
     choices.extend(
-        app.project_backend_choices()
+        app.project_backend_choices(dir)
             .into_iter()
             .map(|(kind, why)| Choice {
                 label: match &why {
@@ -397,6 +403,36 @@ fn list_key(dialog: &mut ProjectProperties, cursor: usize, key: KeyEvent) {
     };
 }
 
+/// Handles pasted `text` while the dialog is open: into the description at
+/// the caret (line breaks become spaces, cut at the length limit), and
+/// ignored on a choice field.
+///
+/// # Returns
+///
+/// `true` when the dialog is open (it takes every paste), `false` otherwise.
+pub fn handle_paste(app: &mut App, text: &str) -> bool {
+    let Some(dialog) = app.sidebar.properties.as_mut() else {
+        return false;
+    };
+    if dialog.focus == Field::Description && dialog.list.is_none() {
+        let room = MAX_DESCRIPTION_CHARS.saturating_sub(dialog.description.chars().count());
+        let pasted: String = text
+            .chars()
+            .filter(|&c| c != '\r')
+            .map(|c| if c == '\n' || c == '\t' { ' ' } else { c })
+            .take(room)
+            .collect();
+        let at = dialog
+            .description
+            .char_indices()
+            .nth(dialog.caret)
+            .map_or(dialog.description.len(), |(i, _)| i);
+        dialog.description.insert_str(at, &pasted);
+        dialog.caret += pasted.chars().count();
+    }
+    true
+}
+
 /// Handles a mouse event while the dialog is open: it consumes every event,
 /// and a click outside it closes it.
 ///
@@ -457,14 +493,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             style,
         )
     };
-    let mut description = dialog.description.clone();
-    if dialog.focus == Field::Description {
-        let at = description
-            .char_indices()
-            .nth(dialog.caret)
-            .map_or(description.len(), |(i, _)| i);
-        description.insert(at, '_');
-    }
+    let description = if dialog.focus == Field::Description {
+        caret_window(
+            &dialog.description,
+            dialog.caret,
+            value_width.saturating_sub(2),
+        )
+    } else {
+        dialog.description.clone()
+    };
     let dim = Style::default().fg(Color::DarkGray);
     let shown_as = if dialog.description.trim().is_empty() {
         format!("shown as: {}", dialog.project_name)
@@ -531,6 +568,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if let Some(cursor) = dialog.list {
         paint_list(frame, dialog, cursor, area);
     }
+}
+
+/// `text` with a `_` caret at `caret`, cut to the `width` characters
+/// around the caret so the caret and the text next to it stay visible
+/// while the rest scrolls out of view.
+fn caret_window(text: &str, caret: usize, width: usize) -> String {
+    let mut chars: Vec<char> = text.chars().collect();
+    let caret = caret.min(chars.len());
+    chars.insert(caret, '_');
+    let start = (caret + 1).saturating_sub(width);
+    chars.into_iter().skip(start).take(width).collect()
 }
 
 /// Paints the open choice list below its field.

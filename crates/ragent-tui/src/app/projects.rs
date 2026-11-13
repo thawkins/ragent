@@ -672,7 +672,7 @@ impl App {
         let manager = self.project_manager();
         let global = self
             .session_processor
-            .load_config_for(&self.cwd_path)
+            .load_config_for(&project.worktree)
             .effective_execution_backend();
         match kind.to_ascii_lowercase().as_str() {
             "" => {
@@ -705,7 +705,7 @@ impl App {
                     format!("unknown backend `{label}`: local, podman, docker, remote or global")
                 })?;
                 if let Some((_, Some(why))) = self
-                    .project_backend_choices()
+                    .project_backend_choices(&project.worktree)
                     .into_iter()
                     .find(|(k, _)| *k == kind)
                 {
@@ -724,11 +724,15 @@ impl App {
     }
 
     /// Every execution backend kind, in `Properties` order, with the reason
-    /// it cannot run here (`None`: it can). A kind is checked as a session
-    /// would use it: the configured descriptor for that kind, its runtime on
-    /// `PATH`, a remote's URL and key.
-    pub(crate) fn project_backend_choices(&self) -> Vec<(ExecutionBackendKind, Option<String>)> {
-        let config = self.session_processor.load_config_for(&self.cwd_path);
+    /// it cannot run for a project at `dir` (`None`: it can). A kind is
+    /// checked as a session there would use it: that directory's
+    /// configuration, the descriptor for the kind, its runtime on `PATH`, a
+    /// remote's URL and key.
+    pub(crate) fn project_backend_choices(
+        &self,
+        dir: &Path,
+    ) -> Vec<(ExecutionBackendKind, Option<String>)> {
+        let config = self.session_processor.load_config_for(dir);
         [
             ExecutionBackendKind::Local,
             ExecutionBackendKind::Podman,
@@ -739,7 +743,7 @@ impl App {
         .map(|kind| {
             let registry = ragent_agent::backend::BackendRegistry::from_config(
                 &config.with_backend_kind(kind),
-                &self.cwd_path,
+                dir,
             );
             let entries = registry.entries();
             let ok = kind.is_local()

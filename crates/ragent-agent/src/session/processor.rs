@@ -229,18 +229,12 @@ async fn dispatch_tool_leaf(
 ) -> anyhow::Result<crate::tool::ToolOutput> {
     let backend = tool_ctx.config.as_ref().map_or_else(
         || crate::backend::resolve_backend(ragent_config::ExecutionBackendKind::Local),
-        |config| match session_backend_kind(tool_ctx) {
-            // The session was created in a project with its own backend.
-            Some(kind) => crate::backend::resolve_backend_with_secrets(
-                &config.with_backend_kind(kind),
-                &tool_ctx.working_dir,
-                tool_ctx.storage.clone(),
-            ),
-            None => crate::backend::resolve_backend_with_secrets(
+        |config| {
+            crate::backend::resolve_backend_with_secrets(
                 config,
                 &tool_ctx.working_dir,
                 tool_ctx.storage.clone(),
-            ),
+            )
         },
     );
     backend
@@ -250,22 +244,6 @@ async fn dispatch_tool_leaf(
             ctx: tool_ctx,
         })
         .await
-}
-
-/// The execution backend kind the tool context's session was created with
-/// (its project's `Properties`), or `None` for the global one. An unknown or
-/// unreadable value reads as `None`.
-fn session_backend_kind(tool_ctx: &ToolContext) -> Option<ragent_config::ExecutionBackendKind> {
-    let storage = tool_ctx.storage.as_ref()?;
-    match storage.session_backend(&tool_ctx.session_id) {
-        Ok(label) => label
-            .as_deref()
-            .and_then(ragent_config::ExecutionBackendKind::from_label),
-        Err(e) => {
-            tracing::warn!(error = %e, "session backend not read; using the global one");
-            None
-        }
-    }
 }
 
 /// B3: dispatches a validated tool call through the permission layer.
@@ -2226,6 +2204,39 @@ impl SessionProcessor {
         });
         Some(registry)
     }
+    /// `cfg` with session `session_id`'s execution backend applied, for a
+    /// whole turn: remote routing and every tool dispatch read the result.
+    ///
+    /// An automation run's override (FR-033) wins, so its confinement
+    /// cannot be loosened by a project setting. Otherwise a session created
+    /// in a project with its own backend (`sessions.execution_backend`) runs
+    /// on that kind. With neither, `cfg` is returned as it is.
+    pub(crate) async fn session_config_for(
+        &self,
+        cfg: &Arc<ragent_config::Config>,
+        session_id: &str,
+    ) -> Arc<ragent_config::Config> {
+        if crate::automation::session_backend_override(session_id).is_some() {
+            return crate::automation::apply_session_backend_override(cfg, session_id);
+        }
+        let id = session_id.to_string();
+        let stored = match self.storage_op(move |s| s.session_backend(&id)).await {
+            Ok(label) => label
+                .as_deref()
+                .and_then(ragent_config::ExecutionBackendKind::from_label),
+            Err(e) => {
+                tracing::warn!(error = %e, "session backend not read; using the global one");
+                None
+            }
+        };
+        match stored {
+            Some(kind) if kind != cfg.effective_execution_backend() => {
+                Arc::new(cfg.with_backend_kind(kind))
+            }
+            Some(_) | None => Arc::clone(cfg),
+        }
+    }
+
     /// Run a blocking storage operation on a dedicated thread to avoid
     /// stalling the Tokio runtime.
     ///
@@ -2355,7 +2366,7 @@ impl SessionProcessor {
         // and mirror its event stream into the local bus. The turn's tools run on
         // the remote host; a relay failure surfaces in the TUI and never re-runs
         // the turn locally (FR-031, FR-034).
-        if let Some(descriptor) = self.remote_backend_for_active(session_id) {
+        if let Some(descriptor) = self.remote_backend_for_active(session_id).await {
             return self
                 .process_remote_turn(session_id, &descriptor, &user_msg, cancel_flag)
                 .await;
