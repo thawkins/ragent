@@ -638,6 +638,40 @@ async fn test_sessions_sidebar_b_on_a_heading_prefills_the_branch_command() {
 }
 
 #[tokio::test]
+async fn test_sessions_sidebar_b_uses_the_id_when_the_name_is_another_projects_id() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project_id = app
+        .storage
+        .get_session(&a)
+        .expect("get")
+        .expect("row")
+        .project_id;
+    let other = fixture_dir("name_is_an_id").join("other");
+    let other = app
+        .storage
+        .ensure_project(&other.display().to_string())
+        .expect("project");
+    // A lookup of this name finds the other project first, by its id.
+    app.storage
+        .rename_project(&project_id, &other.id)
+        .expect("rename");
+    app.sidebar.dirty = true;
+    app.sidebar.cursor = heading_index(&mut app, &project_id);
+    app.sidebar.focused = true;
+
+    app.handle_key_event(key(KeyCode::Char('b'), KeyModifiers::NONE))
+        .await;
+
+    assert!(
+        app.session
+            .input
+            .starts_with(&format!("/session new --project {project_id} --branch ")),
+        "{}",
+        app.session.input
+    );
+}
+
+#[tokio::test]
 async fn test_sessions_sidebar_b_uses_the_id_when_the_name_is_shared() {
     let (mut app, a, _b) = app_with_sidebar().await;
     let project_id = app

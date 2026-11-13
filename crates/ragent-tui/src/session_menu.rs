@@ -24,7 +24,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use std::path::PathBuf;
 
-use crate::app::{App, Attention};
+use crate::app::App;
 use crate::open_in::{LaunchEnv, OpenTarget};
 
 /// What an open menu acts on.
@@ -328,9 +328,7 @@ fn build_items(app: &App, session_id: &str) -> Vec<MenuItem> {
     } else {
         "Pin"
     };
-    let unread = if crate::sessions_sidebar::attention_of(app, session_id)
-        == crate::app::Attention::Unread
-    {
+    let unread = if is_unread(app, session_id) {
         "Mark as read"
     } else {
         "Mark as unread"
@@ -488,6 +486,15 @@ pub fn open_project(app: &mut App, project_id: &str, row_y: u16) {
     );
 }
 
+/// Whether session `id` carries the unread mark, the state `Mark as
+/// unread` / `Mark as read` toggles. A storage failure reads as not unread.
+fn is_unread(app: &App, id: &str) -> bool {
+    app.session_unread(id).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "unread marks not read");
+        false
+    })
+}
+
 /// Builds the items of the selection's menu. `Pin` and `Mark as unread`
 /// apply to every selected session unless all already have that state, in
 /// which case they read `Unpin` and `Mark as read`.
@@ -495,9 +502,7 @@ fn selection_items(app: &App) -> Vec<MenuItem> {
     let selected = &app.sidebar.selected;
     let n = selected.len();
     let all_pinned = selected.iter().all(|id| app.sidebar.pinned.contains(id));
-    let all_unread = selected
-        .iter()
-        .all(|id| crate::sessions_sidebar::attention_of(app, id) == Attention::Unread);
+    let all_unread = selected.iter().all(|id| is_unread(app, id));
     vec![
         item(
             &format!("{} ({n})", if all_pinned { "Unpin" } else { "Pin" }),
@@ -790,9 +795,6 @@ fn dispatch_selection(app: &mut App, action: MenuAction) -> Result<(), String> {
             app.status = format!("{n} session(s) {}", if pin { "pinned" } else { "unpinned" });
         }
         MenuAction::ToggleUnread => {
-            let is_unread = |app: &App, id: &str| {
-                crate::sessions_sidebar::attention_of(app, id) == Attention::Unread
-            };
             let unread = !ids.iter().all(|id| is_unread(app, id));
             for id in &ids {
                 if is_unread(app, id) != unread {

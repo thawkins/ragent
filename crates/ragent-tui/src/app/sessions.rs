@@ -1093,13 +1093,14 @@ impl App {
             .any(|v| v.session_id.as_deref() == Some(id) && v.is_processing)
     }
 
-    /// Marks session `id` unread, or read when it is unread (SESSIONMENU
-    /// FR-08). The mark is stored, and copied to the session's open view.
+    /// Whether session `id` carries the unread mark: stored, or set on its
+    /// open view. Unlike the sidebar's attention marker this is not masked
+    /// by a waiting, running or failed state.
     ///
     /// # Errors
     ///
-    /// Returns a message when storage cannot be read or updated.
-    pub(crate) fn toggle_session_unread(&mut self, id: &str) -> Result<(), String> {
+    /// Returns a message when storage cannot be read.
+    pub(crate) fn session_unread(&self, id: &str) -> Result<bool, String> {
         let stored = self
             .storage
             .unread_session_ids()
@@ -1108,7 +1109,17 @@ impl App {
         let open_unread = std::iter::once(&self.session)
             .chain(self.background.iter())
             .any(|v| v.session_id.as_deref() == Some(id) && v.unread);
-        let unread = !(stored || open_unread);
+        Ok(stored || open_unread)
+    }
+
+    /// Marks session `id` unread, or read when it is unread (SESSIONMENU
+    /// FR-08). The mark is stored, and copied to the session's open view.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when storage cannot be read or updated.
+    pub(crate) fn toggle_session_unread(&mut self, id: &str) -> Result<(), String> {
+        let unread = !self.session_unread(id)?;
         self.storage
             .set_session_unread(id, unread)
             .map_err(|e| e.to_string())?;

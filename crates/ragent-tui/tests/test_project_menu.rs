@@ -458,3 +458,68 @@ async fn test_project_menu_open_in_uses_the_project_directory() {
         log[0].cwd
     );
 }
+
+#[tokio::test]
+async fn test_project_menu_unread_mark_is_read_through_a_failed_state() {
+    let (mut app, a, b) = app_with_sidebar().await;
+    // B is unread and failed: the sidebar marker shows the failure, but the
+    // unread mark is still there and the menu must offer to clear it.
+    app.storage.set_session_unread(&b, true).expect("unread");
+    app.session.unread = true;
+    app.session.errored = true;
+    app.sidebar.dirty = true;
+    app.sidebar.cursor = session_row(&mut app, &b);
+    app.sidebar.focused = true;
+
+    app.handle_key_event(key(KeyCode::Char('m'))).await;
+    let menu = app.sidebar.menu.clone().expect("menu open");
+    assert!(
+        menu.items.iter().any(|i| i.label == "Mark as read"),
+        "{:?}",
+        menu.items
+    );
+    app.handle_key_event(key(KeyCode::Char('u'))).await;
+
+    let unread = app.storage.unread_session_ids().expect("unread ids");
+    assert!(!unread.contains(&b), "mark cleared: {unread:?}");
+    assert!(!unread.contains(&a));
+
+    // A selection marked unread keeps the mark on an already-unread failed
+    // session.
+    app.storage.set_session_unread(&b, true).expect("unread");
+    app.session.unread = true;
+    app.sidebar.selected = [a.clone(), b.clone()].into_iter().collect();
+    app.sidebar.cursor = session_row(&mut app, &b);
+    app.sidebar.focused = true;
+    app.handle_key_event(key(KeyCode::Char('m'))).await;
+    app.handle_key_event(key(KeyCode::Char('u'))).await;
+    let unread = app.storage.unread_session_ids().expect("unread ids");
+    assert!(unread.contains(&a) && unread.contains(&b), "{unread:?}");
+}
+
+#[tokio::test]
+async fn test_project_menu_select_all_follows_the_filter() {
+    let (mut app, a, b) = app_with_sidebar().await;
+    app.storage
+        .update_session(&a, "alpha notes")
+        .expect("title");
+    app.storage.update_session(&b, "beta draft").expect("title");
+    app.sidebar.dirty = true;
+    let project = project_of(&mut app, &a);
+    app.sidebar.filter = "alpha".to_string();
+    open_project_menu(&mut app, &project).await;
+
+    let menu = app.sidebar.menu.clone().expect("menu open");
+    assert!(
+        menu.items.iter().any(|i| i.label == "Archive all (1)"),
+        "counts follow the filter: {:?}",
+        menu.items
+    );
+    app.handle_key_event(key(KeyCode::Char('s'))).await;
+
+    assert_eq!(
+        app.sidebar.selected.iter().collect::<Vec<_>>(),
+        vec![&a],
+        "the session hidden by the filter is not selected"
+    );
+}

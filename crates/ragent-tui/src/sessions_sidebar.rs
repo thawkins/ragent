@@ -529,16 +529,20 @@ fn sections(app: &App) -> Vec<SectionData<'_>> {
     out
 }
 
+/// Whether session `s` of the project labelled `project` passes the
+/// lower-cased `filter`; an empty filter passes everything.
+fn matches_filter(s: &ragent_storage::SessionRow, project: &str, filter: &str) -> bool {
+    filter.is_empty()
+        || s.title.to_lowercase().contains(filter)
+        || project.to_lowercase().contains(filter)
+}
+
 /// Appends one section (heading plus visible sessions) to `rows`.
 fn push_section(rows: &mut Vec<SidebarRow>, app: &App, section: &SectionData<'_>, filter: &str) {
     let matching: Vec<&ragent_storage::SessionRow> = section
         .sessions
         .iter()
-        .filter(|(s, project)| {
-            filter.is_empty()
-                || s.title.to_lowercase().contains(filter)
-                || project.to_lowercase().contains(filter)
-        })
+        .filter(|(s, project)| matches_filter(s, project, filter))
         .map(|(s, _)| *s)
         .collect();
     // While filtering only sections with a match are shown.
@@ -1043,23 +1047,20 @@ fn cursor_project(app: &App) -> Option<ragent_storage::ProjectRow> {
 /// out alone, else by its id.
 pub(crate) fn branch_session_command(app: &App, project: &ragent_storage::ProjectRow) -> String {
     // The stored name, which may be newer than the cached sidebar row.
-    let (name, unique) = match app.storage.list_projects() {
-        Ok(all) => {
-            let name = all
-                .iter()
-                .find(|p| p.id == project.id)
-                .map_or_else(|| project.name.clone(), |p| p.name.clone());
-            let count = all
-                .iter()
-                .filter(|p| p.name.eq_ignore_ascii_case(&name))
-                .count();
-            (name, count == 1)
-        }
+    let name = match app.storage.get_project(&project.id) {
+        Ok(Some(stored)) => stored.name,
+        Ok(None) => project.name.clone(),
         Err(e) => {
-            tracing::warn!(error = %e, "could not list projects");
-            (project.name.clone(), false)
+            tracing::warn!(error = %e, "could not read project");
+            project.name.clone()
         }
     };
+    // The name must resolve back to this project: not shared with another
+    // project, and not another project's id (ids are matched first).
+    let unique = matches!(
+        app.storage.find_project(&name),
+        Ok(Some(found)) if found.id == project.id
+    );
     // A name that cannot be written as one `--project` value falls back to
     // the id: shared with another project, empty, flag-like, or holding
     // both quote characters.
@@ -1165,8 +1166,10 @@ fn toggle_selected(app: &mut App, id: &str) {
 }
 
 /// The sessions listed under project `project_id`'s heading (not pinned,
-/// not in a user section), newest first.
+/// not in a user section, matching the filter when one is set), newest
+/// first. Collapsed sessions are included.
 pub(crate) fn project_session_ids(app: &App, project_id: &str) -> Vec<String> {
+    let filter = app.sidebar.filter.to_lowercase();
     sections(app)
         .into_iter()
         .find(|section| section.key == project_id)
@@ -1174,6 +1177,7 @@ pub(crate) fn project_session_ids(app: &App, project_id: &str) -> Vec<String> {
             section
                 .sessions
                 .into_iter()
+                .filter(|(s, project)| matches_filter(s, project, &filter))
                 .map(|(s, _)| s.id.clone())
                 .collect()
         })
