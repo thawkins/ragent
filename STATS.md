@@ -16,6 +16,18 @@
 > supersedes nothing: the `1.0.168` tree it measures is the spec-system repair
 > pair (`6953c57c`, `9ed32bd8`, merged as PR #11) plus these three commits.
 >
+> The session context menu and PR/MR Auto-fix (`docs/plans/SESSIONMENU.md`,
+> branch `session-menu-wip`) are not re-measured in the tables below either.
+> Against `main` they add 7,729 and remove 162 lines across 60 files, tests
+> and docs included: `crates/ragent-tui` +3,348 (`session_menu.rs`,
+> `open_in.rs`, `app/autofix.rs`, the sidebar), `crates/ragent-agent` +1,873
+> (the new `autofix` watcher module and request binding),
+> `crates/ragent-storage` +1,312 (sections, fork, delete, bindings,
+> `autofix_events`; schema 10), `crates/ragent-tools-vcs` +215
+> (`binding.rs`), `crates/ragent-config` +134 (`vcs` block),
+> `crates/ragent-server` +29 and `crates/ragent-types` +15. No crate or
+> binary is added; 8 test files are added.
+>
 > The `projects` spec (`specs/projects/PLAN.md`), added on top of the
 > multi-session work, is not re-measured in the tables below. It adds 6,879
 > and removes 198 lines across 54 files, tests included:

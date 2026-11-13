@@ -241,6 +241,13 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   (`/session new --branch`), and the session sidebar groups sessions by
   project and shows the pull/merge request count for each session's branch
   (`/project`, `ragent project`)
+- **Session menu and Auto-fix** — right-click (or `m` on) a sidebar session
+  for Open PR/MR, Open in (editor, file manager, terminal), Pin, Mark as
+  unread, Rename, Fork, Move to section, Archive and Delete. A session bound
+  to a GitHub pull request or GitLab merge request (including GitHub
+  Enterprise and self-managed GitLab) can run Auto-fix: it is woken when CI
+  fails, the branch conflicts, or a reviewer comments, and pauses after a
+  set number of tries (`/autofix`)
 - **Session management** — persistent conversation history stored in SQLite;
   list, resume, export-archive, and import sessions. A session's transcript can be
   aged out with `/db prune [--days N] [--dry-run]` (TUI) or `ragent db prune`
