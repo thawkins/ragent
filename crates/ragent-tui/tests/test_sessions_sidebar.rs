@@ -1016,3 +1016,40 @@ async fn test_sessions_sidebar_visual_title_hints_heading_and_cursor_bar() {
     let y = u16::try_from(row).expect("row");
     assert_eq!(buffer[(last, y)].style().bg, Some(Color::Indexed(236)));
 }
+
+#[tokio::test]
+async fn test_sessions_sidebar_keeps_a_gone_project_that_has_sessions() {
+    let (mut app, _a, _b) = app_with_sidebar().await;
+    let gone = fixture_dir("gone_with_sessions").join("vanished_busy");
+    let project = app
+        .storage
+        .ensure_project(&gone.display().to_string())
+        .expect("project");
+    app.storage
+        .create_session_in_project(
+            "s-gone",
+            &project.id,
+            &project.worktree,
+            &ragent_storage::SessionCheckout::default(),
+        )
+        .expect("session");
+    app.sidebar.dirty = true;
+
+    let rows = sidebar_rows(&mut app);
+
+    assert!(
+        row_of(&rows, "vanished_busy").is_some(),
+        "its sessions stay reachable: {rows:#?}"
+    );
+}
+
+#[test]
+fn test_sessions_sidebar_branch_name_skips_taken_names() {
+    let taken: std::collections::HashSet<String> = (0..200)
+        .map(|_| ragent_tui::branch_names::random_branch_name())
+        .collect();
+    for _ in 0..50 {
+        let name = ragent_tui::branch_names::unused_branch_name(|n| taken.contains(n));
+        assert!(!taken.contains(&name), "{name} is taken");
+    }
+}

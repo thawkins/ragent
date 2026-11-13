@@ -72,3 +72,23 @@ fn test_session_request_history_goes_with_a_deleted_session() {
     );
     assert!(storage.session_request_totals().expect("totals").is_empty());
 }
+
+#[test]
+fn test_session_request_history_ignores_a_dropped_poll() {
+    let storage = Storage::open_in_memory().expect("storage");
+    storage
+        .create_session("s", "/nonexistent/history")
+        .expect("s");
+    let bound = request("s", 1, "open");
+    storage.set_session_request(&bound).expect("bind");
+
+    // Auto-fix is off, so the poll is dropped and nothing is written.
+    let kept = storage
+        .record_autofix_poll(&bound, "merged", "changed", "abc")
+        .expect("poll");
+
+    assert!(!kept);
+    let history = storage.session_request_history("s").expect("history");
+    assert_eq!(history[0].state, "open");
+    assert_eq!(history[0].title, "MR 1");
+}

@@ -523,3 +523,28 @@ async fn test_project_menu_select_all_follows_the_filter() {
         "the session hidden by the filter is not selected"
     );
 }
+
+#[tokio::test]
+async fn test_project_menu_selection_skips_sessions_hidden_by_the_filter() {
+    let (mut app, a, b) = app_with_sidebar().await;
+    app.storage
+        .update_session(&a, "alpha notes")
+        .expect("title");
+    app.storage.update_session(&b, "beta draft").expect("title");
+    app.sidebar.dirty = true;
+    sessions_sidebar::refresh_if_dirty(&mut app);
+    app.sidebar.selected = [a.clone(), b.clone()].into_iter().collect();
+    app.sidebar.filter = "alpha".to_string();
+
+    let _ = draw(&mut app);
+    app.sidebar.focused = true;
+    ragent_tui::session_menu::open_selection(&mut app, 1);
+    let menu = app.sidebar.menu.clone().expect("menu open");
+    assert_eq!(menu.items[0].label, "Pin (1)", "{:?}", menu.items);
+
+    app.handle_key_event(key(KeyCode::Char('p'))).await;
+
+    let pinned = app.storage.pinned_session_ids().expect("pins");
+    assert!(pinned.contains(&a), "{pinned:?}");
+    assert!(!pinned.contains(&b), "hidden by the filter: {pinned:?}");
+}

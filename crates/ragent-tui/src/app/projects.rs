@@ -664,15 +664,16 @@ impl App {
             "rename" => {
                 // `--project <id> <name>` renames a listed project (the
                 // sidebar's project menu); otherwise the focused one.
-                let target = match rest.strip_prefix("--project ") {
-                    Some(tail) => tail
+                let target = match rest.strip_prefix("--project") {
+                    // A bare `--project` is a usage error, not a new name.
+                    Some(tail) if tail.is_empty() || tail.starts_with(char::is_whitespace) => tail
                         .trim_start()
                         .split_once(char::is_whitespace)
                         .map(|(id, name)| (Some(id), name.trim()))
                         .ok_or_else(|| {
                             "usage: /project rename [--project <id>] <name>".to_string()
                         }),
-                    None => Ok((None, rest)),
+                    Some(_) | None => Ok((None, rest)),
                 };
                 target.and_then(|(id, name)| {
                     let project = match id {
