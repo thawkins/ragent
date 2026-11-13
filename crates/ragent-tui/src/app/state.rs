@@ -1266,6 +1266,14 @@ pub enum RowAction {
         /// How many sub-agent, teammate and skill sessions go with it.
         children: usize,
     },
+    /// Permanently delete several sessions and their sub-agent sessions
+    /// (the sidebar's project and selection menus).
+    DeleteSessions {
+        /// The sessions the answer deletes.
+        session_ids: Vec<String>,
+        /// Where they come from (a project name, `the selection`).
+        label: String,
+    },
 }
 
 /// The footer hints for the modal row-action dialog (spec `teamssetup` FR-028,
@@ -1301,6 +1309,9 @@ impl RowAction {
             Self::ShutdownTeammate { .. } => " Shut down teammate? ".to_string(),
             Self::ResumeTeammate { name, .. } => format!(" Resume {name}? "),
             Self::DeleteSession { .. } => " Delete session? ".to_string(),
+            Self::DeleteSessions { session_ids, .. } => {
+                format!(" Delete {} sessions? ", session_ids.len())
+            }
         }
     }
 
@@ -1342,6 +1353,11 @@ impl RowAction {
                 };
                 format!("{}{with}; cannot be undone", short_suffix(title, 40))
             }
+            Self::DeleteSessions { session_ids, label } => format!(
+                "{} session(s) in {} and their sub-sessions; cannot be undone",
+                session_ids.len(),
+                short_suffix(label, 30)
+            ),
         }
     }
 }

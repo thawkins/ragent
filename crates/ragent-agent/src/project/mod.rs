@@ -197,6 +197,35 @@ impl ProjectManager {
             .ok_or_else(|| anyhow::anyhow!("project not found: {project_id}"))
     }
 
+    /// Detects the remote of every listed project whose remote has never
+    /// been checked and whose checkout still exists. Projects recorded
+    /// without a session starting in them (the projects migration, `/project
+    /// add` of a folder) otherwise show no forge until one is opened.
+    ///
+    /// # Returns
+    ///
+    /// The number of projects checked.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the project list cannot be read; a failure on one
+    /// project is logged and the rest are still checked.
+    pub fn check_unchecked_remotes(&self) -> Result<usize> {
+        let unchecked: Vec<String> = self
+            .storage
+            .list_projects()?
+            .into_iter()
+            .filter(|row| !row.remote_checked && Path::new(&row.worktree).exists())
+            .map(|row| row.id)
+            .collect();
+        for id in &unchecked {
+            if let Err(e) = self.refresh_remote(id) {
+                tracing::debug!(project = %id, error = %e, "remote check failed");
+            }
+        }
+        Ok(unchecked.len())
+    }
+
     /// Fetches a project by id.
     ///
     /// # Errors

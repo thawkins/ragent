@@ -2,7 +2,7 @@
 
 Feature ID: SESSIONMENU
 Title: Per-session context menu in the sessions sidebar, plus PR/MR Auto-fix
-Status: M1-M6 done.
+Status: M1-M6 done; project heading menu and multi-selection added after M6 (SPEC 6.1c).
 Reference UX: Claude desktop app, Code mode (sidebar row context menu, Auto-fix)
 Builds on: [MULTISESSION.md](MULTISESSION.md) (M1-M8 done, schema 5)
 Roadmap: ROADMAP.md items 4 and 5

@@ -1,11 +1,15 @@
-//! Context menu for one session row of the sidebar (spec SESSIONMENU).
+//! Context menus of the sidebar (spec SESSIONMENU): one for a session row,
+//! one for a project heading, and one for the multi-selection.
 //!
-//! Opened with `m` or `Shift+F10` on a session row while the sidebar has
-//! focus, or with a right-click on a session row. It lists the actions that
-//! apply to that session, each with a one-letter accelerator, in groups
-//! separated by a rule. `Open in` and `Move to section` open a submenu
-//! (`Right`, `Enter` or a click); `Left`/`Esc` close one level. While it is
-//! open it consumes every key; a click outside it closes it.
+//! Opened with `m` or `Shift+F10` while the sidebar has focus, or with a
+//! right-click: on a session row it acts on that session, on a selected
+//! session (with more than one selected) on the whole selection, and on a
+//! project heading on that project. It lists the actions that apply, each
+//! with a one-letter accelerator, in groups separated by a rule; an action
+//! that cannot run now is greyed out and does nothing. `Open in` and `Move
+//! to section` open a submenu (`Right`, `Enter` or a click); `Left`/`Esc`
+//! close one level. While it is open it consumes every key; a click outside
+//! it closes it.
 //!
 //! The menu only dispatches: each action calls the same `App` method as the
 //! sidebar's single-key shortcut or `/session` subcommand, so the paths
@@ -18,8 +22,21 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
+use std::path::PathBuf;
+
 use crate::app::App;
 use crate::open_in::{LaunchEnv, OpenTarget};
+
+/// What an open menu acts on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MenuTarget {
+    /// One session, by id.
+    Session(String),
+    /// A project heading, by project id.
+    Project(String),
+    /// The sessions in the sidebar's multi-selection.
+    Selection,
+}
 
 /// What a menu item does to its session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +47,11 @@ pub enum MenuAction {
     /// Turn Auto-fix on or off for the bound request (`Auto-fix: on/off`,
     /// shown only when the session is bound).
     ToggleAutofix,
+    /// Open the `PR/MRs` submenu: every pull/merge request the session has
+    /// had (shown when it has had one).
+    Requests,
+    /// Open a web URL in the default browser (`PR/MRs` submenu).
+    OpenUrl(String),
     /// Open the `Open in` submenu.
     OpenIn,
     /// Pin or unpin the session (same as `p`).
@@ -54,12 +76,36 @@ pub enum MenuAction {
     /// Focus the session and prefill `/session section new` (`Move to
     /// section` submenu).
     NewSection,
+    /// Start a session in the project (same as `n` on its heading).
+    NewSession,
+    /// Prefill the command that starts a session on its own branch (same
+    /// as `b` on a project heading).
+    NewSessionOnBranch,
+    /// Prefill `/project rename` for the project.
+    RenameProject,
+    /// Move the project one place up in the sidebar.
+    MoveUp,
+    /// Move the project one place down in the sidebar.
+    MoveDown,
+    /// Select every session listed under the project.
+    SelectAll,
+    /// Empty the selection.
+    ClearSelection,
+    /// Collapse every sidebar section.
+    CollapseAll,
+    /// Expand every sidebar section.
+    ExpandAll,
 }
 
 impl MenuAction {
     /// Whether the item opens a submenu instead of running.
     fn opens_submenu(&self) -> bool {
-        matches!(self, Self::OpenIn | Self::MoveTo)
+        matches!(self, Self::Requests | Self::OpenIn | Self::MoveTo)
+    }
+
+    /// Whether the item destroys data; drawn in red.
+    fn is_danger(&self) -> bool {
+        matches!(self, Self::Delete)
     }
 }
 
@@ -76,13 +122,16 @@ pub struct MenuItem {
     pub group: u8,
     /// Whether the item destroys data; drawn in red.
     pub danger: bool,
+    /// Whether the item can run now; a disabled one is greyed out and
+    /// does nothing.
+    pub enabled: bool,
 }
 
 /// An open context menu, or an open submenu of one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionMenu {
-    /// The session the menu acts on.
-    pub session_id: String,
+    /// What the menu acts on.
+    pub target: MenuTarget,
     /// Screen row the menu is anchored to: the sidebar row for the menu,
     /// the parent item's line for a submenu.
     pub row_y: u16,
@@ -154,20 +203,50 @@ impl SessionMenu {
     }
 }
 
-/// Builds an item; `Delete` is the only dangerous one.
+/// Builds an enabled item; `Delete` is the only dangerous one.
 fn item(label: &str, accel: Option<char>, action: MenuAction, group: u8) -> MenuItem {
     MenuItem {
         label: label.to_string(),
         accel,
-        danger: action == MenuAction::Delete,
+        danger: action.is_danger(),
         action,
         group,
+        enabled: true,
     }
 }
 
-/// The `Open in` targets this machine can start for `session_id`.
-fn open_in_items(app: &App, session_id: &str) -> Vec<MenuItem> {
-    let Some(dir) = app.session_directory(session_id) else {
+/// Builds an item that is greyed out unless `enabled`.
+fn item_if(
+    enabled: bool,
+    label: &str,
+    accel: Option<char>,
+    action: MenuAction,
+    group: u8,
+) -> MenuItem {
+    MenuItem {
+        enabled,
+        ..item(label, accel, action, group)
+    }
+}
+
+/// The directory `Open in` opens for `target`: the session's, or the
+/// project's worktree.
+fn target_directory(app: &App, target: &MenuTarget) -> Option<PathBuf> {
+    match target {
+        MenuTarget::Session(id) => app.session_directory(id),
+        MenuTarget::Project(id) => app
+            .sidebar
+            .groups
+            .iter()
+            .find(|g| g.project_id == *id)
+            .map(|g| PathBuf::from(&g.project.worktree)),
+        MenuTarget::Selection => None,
+    }
+}
+
+/// The `Open in` targets this machine can start for `target`.
+fn open_in_items(app: &App, target: &MenuTarget) -> Vec<MenuItem> {
+    let Some(dir) = target_directory(app, target) else {
         return Vec::new();
     };
     let env = LaunchEnv::current();
@@ -182,25 +261,63 @@ fn open_in_items(app: &App, session_id: &str) -> Vec<MenuItem> {
     .collect()
 }
 
-/// The `Move to section` choices; the session's current place is marked.
-fn move_to_items(app: &App, session_id: &str) -> Vec<MenuItem> {
-    let current = app.sidebar.session_section.get(session_id);
+/// The `PR/MRs` choices: each pull/merge request session `target` has had,
+/// newest first, as `PR #12 [open] title`; choosing one opens its URL.
+fn request_items(app: &App, target: &MenuTarget) -> Vec<MenuItem> {
+    let MenuTarget::Session(id) = target else {
+        return Vec::new();
+    };
+    let history = match app.storage.session_request_history(id) {
+        Ok(history) => history,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not read PR/MR history");
+            Vec::new()
+        }
+    };
+    history
+        .iter()
+        .map(|r| {
+            let (short, sigil) =
+                ragent_agent::project::RemoteKind::parse(&r.forge).map_or(("#", '#'), |kind| {
+                    let noun = kind.noun();
+                    (noun.short, noun.sigil)
+                });
+            let title: String = r.title.chars().take(REQUEST_TITLE_WIDTH).collect();
+            let label = format!("{short} {sigil}{} [{}] {title}", r.number, r.state);
+            item(&label, None, MenuAction::OpenUrl(r.web_url.clone()), 0)
+        })
+        .collect()
+}
+
+/// Longest request title shown in the `PR/MRs` submenu.
+const REQUEST_TITLE_WIDTH: usize = 48;
+
+/// The `Move to section` choices. For one session its current place is
+/// marked and `New section...` is offered; for the selection nothing is
+/// marked and new sections are made with `/session section new` first.
+fn move_to_items(app: &App, target: &MenuTarget) -> Vec<MenuItem> {
+    let current = match target {
+        MenuTarget::Session(id) => Some(app.sidebar.session_section.get(id)),
+        MenuTarget::Project(_) | MenuTarget::Selection => None,
+    };
     let mark = |here: bool, name: &str| format!("{} {name}", if here { "*" } else { " " });
     let mut items = vec![item(
-        &mark(current.is_none(), "Project (default)"),
+        &mark(current == Some(None), "Project (default)"),
         None,
         MenuAction::MoveToSection(None),
         0,
     )];
     items.extend(app.sidebar.sections.iter().map(|s| {
         item(
-            &mark(current == Some(&s.id), &s.name),
+            &mark(current == Some(Some(&s.id)), &s.name),
             None,
             MenuAction::MoveToSection(Some(s.id.clone())),
             1,
         )
     }));
-    items.push(item("  New section...", None, MenuAction::NewSection, 2));
+    if current.is_some() {
+        items.push(item("  New section...", None, MenuAction::NewSection, 2));
+    }
     items
 }
 
@@ -211,9 +328,7 @@ fn build_items(app: &App, session_id: &str) -> Vec<MenuItem> {
     } else {
         "Pin"
     };
-    let unread = if crate::sessions_sidebar::attention_of(app, session_id)
-        == crate::app::Attention::Unread
-    {
+    let unread = if is_unread(app, session_id) {
         "Mark as read"
     } else {
         "Mark as unread"
@@ -242,7 +357,21 @@ fn build_items(app: &App, session_id: &str) -> Vec<MenuItem> {
             0,
         ));
     }
-    if !open_in_items(app, session_id).is_empty() {
+    let total = app
+        .sidebar
+        .request_totals
+        .get(session_id)
+        .copied()
+        .unwrap_or(0);
+    if total > 0 {
+        items.push(item(
+            &format!("PR/MRs ({total})"),
+            None,
+            MenuAction::Requests,
+            0,
+        ));
+    }
+    if !open_in_items(app, &MenuTarget::Session(session_id.to_string())).is_empty() {
         items.push(item("Open in", None, MenuAction::OpenIn, 0));
     }
     items.extend([
@@ -267,8 +396,153 @@ fn build_items(app: &App, session_id: &str) -> Vec<MenuItem> {
 /// * `row_y` - screen row of that session's sidebar row.
 pub fn open(app: &mut App, session_id: &str, row_y: u16) {
     let items = build_items(app, session_id);
+    show(
+        app,
+        MenuTarget::Session(session_id.to_string()),
+        row_y,
+        items,
+    );
+}
+
+/// Builds the items of project `project_id`'s menu.
+fn project_items(app: &App, project_id: &str) -> Vec<MenuItem> {
+    let target = MenuTarget::Project(project_id.to_string());
+    let listed = crate::sessions_sidebar::project_session_ids(app, project_id).len();
+    let (up, down) = crate::sessions_sidebar::project_moves(app, project_id);
+    let keys = crate::sessions_sidebar::section_keys(app);
+    let collapsed = &app.sidebar.collapsed;
+    let any_open = keys.iter().any(|k| !collapsed.contains(k));
+    let any_collapsed = keys.iter().any(|k| collapsed.contains(k));
+    let mut items = vec![
+        item("New session", Some('n'), MenuAction::NewSession, 0),
+        item(
+            "New session on branch",
+            Some('b'),
+            MenuAction::NewSessionOnBranch,
+            0,
+        ),
+    ];
+    if !open_in_items(app, &target).is_empty() {
+        items.push(item("Open in", None, MenuAction::OpenIn, 0));
+    }
+    items.extend([
+        item("Rename project", Some('r'), MenuAction::RenameProject, 1),
+        item_if(up, "Move up", Some('k'), MenuAction::MoveUp, 1),
+        item_if(down, "Move down", Some('j'), MenuAction::MoveDown, 1),
+        item_if(
+            listed > 0,
+            "Select all",
+            Some('s'),
+            MenuAction::SelectAll,
+            2,
+        ),
+        item_if(
+            any_open,
+            "Collapse all",
+            Some('c'),
+            MenuAction::CollapseAll,
+            2,
+        ),
+        item_if(
+            any_collapsed,
+            "Expand all",
+            Some('e'),
+            MenuAction::ExpandAll,
+            2,
+        ),
+        item_if(
+            listed > 0,
+            &format!("Archive all ({listed})"),
+            Some('a'),
+            MenuAction::Archive,
+            3,
+        ),
+        item_if(
+            listed > 0,
+            &format!("Delete all sessions ({listed})"),
+            Some('d'),
+            MenuAction::Delete,
+            3,
+        ),
+    ]);
+    items
+}
+
+/// Opens the menu for project `project_id`, anchored to its heading painted
+/// at screen row `row_y`.
+///
+/// # Arguments
+///
+/// * `app` - the application; the menu is stored in `app.sidebar.menu`.
+/// * `project_id` - the project the menu acts on.
+/// * `row_y` - screen row of the project's heading.
+pub fn open_project(app: &mut App, project_id: &str, row_y: u16) {
+    let items = project_items(app, project_id);
+    show(
+        app,
+        MenuTarget::Project(project_id.to_string()),
+        row_y,
+        items,
+    );
+}
+
+/// Whether session `id` carries the unread mark, the state `Mark as
+/// unread` / `Mark as read` toggles. A storage failure reads as not unread.
+fn is_unread(app: &App, id: &str) -> bool {
+    app.session_unread(id).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "unread marks not read");
+        false
+    })
+}
+
+/// Builds the items of the selection's menu. `Pin` and `Mark as unread`
+/// apply to every selected session unless all already have that state, in
+/// which case they read `Unpin` and `Mark as read`.
+fn selection_items(app: &App) -> Vec<MenuItem> {
+    let selected = &app.sidebar.selected;
+    let n = selected.len();
+    let all_pinned = selected.iter().all(|id| app.sidebar.pinned.contains(id));
+    let all_unread = selected.iter().all(|id| is_unread(app, id));
+    vec![
+        item(
+            &format!("{} ({n})", if all_pinned { "Unpin" } else { "Pin" }),
+            Some('p'),
+            MenuAction::TogglePin,
+            0,
+        ),
+        item(
+            if all_unread {
+                "Mark as read"
+            } else {
+                "Mark as unread"
+            },
+            Some('u'),
+            MenuAction::ToggleUnread,
+            0,
+        ),
+        item("Move to section", None, MenuAction::MoveTo, 0),
+        item("Clear selection", Some('c'), MenuAction::ClearSelection, 1),
+        item(&format!("Archive ({n})"), Some('a'), MenuAction::Archive, 2),
+        item(&format!("Delete ({n})"), Some('d'), MenuAction::Delete, 2),
+    ]
+}
+
+/// Opens the menu for the sessions in the selection, anchored to the
+/// sidebar row painted at screen row `row_y`.
+///
+/// # Arguments
+///
+/// * `app` - the application; the menu is stored in `app.sidebar.menu`.
+/// * `row_y` - screen row of the selected session the menu was opened on.
+pub fn open_selection(app: &mut App, row_y: u16) {
+    let items = selection_items(app);
+    show(app, MenuTarget::Selection, row_y, items);
+}
+
+/// Stores a new top-level menu.
+fn show(app: &mut App, target: MenuTarget, row_y: u16, items: Vec<MenuItem>) {
     app.sidebar.menu = Some(SessionMenu {
-        session_id: session_id.to_string(),
+        target,
         row_y,
         items,
         cursor: 0,
@@ -364,10 +638,11 @@ fn paint(frame: &mut Frame, menu: &SessionMenu, area: Rect) {
         };
         let gap = inner_width.saturating_sub(item.label.chars().count() + 3);
         let text = format!(" {}{}{hint} ", item.label, " ".repeat(gap));
-        let style = match (index == menu.cursor, item.danger) {
-            (true, _) => selected,
-            (false, true) => normal.fg(Color::Red),
-            (false, false) => normal,
+        let style = match (index == menu.cursor, item.enabled, item.danger) {
+            (true, _, _) => selected,
+            (false, false, _) => normal.fg(Color::DarkGray),
+            (false, true, true) => normal.fg(Color::Red),
+            (false, true, false) => normal,
         };
         lines.push(Line::from(Span::styled(text, style)));
     }
@@ -408,10 +683,11 @@ fn open_submenu(app: &mut App, index: usize) {
     let Some(menu) = app.sidebar.menu.as_ref() else {
         return;
     };
-    let session_id = menu.session_id.clone();
+    let target = menu.target.clone();
     let items = match menu.items.get(index).map(|i| &i.action) {
-        Some(MenuAction::OpenIn) => open_in_items(app, &session_id),
-        Some(MenuAction::MoveTo) => move_to_items(app, &session_id),
+        Some(MenuAction::Requests) => request_items(app, &target),
+        Some(MenuAction::OpenIn) => open_in_items(app, &target),
+        Some(MenuAction::MoveTo) => move_to_items(app, &target),
         _ => return,
     };
     let Some(menu) = app.sidebar.menu.as_mut() else {
@@ -421,7 +697,7 @@ fn open_submenu(app: &mut App, index: usize) {
     let row_y = menu.area.y + 1 + u16::try_from(line).unwrap_or(0);
     menu.cursor = index;
     menu.submenu = Some(Box::new(SessionMenu {
-        session_id,
+        target,
         row_y,
         items,
         cursor: 0,
@@ -431,11 +707,149 @@ fn open_submenu(app: &mut App, index: usize) {
     }));
 }
 
-/// Closes the menu and runs `action` on `session_id`.
-fn dispatch(app: &mut App, session_id: &str, action: MenuAction) {
+/// Closes the menu and runs `action` on `target`.
+fn dispatch(app: &mut App, target: &MenuTarget, action: MenuAction) {
     app.sidebar.menu = None;
-    let result = match action {
-        MenuAction::OpenIn | MenuAction::MoveTo => Ok(()),
+    let result = match target {
+        MenuTarget::Session(id) => dispatch_session(app, id, action),
+        MenuTarget::Project(id) => dispatch_project(app, id, action),
+        MenuTarget::Selection => dispatch_selection(app, action),
+    };
+    crate::sessions_sidebar::report(app, result);
+}
+
+/// Runs a project menu `action` on project `project_id`.
+fn dispatch_project(app: &mut App, project_id: &str, action: MenuAction) -> Result<(), String> {
+    let project = app
+        .sidebar
+        .groups
+        .iter()
+        .find(|g| g.project_id == project_id)
+        .map(|g| g.project.clone())
+        .ok_or_else(|| "that project is no longer listed".to_string())?;
+    let listed = || crate::sessions_sidebar::project_session_ids(app, project_id);
+    match action {
+        MenuAction::NewSession => {
+            app.open_new_session_in_project(&project.into(), None)?;
+            app.sidebar.focused = false;
+        }
+        MenuAction::NewSessionOnBranch => {
+            let text = crate::sessions_sidebar::branch_session_command(app, &project);
+            prefill(app, &text);
+        }
+        MenuAction::RenameProject => prefill(
+            app,
+            &format!("/project rename --project {project_id} {}", project.name),
+        ),
+        MenuAction::MoveUp | MenuAction::MoveDown => {
+            crate::sessions_sidebar::move_project(app, project_id, action == MenuAction::MoveUp);
+        }
+        MenuAction::SelectAll => {
+            let ids = listed();
+            app.sidebar.selected = ids.into_iter().collect();
+        }
+        MenuAction::CollapseAll | MenuAction::ExpandAll => {
+            crate::sessions_sidebar::set_all_collapsed(app, action == MenuAction::CollapseAll);
+        }
+        MenuAction::Archive => {
+            let ids = listed();
+            app.archive_sessions_by_id(&ids)?;
+        }
+        MenuAction::Delete => {
+            let ids = listed();
+            app.request_delete_sessions(ids, &project.name)?;
+        }
+        MenuAction::Launch(open) => {
+            let dir = PathBuf::from(&project.worktree);
+            app.open_directory_in(&dir, open)?;
+        }
+        MenuAction::OpenIn
+        | MenuAction::MoveTo
+        | MenuAction::Requests
+        | MenuAction::OpenUrl(_)
+        | MenuAction::OpenRequest
+        | MenuAction::ToggleAutofix
+        | MenuAction::TogglePin
+        | MenuAction::ToggleUnread
+        | MenuAction::Rename
+        | MenuAction::Fork
+        | MenuAction::MoveToSection(_)
+        | MenuAction::NewSection
+        | MenuAction::ClearSelection => {}
+    }
+    Ok(())
+}
+
+/// Runs a selection menu `action` on every selected session.
+fn dispatch_selection(app: &mut App, action: MenuAction) -> Result<(), String> {
+    let ids: Vec<String> = app.sidebar.selected.iter().cloned().collect();
+    let n = ids.len();
+    match action {
+        MenuAction::TogglePin => {
+            let pin = !ids.iter().all(|id| app.sidebar.pinned.contains(id));
+            for id in &ids {
+                if app.sidebar.pinned.contains(id) != pin {
+                    app.toggle_session_pin(id)?;
+                }
+            }
+            app.status = format!("{n} session(s) {}", if pin { "pinned" } else { "unpinned" });
+        }
+        MenuAction::ToggleUnread => {
+            let unread = !ids.iter().all(|id| is_unread(app, id));
+            for id in &ids {
+                if is_unread(app, id) != unread {
+                    app.toggle_session_unread(id)?;
+                }
+            }
+            app.status = format!(
+                "{n} session(s) marked {}",
+                if unread { "unread" } else { "read" }
+            );
+        }
+        MenuAction::MoveToSection(section) => {
+            for id in &ids {
+                app.move_session_to_section(id, section.as_deref())?;
+            }
+            app.status = format!("{n} session(s) moved");
+        }
+        MenuAction::ClearSelection => app.sidebar.selected.clear(),
+        MenuAction::Archive => app.archive_sessions_by_id(&ids)?,
+        MenuAction::Delete => app.request_delete_sessions(ids, "the selection")?,
+        MenuAction::OpenIn
+        | MenuAction::MoveTo
+        | MenuAction::Requests
+        | MenuAction::OpenUrl(_)
+        | MenuAction::OpenRequest
+        | MenuAction::ToggleAutofix
+        | MenuAction::Rename
+        | MenuAction::Fork
+        | MenuAction::Launch(_)
+        | MenuAction::NewSection
+        | MenuAction::NewSession
+        | MenuAction::NewSessionOnBranch
+        | MenuAction::RenameProject
+        | MenuAction::MoveUp
+        | MenuAction::MoveDown
+        | MenuAction::SelectAll
+        | MenuAction::CollapseAll
+        | MenuAction::ExpandAll => {}
+    }
+    Ok(())
+}
+
+/// Puts `text` in the input with the cursor at its end and returns focus
+/// to the input.
+fn prefill(app: &mut App, text: &str) {
+    app.session.input_cursor = text.chars().count();
+    app.session.input = text.to_string();
+    app.sidebar.focused = false;
+}
+
+/// Runs a session menu `action` on `session_id`.
+fn dispatch_session(app: &mut App, session_id: &str, action: MenuAction) -> Result<(), String> {
+    match action {
+        MenuAction::Requests | MenuAction::OpenIn | MenuAction::MoveTo => Ok(()),
+        MenuAction::OpenUrl(url) => app.open_url(&url),
         MenuAction::OpenRequest => app.open_session_request(session_id),
         MenuAction::ToggleAutofix => app
             .toggle_session_autofix(session_id)
@@ -457,8 +871,16 @@ fn dispatch(app: &mut App, session_id: &str, action: MenuAction) {
             crate::sessions_sidebar::begin_prefill(app, session_id, "/session section new ");
             Ok(())
         }
-    };
-    crate::sessions_sidebar::report(app, result);
+        MenuAction::NewSession
+        | MenuAction::NewSessionOnBranch
+        | MenuAction::RenameProject
+        | MenuAction::MoveUp
+        | MenuAction::MoveDown
+        | MenuAction::SelectAll
+        | MenuAction::ClearSelection
+        | MenuAction::CollapseAll
+        | MenuAction::ExpandAll => Ok(()),
+    }
 }
 
 /// Runs the item at `index` of the open menu (`in_submenu` false) or of its
@@ -478,12 +900,15 @@ fn activate(app: &mut App, index: usize, in_submenu: bool) {
     let Some(item) = level.items.get(index) else {
         return;
     };
+    if !item.enabled {
+        return;
+    }
     if item.action.opens_submenu() {
         open_submenu(app, index);
         return;
     }
-    let (session_id, action) = (menu.session_id.clone(), item.action.clone());
-    dispatch(app, &session_id, action);
+    let (target, action) = (menu.target.clone(), item.action.clone());
+    dispatch(app, &target, action);
 }
 
 /// Handles a key while the menu is open.

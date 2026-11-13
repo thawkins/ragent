@@ -855,6 +855,31 @@ impl App {
         Ok(())
     }
 
+    /// Archives every session in `ids` (the project and selection menus).
+    /// Every session is tried; a running one is skipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming how many could not be archived, and the
+    /// first reason.
+    pub(crate) fn archive_sessions_by_id(&mut self, ids: &[String]) -> Result<(), String> {
+        let mut failed: Vec<String> = Vec::new();
+        for id in ids {
+            if let Err(e) = self.archive_session_by_id(id) {
+                failed.push(e);
+            }
+        }
+        let done = ids.len() - failed.len();
+        self.status = format!("archived {done} session(s)");
+        match failed.first() {
+            None => Ok(()),
+            Some(first) => Err(format!(
+                "archived {done}, {} not archived: {first}",
+                failed.len()
+            )),
+        }
+    }
+
     /// Directory of session `id`: its open view's, else the stored one.
     pub(crate) fn session_directory(&self, id: &str) -> Option<PathBuf> {
         std::iter::once(&self.session)
@@ -885,6 +910,19 @@ impl App {
         let dir = self
             .session_directory(id)
             .ok_or_else(|| format!("session not found: {id}"))?;
+        self.open_directory_in(&dir, target)
+    }
+
+    /// Opens directory `dir` in `target` (editor, file manager, terminal).
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when no such program is found or it cannot start.
+    pub(crate) fn open_directory_in(
+        &mut self,
+        dir: &std::path::Path,
+        target: crate::open_in::OpenTarget,
+    ) -> Result<(), String> {
         let env = crate::open_in::LaunchEnv::current();
         let spec = crate::open_in::launch_spec(target, &dir, &env)
             .ok_or_else(|| format!("no {} found", target.label().to_lowercase()))?;
@@ -911,14 +949,24 @@ impl App {
         let request = self
             .session_request_of(id)
             .ok_or("this session is not bound to a pull or merge request")?;
+        self.open_url(&request.web_url)
+    }
+
+    /// Opens web URL `url` in the default browser (the `PR/MRs` list).
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when `url` is not an `http(s)` URL or the browser
+    /// cannot start.
+    pub(crate) fn open_url(&mut self, url: &str) -> Result<(), String> {
         let env = crate::open_in::LaunchEnv::current();
-        let spec = crate::open_in::url_spec(&request.web_url, &env)
-            .ok_or_else(|| format!("`{}` is not a web URL", request.web_url))?;
+        let spec = crate::open_in::url_spec(url, &env)
+            .ok_or_else(|| format!("`{url}` is not a web URL"))?;
         match self.sidebar.launch_log.as_mut() {
             Some(log) => log.push(spec),
             None => crate::open_in::spawn(&spec)?,
         }
-        self.status = format!("opened {}", request.web_url);
+        self.status = format!("opened {url}");
         Ok(())
     }
 
@@ -1045,13 +1093,14 @@ impl App {
             .any(|v| v.session_id.as_deref() == Some(id) && v.is_processing)
     }
 
-    /// Marks session `id` unread, or read when it is unread (SESSIONMENU
-    /// FR-08). The mark is stored, and copied to the session's open view.
+    /// Whether session `id` carries the unread mark: stored, or set on its
+    /// open view. Unlike the sidebar's attention marker this is not masked
+    /// by a waiting, running or failed state.
     ///
     /// # Errors
     ///
-    /// Returns a message when storage cannot be read or updated.
-    pub(crate) fn toggle_session_unread(&mut self, id: &str) -> Result<(), String> {
+    /// Returns a message when storage cannot be read.
+    pub(crate) fn session_unread(&self, id: &str) -> Result<bool, String> {
         let stored = self
             .storage
             .unread_session_ids()
@@ -1060,7 +1109,17 @@ impl App {
         let open_unread = std::iter::once(&self.session)
             .chain(self.background.iter())
             .any(|v| v.session_id.as_deref() == Some(id) && v.unread);
-        let unread = !(stored || open_unread);
+        Ok(stored || open_unread)
+    }
+
+    /// Marks session `id` unread, or read when it is unread (SESSIONMENU
+    /// FR-08). The mark is stored, and copied to the session's open view.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when storage cannot be read or updated.
+    pub(crate) fn toggle_session_unread(&mut self, id: &str) -> Result<(), String> {
+        let unread = !self.session_unread(id)?;
         self.storage
             .set_session_unread(id, unread)
             .map_err(|e| e.to_string())?;
@@ -1132,6 +1191,61 @@ impl App {
             children: tree.len() - 1,
         });
         Ok(())
+    }
+
+    /// Opens one delete confirmation for every session in `ids` (the
+    /// project and selection menus); `label` names where they come from.
+    /// A running session, or one with a running sub-agent, is refused
+    /// before asking.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when `ids` is empty or a session is running.
+    pub(crate) fn request_delete_sessions(
+        &mut self,
+        ids: Vec<String>,
+        label: &str,
+    ) -> Result<(), String> {
+        if ids.is_empty() {
+            return Err("no sessions to delete".to_string());
+        }
+        for id in &ids {
+            let tree = self
+                .storage
+                .session_tree_ids(id)
+                .map_err(|e| e.to_string())?;
+            self.check_tree_idle(id, &tree)?;
+        }
+        self.open_row_action(crate::app::RowAction::DeleteSessions {
+            session_ids: ids,
+            label: label.to_string(),
+        });
+        Ok(())
+    }
+
+    /// Deletes every session in `ids` and their sub-agent sessions, after
+    /// the confirmation. Every session is tried.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming how many could not be deleted, and the
+    /// first reason.
+    pub(crate) fn delete_sessions_by_id(&mut self, ids: &[String]) -> Result<(), String> {
+        let mut failed: Vec<String> = Vec::new();
+        for id in ids {
+            if let Err(e) = self.delete_session_by_id(id) {
+                failed.push(e);
+            }
+        }
+        let done = ids.len() - failed.len();
+        self.status = format!("deleted {done} session(s)");
+        match failed.first() {
+            None => Ok(()),
+            Some(first) => Err(format!(
+                "deleted {done}, {} not deleted: {first}",
+                failed.len()
+            )),
+        }
     }
 
     /// Refuses deleting session `id` while it, or any session in its `tree`

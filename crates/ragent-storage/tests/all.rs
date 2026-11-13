@@ -88,6 +88,8 @@ mod test_schema_version_fast_path;
 mod test_session_delete_fork;
 #[path = "test_session_grouping.rs"]
 mod test_session_grouping;
+#[path = "test_session_request_history.rs"]
+mod test_session_request_history;
 #[path = "test_sessions_list_plan.rs"]
 mod test_sessions_list_plan;
 #[path = "test_settings_and_file_storage.rs"]

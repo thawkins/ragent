@@ -610,6 +610,8 @@ mod test_probe_t022;
 mod test_project_base_model;
 #[path = "test_project_command.rs"]
 mod test_project_command;
+#[path = "test_project_menu.rs"]
+mod test_project_menu;
 #[path = "test_project_services.rs"]
 mod test_project_services;
 #[path = "test_session_menu.rs"]

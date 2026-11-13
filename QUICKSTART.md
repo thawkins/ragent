@@ -1387,7 +1387,11 @@ hides it; `Ctrl+N` opens a session; `Ctrl+Up`/`Ctrl+Down` move to the
 previous/next one; `Alt+R` returns to the last one. Right-click a session
 row (or press `m` on it with the sidebar focused) for its menu: Open PR/MR,
 Auto-fix on/off, Open in (editor, file manager, terminal), Pin, Mark as
-unread, Rename, Fork, Move to section, Archive and Delete.
+unread, Rename, Fork, Move to section, Archive and Delete. Right-click a
+project heading for the project menu (New session, Open in, Rename project,
+Move up/down, Select all, Collapse/Expand all, Archive all, Delete all
+sessions); with several sessions selected (`v` or `Ctrl`+click), the menu
+on one of them acts on all of them.
 
 ### Auto-fix for pull and merge requests
 

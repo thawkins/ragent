@@ -46,7 +46,7 @@ use ragent_types::message::{Message, MessagePart, Role};
 ///
 /// Public so tests can assert the persisted `schema_version` setting against
 /// the compiler-enforced value instead of a hard-coded literal.
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
 
 // PERF-071: static SQL bodies hoisted to `const &str` so the session read
 // paths build no `String` and the prepared-statement cache sees a stable
@@ -1339,6 +1339,29 @@ impl Storage {
                  PRIMARY KEY (session_id, head_sha, kind, item_id)
              );",
         )?;
+        // Every pull/merge request ever bound to a session (created by a
+        // tool or bound by the user), so the sidebar can count and list them
+        // after the session is rebound. Seeded from the current bindings.
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS session_request_history (
+                 session_id TEXT NOT NULL,
+                 forge TEXT NOT NULL,
+                 host TEXT NOT NULL,
+                 repo TEXT NOT NULL,
+                 number INTEGER NOT NULL,
+                 title TEXT NOT NULL DEFAULT '',
+                 web_url TEXT NOT NULL,
+                 head_branch TEXT NOT NULL,
+                 state TEXT NOT NULL,
+                 first_seen_at TEXT NOT NULL,
+                 PRIMARY KEY (session_id, host, repo, number)
+             );
+             INSERT OR IGNORE INTO session_request_history
+                 (session_id, forge, host, repo, number, title, web_url, head_branch, state,
+                  first_seen_at)
+                 SELECT session_id, forge, host, repo, number, title, web_url, head_branch,
+                        state, updated_at FROM session_requests;",
+        )?;
         tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS sidebar_sections (
                  id TEXT PRIMARY KEY,
@@ -2031,6 +2054,7 @@ impl Storage {
                 "message_fts_keys",
                 "messages",
                 "session_requests",
+                "session_request_history",
                 "autofix_events",
                 "run_cost_summaries",
                 "background_tasks",
@@ -2194,7 +2218,81 @@ impl Storage {
                 Utc::now().to_rfc3339()
             ],
         )?;
+        conn.execute(
+            "INSERT INTO session_request_history \
+             (session_id, forge, host, repo, number, title, web_url, head_branch, state, \
+              first_seen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+             ON CONFLICT(session_id, host, repo, number) DO UPDATE SET \
+              forge = excluded.forge, title = excluded.title, web_url = excluded.web_url, \
+              head_branch = excluded.head_branch, state = excluded.state",
+            params![
+                request.session_id,
+                request.forge,
+                request.host,
+                request.repo,
+                i64::try_from(request.number).unwrap_or(i64::MAX),
+                request.title,
+                request.web_url,
+                request.head_branch,
+                request.state,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
         Ok(())
+    }
+
+    /// Every pull/merge request ever bound to session `session_id`, newest
+    /// first. The current binding is among them; earlier ones stay after a
+    /// rebind or `/autofix unbind`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn session_request_history(&self, session_id: &str) -> Result<Vec<SessionRequest>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT session_id, forge, host, repo, number, title, web_url, head_branch, state \
+             FROM session_request_history WHERE session_id = ?1 \
+             ORDER BY first_seen_at DESC, number DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![session_id], |r| {
+                Ok(SessionRequest {
+                    session_id: r.get(0)?,
+                    forge: r.get(1)?,
+                    host: r.get(2)?,
+                    repo: r.get(3)?,
+                    number: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
+                    title: r.get(5)?,
+                    web_url: r.get(6)?,
+                    head_branch: r.get(7)?,
+                    state: r.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// How many pull/merge requests each session has had (see
+    /// [`Storage::session_request_history`]); sessions with none are absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn session_request_totals(&self) -> Result<HashMap<String, usize>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT session_id, COUNT(*) FROM session_request_history GROUP BY session_id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    usize::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+                ))
+            })?
+            .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+        Ok(rows)
     }
 
     /// The request session `session_id` is bound to, if any.
@@ -2482,6 +2580,18 @@ impl Storage {
         head_sha: &str,
     ) -> Result<bool> {
         let conn = lock_conn!(self)?;
+        conn.execute(
+            "UPDATE session_request_history SET state = ?2, title = ?3 \
+             WHERE session_id = ?1 AND repo = ?4 AND number = ?5 AND host = ?6",
+            params![
+                binding.session_id,
+                state,
+                title,
+                binding.repo,
+                i64::try_from(binding.number).unwrap_or(i64::MAX),
+                binding.host
+            ],
+        )?;
         let changed = conn.execute(
             "UPDATE session_requests SET state = ?2, title = ?3, head_sha = ?4, \
              last_polled_at = ?5 WHERE session_id = ?1 AND repo = ?6 AND number = ?7 \
