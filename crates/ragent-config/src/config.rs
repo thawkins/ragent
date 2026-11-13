@@ -2819,6 +2819,20 @@ impl Config {
             .unwrap_or(ExecutionBackendKind::Local)
     }
 
+    /// This config with the execution backend switched to `kind`, as a
+    /// project's own backend setting does for its sessions. The descriptor
+    /// for `kind` is the configured one (`backends`); when `kind` is already
+    /// the effective kind the config is returned unchanged, so an inline
+    /// `execution_backend` descriptor is kept.
+    #[must_use]
+    pub fn with_backend_kind(&self, kind: ExecutionBackendKind) -> Self {
+        let mut config = self.clone();
+        if self.effective_execution_backend() != kind {
+            config.execution_backend = Some(ExecutionBackend::Kind(kind.as_str().to_string()));
+        }
+        config
+    }
+
     /// Whether [`Config::execution_backend`] was set to a value that does not
     /// resolve to a known kind.
     ///

@@ -250,7 +250,9 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   Enterprise and self-managed GitLab) can run Auto-fix: it is woken when CI
   fails, the branch conflicts, or a reviewer comments, and pauses after a
   set number of tries (`/autofix`). Project headings and multi-selections
-  (`v` or `Ctrl`+click) have their own menus, and each session row shows
+  (`v` or `Ctrl`+click) have their own menus; a project's `Properties` sets
+  its description, the execution backend its new sessions use and their
+  model, each falling back to the global setting. Each session row shows
   `#N`, the number of pull/merge requests it has had, with a `PR/MRs`
   submenu that opens any of them in the browser
 - **Session management** — persistent conversation history stored in SQLite;

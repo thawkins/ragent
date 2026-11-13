@@ -46,7 +46,7 @@ use ragent_types::message::{Message, MessagePart, Role};
 ///
 /// Public so tests can assert the persisted `schema_version` setting against
 /// the compiler-enforced value instead of a hard-coded literal.
-pub const SCHEMA_VERSION: u32 = 12;
+pub const SCHEMA_VERSION: u32 = 13;
 
 // PERF-071: static SQL bodies hoisted to `const &str` so the session read
 // paths build no `String` and the prepared-statement cache sees a stable
@@ -1423,6 +1423,25 @@ impl Storage {
                 tx.execute_batch(&format!("ALTER TABLE sessions ADD COLUMN {col} {ty};"))?;
             }
         }
+        // Project properties (schema 13): a description shown after the
+        // project name, and an execution backend kind that new sessions
+        // copy into `sessions.execution_backend`. NULL means the global one.
+        for (table, col) in &[
+            ("projects", "description"),
+            ("projects", "execution_backend"),
+            ("sessions", "execution_backend"),
+        ] {
+            let has_col: bool = tx
+                .prepare_cached(&format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{col}'"
+                ))?
+                .query_row([], |r| r.get::<_, i64>(0))
+                .unwrap_or(0)
+                > 0;
+            if !has_col {
+                tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {col} TEXT;"))?;
+            }
+        }
         let legacy_roots: Vec<String> = tx
             .prepare(
                 "SELECT DISTINCT project_id FROM sessions \
@@ -1579,8 +1598,12 @@ impl Storage {
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO sessions \
-             (id, project_id, directory, parent_id, kind, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             (id, project_id, directory, parent_id, kind, created_at, updated_at, \
+              execution_backend) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \
+              CASE WHEN ?4 IS NULL \
+               THEN (SELECT execution_backend FROM projects WHERE id = ?2) \
+               ELSE (SELECT execution_backend FROM sessions WHERE id = ?4) END)",
             params![
                 id,
                 project_id,
@@ -2125,15 +2148,18 @@ impl Storage {
         let now = Utc::now().to_rfc3339();
         tx.execute(
             "INSERT INTO sessions \
-             (id, title, project_id, directory, parent_id, kind, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?6)",
+             (id, title, project_id, directory, parent_id, kind, created_at, updated_at, \
+              execution_backend) \
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?6, \
+              (SELECT execution_backend FROM sessions WHERE id = ?7))",
             params![
                 new_id,
                 title,
                 project_id,
                 directory,
                 SessionKind::Interactive.as_str(),
-                now
+                now,
+                source
             ],
         )?;
         let rows: Vec<(String, String, String, String)> = {
@@ -6385,6 +6411,8 @@ fn orphan_project(row: &SessionRow) -> crate::project::ProjectRow {
         worktree: row.directory.clone(),
         provider_id: None,
         model_id: None,
+        description: None,
+        execution_backend: None,
         remote: None,
         remote_checked: true,
         created_at: row.created_at.clone(),

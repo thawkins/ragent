@@ -117,6 +117,8 @@ pub struct SidebarState {
     pub drag_session: Option<String>,
     /// The open session context menu, if any (spec SESSIONMENU).
     pub menu: Option<crate::session_menu::SessionMenu>,
+    /// The open project `Properties` dialog, if any.
+    pub properties: Option<crate::project_properties::ProjectProperties>,
     /// Ids of the sessions in the multi-selection (not persisted).
     pub selected: BTreeSet<String>,
     /// Manual project order (project ids, top first), set by the project
@@ -153,6 +155,7 @@ impl Default for SidebarState {
             dragging: false,
             drag_session: None,
             menu: None,
+            properties: None,
             selected: BTreeSet::new(),
             project_order: Vec::new(),
             launch_log: None,
@@ -249,6 +252,9 @@ pub enum SidebarRow {
         collapsed: bool,
         /// The project's remote host kind (`github`, `gitlab`), if any.
         remote: Option<String>,
+        /// The project's description (its `Properties`), shown dim in
+        /// parentheses after the name.
+        description: Option<String>,
     },
     /// A session.
     Session {
@@ -436,6 +442,8 @@ struct SectionData<'a> {
     sessions: Vec<(&'a ragent_storage::SessionRow, String)>,
     /// Forge kind of the project's remote (`github`, `gitlab`), if any.
     remote: Option<String>,
+    /// The project's description, if any.
+    description: Option<String>,
     /// Whether the heading is shown when the section has no sessions.
     show_empty: bool,
     /// Whether a blank line goes above the heading (`Pinned` and projects).
@@ -470,6 +478,7 @@ fn sections(app: &App) -> Vec<SectionData<'_>> {
         label: "Pinned".to_string(),
         sessions: pinned,
         remote: None,
+        description: None,
         // Always listed, so a session can be dragged onto it to pin it.
         show_empty: true,
         spaced: true,
@@ -486,6 +495,7 @@ fn sections(app: &App) -> Vec<SectionData<'_>> {
             label: section.name.clone(),
             sessions,
             remote: None,
+            description: None,
             show_empty: false,
             spaced: false,
         });
@@ -527,6 +537,7 @@ fn sections(app: &App) -> Vec<SectionData<'_>> {
             label,
             sessions,
             remote: group.project.remote.as_ref().map(|r| r.kind.clone()),
+            description: group.project.description.clone(),
             // A project with no sessions is still listed, so a session
             // can be started in it (spec `projects`).
             show_empty: true,
@@ -569,6 +580,7 @@ fn push_section(rows: &mut Vec<SidebarRow>, app: &App, section: &SectionData<'_>
         count: matching.len(),
         collapsed,
         remote: section.remote.clone(),
+        description: section.description.clone(),
     });
     if !collapsed {
         rows.extend(matching.into_iter().map(|s| {
@@ -780,6 +792,7 @@ fn row_line(
             count,
             collapsed,
             remote,
+            description,
         } => {
             // A quiet heading so the session titles carry the list: the name
             // in grey (yellow for `Pinned`), then a dimmer chevron (`v` open,
@@ -800,8 +813,17 @@ fn row_line(
             };
             let name = fit(label, width);
             let suffix = fit(&suffix, width.saturating_sub(name.chars().count()));
+            // The description gives way first: it gets what the name and
+            // the chevron leave, and is dropped below a few characters.
+            let room = width.saturating_sub(name.chars().count() + suffix.chars().count());
+            let note = description
+                .as_deref()
+                .filter(|_| room >= 6)
+                .map(|d| format!(" ({})", fit(d, room - 3)))
+                .unwrap_or_default();
             Line::from(vec![
                 Span::styled(name, Style::default().fg(name_colour)),
+                Span::styled(note, Style::default().fg(Color::DarkGray)),
                 Span::styled(suffix, Style::default().fg(Color::DarkGray)),
             ])
         }
@@ -1375,6 +1397,9 @@ fn cursor_session(app: &App) -> Option<String> {
 ///
 /// `true` when the sidebar consumed the key.
 pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
+    if crate::project_properties::handle_key(app, key) {
+        return true;
+    }
     if crate::session_menu::handle_key(app, key) {
         return true;
     }
@@ -1536,6 +1561,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
 ///
 /// `true` when the sidebar consumed the event.
 pub fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
+    if crate::project_properties::handle_mouse(app, event) {
+        return true;
+    }
     if crate::session_menu::handle_mouse(app, event) {
         return true;
     }

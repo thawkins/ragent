@@ -3855,6 +3855,11 @@ impl App {
     /// Insert pasted text at the cursor, stripping `\r` and replacing any
     /// active keyboard or mouse selection.
     pub fn handle_paste_text(&mut self, text: &str) {
+        // The project `Properties` dialog takes the paste; the chat draft
+        // behind it is left alone.
+        if crate::project_properties::handle_paste(self, text) {
+            return;
+        }
         let clean: String = text.chars().filter(|&c| c != '\r').collect();
         if clean.is_empty() {
             return;
@@ -4380,6 +4385,8 @@ impl App {
                     Ok(None) => {}
                     Err(e) => tracing::debug!(error = %e, "could not read the session's project"),
                 }
+                // The status bar shows the backend it copied from its project.
+                self.refresh_active_backend();
                 // A fresh session starts with an empty queue (NFR-005).
                 self.clear_input_queue();
                 // Map the primary session's short_sid to the current agent name
@@ -4537,6 +4544,8 @@ impl App {
         let msg_count = messages.len();
 
         self.session.session_id = Some(session_id.to_string());
+        // The status bar shows the backend the session runs on.
+        self.refresh_active_backend();
         // Switching or resuming a session drops any queued messages from the
         // previous session (NFR-005: the queue is not persisted and does not
         // cross a session boundary).

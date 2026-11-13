@@ -72,6 +72,8 @@ mod test_message_retention;
 mod test_message_search;
 #[path = "test_ms04_diff_boundary.rs"]
 mod test_ms04_diff_boundary;
+#[path = "test_project_properties.rs"]
+mod test_project_properties;
 #[path = "test_projects_crud.rs"]
 mod test_projects_crud;
 #[path = "test_projects_migration.rs"]

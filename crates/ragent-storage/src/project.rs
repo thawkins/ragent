@@ -52,6 +52,11 @@ pub struct ProjectRow {
     pub provider_id: Option<String>,
     /// Base model new sessions start with, if set.
     pub model_id: Option<String>,
+    /// Friendly description shown after the name in the sidebar, if set.
+    pub description: Option<String>,
+    /// Execution backend kind (`local`, `podman`, `docker`, `remote`) new
+    /// sessions use; `None` means the global `execution_backend`.
+    pub execution_backend: Option<String>,
     /// The remote the worktree was checked out from, if recognised.
     pub remote: Option<ProjectRemoteRow>,
     /// Whether remote detection has run for this project.

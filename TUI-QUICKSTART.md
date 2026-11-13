@@ -1051,7 +1051,8 @@ press `Enter`. `Esc` closes it.
 
 Right-click a project heading (or press `m` on it) for the project menu:
 New session (`N`), New session on branch (`B`), Open in, Rename project
-(`R`), Move up/down (`K`/`J`, the order is remembered), Select all (`S`),
+(`R`), Properties (`P`: description, backend and model for the project;
+an unset one follows the global setting), Move up/down (`K`/`J`, the order is remembered), Select all (`S`),
 Collapse all/Expand all (`C`/`E`), Archive all (`A`) and Delete all
 sessions (`D`, asks once). Greyed items cannot run right now.
 

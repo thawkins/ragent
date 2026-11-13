@@ -156,3 +156,39 @@ fn test_project_manager_checks_unchecked_remotes_once() {
     assert_eq!(remote.path, "acme/oteldev");
     assert_eq!(m.projects.check_unchecked_remotes().expect("again"), 0);
 }
+
+#[test]
+fn test_project_manager_description_is_trimmed_and_bounded() {
+    let m = managers();
+    let project = m
+        .projects
+        .resolve_for_dir(std::path::Path::new("/nonexistent/describe"))
+        .expect("project");
+
+    m.projects
+        .set_description(&project.id, Some("  AI coding agent  "))
+        .expect("describe");
+    let row = m
+        .storage
+        .get_project(&project.id)
+        .expect("get")
+        .expect("row");
+    assert_eq!(row.description.as_deref(), Some("AI coding agent"));
+
+    let long = "x".repeat(ragent_agent::project::MAX_DESCRIPTION_CHARS + 1);
+    assert!(
+        m.projects
+            .set_description(&project.id, Some(&long))
+            .is_err()
+    );
+
+    m.projects
+        .set_description(&project.id, Some("   "))
+        .expect("blank clears");
+    let row = m
+        .storage
+        .get_project(&project.id)
+        .expect("get")
+        .expect("row");
+    assert_eq!(row.description, None);
+}

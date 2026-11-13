@@ -548,3 +548,191 @@ async fn test_project_menu_selection_skips_sessions_hidden_by_the_filter() {
     assert!(pinned.contains(&a), "{pinned:?}");
     assert!(!pinned.contains(&b), "hidden by the filter: {pinned:?}");
 }
+
+#[tokio::test]
+async fn test_project_menu_properties_saves_description_and_backend() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project = project_of(&mut app, &a);
+    open_project_menu(&mut app, &project).await;
+    let menu = app.sidebar.menu.clone().expect("menu open");
+    assert!(
+        menu.items.iter().any(|i| i.label == "Properties..."),
+        "{:?}",
+        menu.items
+    );
+
+    app.handle_key_event(key(KeyCode::Char('p'))).await;
+    let dialog = app.sidebar.properties.clone().expect("properties open");
+    assert_eq!(dialog.project_id, project);
+    assert!(dialog.backends[0].label.starts_with("Global ("));
+    assert!(dialog.models[0].label.starts_with("Global ("));
+
+    for c in "Agent home".chars() {
+        app.handle_key_event(key(KeyCode::Char(c))).await;
+    }
+    // Backend: step from `Global` to `local`, always available.
+    app.handle_key_event(key(KeyCode::Tab)).await;
+    app.handle_key_event(key(KeyCode::Right)).await;
+    let dialog = app.sidebar.properties.clone().expect("still open");
+    assert_eq!(
+        dialog.backends[dialog.backend].value.as_deref(),
+        Some("local")
+    );
+    app.handle_key_event(key(KeyCode::Enter)).await;
+
+    assert!(app.sidebar.properties.is_none(), "saved and closed");
+    let row = app
+        .storage
+        .get_project(&project)
+        .expect("get")
+        .expect("row");
+    assert_eq!(row.description.as_deref(), Some("Agent home"));
+    assert_eq!(row.execution_backend.as_deref(), Some("local"));
+    let rows = draw(&mut app);
+    assert!(
+        rows.iter().any(|r| r.contains("(Agent home)")),
+        "heading shows the description: {rows:#?}"
+    );
+
+    // A session created now copies the project's backend.
+    app.execute_slash_command("/session new").await;
+    let created = app.session.session_id.clone().expect("new session");
+    assert_eq!(
+        app.storage
+            .session_backend(&created)
+            .expect("backend")
+            .as_deref(),
+        Some("local")
+    );
+    assert_eq!(app.session.active_backend, "local");
+}
+
+#[tokio::test]
+async fn test_project_menu_properties_esc_discards_and_disabled_backend_is_skipped() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project = project_of(&mut app, &a);
+    open_project_menu(&mut app, &project).await;
+    app.handle_key_event(key(KeyCode::Char('p'))).await;
+    app.handle_key_event(key(KeyCode::Char('x'))).await;
+
+    // No remote backend is configured in tests: `remote` is greyed out, and
+    // stepping left from `Global` skips it.
+    app.handle_key_event(key(KeyCode::Tab)).await;
+    let dialog = app.sidebar.properties.clone().expect("open");
+    let remote = dialog
+        .backends
+        .iter()
+        .position(|c| c.value.as_deref() == Some("remote"))
+        .expect("remote listed");
+    assert!(!dialog.backends[remote].enabled, "{:?}", dialog.backends);
+    app.handle_key_event(key(KeyCode::Left)).await;
+    let dialog = app.sidebar.properties.clone().expect("open");
+    assert_ne!(dialog.backend, remote);
+
+    app.handle_key_event(key(KeyCode::Esc)).await;
+
+    assert!(app.sidebar.properties.is_none());
+    let row = app
+        .storage
+        .get_project(&project)
+        .expect("get")
+        .expect("row");
+    assert_eq!((row.description, row.execution_backend), (None, None));
+}
+
+#[tokio::test]
+async fn test_project_menu_backend_and_describe_commands() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project = project_of(&mut app, &a);
+
+    app.execute_slash_command(&format!("/project describe --project {project} Tools"))
+        .await;
+    app.execute_slash_command(&format!("/project backend --project {project} local"))
+        .await;
+    app.execute_slash_command(&format!("/project backend --project {project} nonsense"))
+        .await;
+
+    let row = app
+        .storage
+        .get_project(&project)
+        .expect("get")
+        .expect("row");
+    assert_eq!(row.description.as_deref(), Some("Tools"));
+    assert_eq!(row.execution_backend.as_deref(), Some("local"));
+
+    app.execute_slash_command(&format!("/project backend --project {project} global"))
+        .await;
+    let row = app
+        .storage
+        .get_project(&project)
+        .expect("get")
+        .expect("row");
+    assert_eq!(row.execution_backend, None);
+}
+
+#[tokio::test]
+async fn test_project_menu_backend_switch_on_a_project_session_is_its_own() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project = project_of(&mut app, &a);
+    app.execute_slash_command(&format!("/project backend --project {project} local"))
+        .await;
+    app.execute_slash_command("/session new").await;
+    let created = app.session.session_id.clone().expect("new session");
+
+    app.execute_slash_command("/backend local").await;
+
+    assert_eq!(
+        app.storage
+            .session_backend(&created)
+            .expect("backend")
+            .as_deref(),
+        Some("local")
+    );
+    assert_eq!(app.session.active_backend, "local");
+    let last = app
+        .session
+        .messages
+        .iter()
+        .rev()
+        .map(|m| m.text_content())
+        .find(|t| !t.is_empty())
+        .unwrap_or_default();
+    assert!(last.contains("This session now runs tools on"), "{last}");
+}
+
+#[tokio::test]
+async fn test_project_menu_properties_paste_and_long_description_stay_in_view() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project = project_of(&mut app, &a);
+    app.session.input = "draft".to_string();
+    open_project_menu(&mut app, &project).await;
+    app.handle_key_event(key(KeyCode::Char('p'))).await;
+
+    // A paste goes into the description, not the chat draft behind it.
+    let long = format!("{}TAIL", "word ".repeat(14));
+    app.handle_paste_text(&format!("{long}\nmore"));
+
+    let dialog = app.sidebar.properties.clone().expect("open");
+    assert_eq!(app.session.input, "draft", "the chat draft is untouched");
+    assert!(
+        dialog.description.starts_with(&long),
+        "{}",
+        dialog.description
+    );
+    assert!(!dialog.description.contains('\n'));
+    assert!(dialog.description.chars().count() <= 80);
+
+    // The caret is past the visible width; the field shows the text around it.
+    let rows = draw(&mut app);
+    assert!(
+        rows.iter().any(|r| r.contains("more_")),
+        "the caret end is visible: {rows:#?}"
+    );
+
+    // On a choice field a paste changes nothing.
+    app.handle_key_event(key(KeyCode::Tab)).await;
+    app.handle_paste_text("ignored");
+    let after = app.sidebar.properties.clone().expect("open");
+    assert_eq!(after.description, dialog.description);
+    assert_eq!(app.session.input, "draft");
+}

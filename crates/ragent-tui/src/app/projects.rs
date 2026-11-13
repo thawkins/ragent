@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use ragent_agent::project::worktree::{default_worktree_root, prune_worktrees};
 use ragent_agent::project::{Project, ProjectManager, parse_model_ref};
+use ragent_config::ExecutionBackendKind;
 
 use super::helpers::{from_cmd, short_session_id};
 use super::state::App;
@@ -33,11 +34,18 @@ this directory and register it |\n\
 | `/project model <provider>/<model>` | Set the model new sessions in the project start with |\n\
 | `/project model current` | Use the focused session's model as the base model |\n\
 | `/project model clear` | Remove the base model |\n\
+| `/project describe <text>` | Set the description shown after the name in the sidebar \
+(`clear` removes it) |\n\
+| `/project backend <local\\|podman\\|docker\\|remote>` | Set the execution backend new \
+sessions in the project use (`global` uses the global one; existing sessions keep theirs) |\n\
 | `/project refresh` | Re-read the remote and refresh pull/merge request counts |\n\
 | `/project prune` | Remove clean worktrees of archived sessions |\n\
 | `/project remove <name>` | Remove a project with no live sessions from the list \
 (files are kept) |\n\
 | `/project help` | Show this help |\n\n\
+`rename`, `describe`, `backend` and `model` take `--project <id>` before their argument \
+to act on a listed project instead of the focused one. The sidebar's project menu \
+`Properties...` sets the description, backend and model together.\n\n\
 Start a session in a project with `/session new --project <name> [--branch <branch>]`. \
 With `--branch` the session gets its own git worktree at that branch. The project's \
 checkout must be inside the launch directory or a `dirs.allowed_roots` entry.";
@@ -602,9 +610,161 @@ impl App {
         ))
     }
 
-    /// `/project model <provider>/<model> | current | clear`.
-    fn project_model(&mut self, arg: &str) -> Result<String, String> {
-        let project = self.focused_project()?;
+    /// The project a `/project` subcommand acts on, and the rest of its
+    /// arguments: `--project <id> <rest>` names a listed project (the
+    /// sidebar's project menu and `Properties`); otherwise the focused one.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when `--project` has no id, or no such project.
+    fn target_project<'a>(&self, rest: &'a str) -> Result<(Project, &'a str), String> {
+        match rest.strip_prefix("--project") {
+            Some(tail) if tail.is_empty() || tail.starts_with(char::is_whitespace) => {
+                let tail = tail.trim_start();
+                let (id, rest) = tail
+                    .split_once(char::is_whitespace)
+                    .map_or((tail, ""), |(id, rest)| (id, rest.trim()));
+                if id.is_empty() {
+                    return Err("`--project` needs a project id".to_string());
+                }
+                Ok((self.named_project(id)?, rest))
+            }
+            Some(_) | None => Ok((self.focused_project()?, rest)),
+        }
+    }
+
+    /// `/project describe [--project <id>] [<text> | clear]`: the
+    /// description shown after the project's name in the sidebar.
+    fn project_describe(&self, project: &Project, text: &str) -> Result<String, String> {
+        let manager = self.project_manager();
+        match text {
+            "" => {
+                let stored = self
+                    .storage
+                    .get_project(&project.id)
+                    .map_err(|e| e.to_string())?
+                    .and_then(|row| row.description);
+                Ok(format!(
+                    "Description of **{}**: {}",
+                    project.name,
+                    stored.as_deref().unwrap_or("none")
+                ))
+            }
+            "clear" | "none" => {
+                manager
+                    .set_description(&project.id, None)
+                    .map_err(|e| e.to_string())?;
+                Ok(format!("Description of **{}** cleared.", project.name))
+            }
+            text => {
+                manager
+                    .set_description(&project.id, Some(text))
+                    .map_err(|e| e.to_string())?;
+                Ok(format!("**{}** is now described as: {text}", project.name))
+            }
+        }
+    }
+
+    /// `/project backend [--project <id>] [<local|podman|docker|remote> |
+    /// global]`: the execution backend sessions created in the project from
+    /// now on use. Existing sessions keep theirs.
+    fn project_backend(&self, project: &Project, kind: &str) -> Result<String, String> {
+        let manager = self.project_manager();
+        let global = self
+            .session_processor
+            .load_config_for(&project.worktree)
+            .effective_execution_backend();
+        match kind.to_ascii_lowercase().as_str() {
+            "" => {
+                let stored = self
+                    .storage
+                    .get_project(&project.id)
+                    .map_err(|e| e.to_string())?
+                    .and_then(|row| row.execution_backend);
+                Ok(match stored {
+                    Some(kind) => format!("Backend of **{}**: {kind}", project.name),
+                    None => format!(
+                        "Backend of **{}**: global ({})",
+                        project.name,
+                        global.as_str()
+                    ),
+                })
+            }
+            "global" | "clear" | "none" => {
+                manager
+                    .set_backend(&project.id, None)
+                    .map_err(|e| e.to_string())?;
+                Ok(format!(
+                    "New sessions in **{}** use the global backend ({}).",
+                    project.name,
+                    global.as_str()
+                ))
+            }
+            label => {
+                let kind = ExecutionBackendKind::from_label(label).ok_or_else(|| {
+                    format!("unknown backend `{label}`: local, podman, docker, remote or global")
+                })?;
+                if let Some((_, Some(why))) = self
+                    .project_backend_choices(&project.worktree)
+                    .into_iter()
+                    .find(|(k, _)| *k == kind)
+                {
+                    return Err(format!("{} cannot run here: {why}", kind.as_str()));
+                }
+                manager
+                    .set_backend(&project.id, Some(kind))
+                    .map_err(|e| e.to_string())?;
+                Ok(format!(
+                    "New sessions in **{}** run tools on `{}`; existing sessions keep theirs.",
+                    project.name,
+                    kind.as_str()
+                ))
+            }
+        }
+    }
+
+    /// Every execution backend kind, in `Properties` order, with the reason
+    /// it cannot run for a project at `dir` (`None`: it can). A kind is
+    /// checked as a session there would use it: that directory's
+    /// configuration, the descriptor for the kind, its runtime on `PATH`, a
+    /// remote's URL and key.
+    pub(crate) fn project_backend_choices(
+        &self,
+        dir: &Path,
+    ) -> Vec<(ExecutionBackendKind, Option<String>)> {
+        let config = self.session_processor.load_config_for(dir);
+        [
+            ExecutionBackendKind::Local,
+            ExecutionBackendKind::Podman,
+            ExecutionBackendKind::Docker,
+            ExecutionBackendKind::Remote,
+        ]
+        .into_iter()
+        .map(|kind| {
+            let registry = ragent_agent::backend::BackendRegistry::from_config(
+                &config.with_backend_kind(kind),
+                dir,
+            );
+            let entries = registry.entries();
+            let ok = kind.is_local()
+                || entries
+                    .iter()
+                    .any(|e| e.kind() == kind && e.health().is_ok());
+            let why = (!ok).then(|| {
+                entries
+                    .iter()
+                    .find(|e| e.kind() == kind)
+                    .and_then(|e| e.detail().map(str::to_string))
+                    .unwrap_or_else(|| "not configured".to_string())
+            });
+            (kind, why)
+        })
+        .collect()
+    }
+
+    /// `/project model [--project <id>] <provider>/<model> | current | clear`.
+    fn project_model(&mut self, project: &Project, arg: &str) -> Result<String, String> {
+        let project = project.clone();
         let manager = self.project_manager();
         match arg {
             "" => Ok(format!(
@@ -679,32 +839,24 @@ impl App {
             "add" if rest.is_empty() => Err("usage: /project add <path-or-url>".to_string()),
             "add" => self.project_add(rest),
             "rename" if rest.is_empty() => Err("usage: /project rename <name>".to_string()),
-            "rename" => {
-                // `--project <id> <name>` renames a listed project (the
-                // sidebar's project menu); otherwise the focused one.
-                let target = match rest.strip_prefix("--project") {
-                    // A bare `--project` is a usage error, not a new name.
-                    Some(tail) if tail.is_empty() || tail.starts_with(char::is_whitespace) => tail
-                        .trim_start()
-                        .split_once(char::is_whitespace)
-                        .map(|(id, name)| (Some(id), name.trim()))
-                        .ok_or_else(|| {
-                            "usage: /project rename [--project <id>] <name>".to_string()
-                        }),
-                    Some(_) | None => Ok((None, rest)),
-                };
-                target.and_then(|(id, name)| {
-                    let project = match id {
-                        Some(id) => self.named_project(id)?,
-                        None => self.focused_project()?,
-                    };
-                    self.project_manager()
-                        .rename(&project.id, name)
-                        .map_err(|e| e.to_string())?;
-                    Ok(format!("Project renamed to **{}**.", name.trim()))
-                })
-            }
-            "model" => self.project_model(rest),
+            "rename" => self.target_project(rest).and_then(|(project, name)| {
+                if name.is_empty() {
+                    return Err("usage: /project rename [--project <id>] <name>".to_string());
+                }
+                self.project_manager()
+                    .rename(&project.id, name)
+                    .map_err(|e| e.to_string())?;
+                Ok(format!("Project renamed to **{name}**."))
+            }),
+            "describe" => self
+                .target_project(rest)
+                .and_then(|(project, text)| self.project_describe(&project, text)),
+            "backend" => self
+                .target_project(rest)
+                .and_then(|(project, kind)| self.project_backend(&project, kind)),
+            "model" => self
+                .target_project(rest)
+                .and_then(|(project, arg)| self.project_model(&project, arg)),
             "refresh" => self.focused_project().and_then(|p| {
                 let refreshed = self
                     .project_manager()
