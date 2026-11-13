@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+## [1.0.169] - 2026-11-13
+
+Projects, session menus and PR/MR Auto-fix release.
+
+Projects become the container for sessions: a project heading carries its own
+menu and `Properties...` dialog, sessions can run in a `git worktree` on a
+branch, and each session row shows how many pull/merge requests its branch has
+had. The session sidebar gains a multi-selection, user sections, pinning and a
+right-click menu, and a session bound to a PR/MR can run Auto-fix.
+
+### Fixed - project Properties review (`91e83c65`)
+
+- A session's backend is resolved once per turn
+  (`SessionProcessor::session_config_for`): an automation override wins, then
+  the stored session kind, then the global one. Remote routing and tool
+  dispatch both read that one result, so a stored `remote` relays, a stored
+  `local` is not relayed by a global `remote`, and a project setting can no
+  longer loosen an automation's confinement.
+- Backend availability and the `Global (...)` label come from the target
+  project's own configuration, not the focused project's.
+- The status bar shows the stored backend after the first session is created
+  and after a resume, not only after a focus change.
+- A paste while Properties is open goes into the description (or is dropped on
+  a choice field) instead of the hidden chat draft.
+- The description field shows the text around the caret, so a long description
+  stays editable in view.
+
+### Security
+
+- Lockfile-only bump of `quinn-proto` 0.11.19 and `quinn-udp` 0.5.16
+  (RUSTSEC-2026-0523, -0524, -0538): a long Retry token could panic or exhaust
+  memory, `MAX_STREAM_DATA` could open streams past the limit, and the receive
+  loop could spin on a truncated datagram.
+
 ### Added - project Properties
 
 - The project heading menu has `Properties...` (`P`): a dialog that sets

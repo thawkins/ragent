@@ -79,9 +79,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex,
   codeindex_explain, codeindex_path, codeindex_communities, codeindex_godnodes
   (read-only, hardwired always-allowed)
-- **Git** (18) — git_status, git_log, git_diff, git_branch, git_show, git_remote,
+- **Git** (19) — git_status, git_log, git_diff, git_branch, git_show, git_remote,
   git_tag, git_add, git_reset, git_checkout, git_commit, git_stash, git_cherry_pick,
-  git_push, git_pull, git_fetch, git_clone, git_merge
+  git_push, git_pull, git_fetch, git_clone, git_merge, plus `autofix_add` (push the
+  current branch, open or reuse its PR/MR against the branch it came from, bind it
+  and turn Auto-fix on)
 - **GitHub** (11) and **GitLab** (19) — issues, PRs/MRs, pipelines, jobs, and CI/CD
 - **Teams** (20) — the full team lifecycle, shared tasks (create, list, claim,
   complete, assign and lead-only `team_task_cancel`), mailbox messaging, and
@@ -141,10 +143,10 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   distribution, CPU, graphics adapters and graphics-API versions, physical
   hardware, memory, uptime, and process environment; also `/osinfo show`),
   tool_info and commands_info (registry and slash-command dumps)
-- One each: **model** (model_info), **network** (http_request), **system**
-  (mf_version, mf_cache_clear, autofix_status - watched PR/MR Auto-fix requests and
-  watcher state), **git** also has autofix_add (push the current branch, open or
-  reuse its PR/MR against the branch it came from, bind it and turn Auto-fix on), **skill** (Skill), **storage** (initiative),
+- **System** (3) — mf_version, mf_cache_clear and autofix_status (watched
+  PR/MR Auto-fix requests and watcher state)
+- One each: **model** (model_info), **network** (http_request), **skill**
+  (Skill), **storage** (initiative),
   **ask_user** (AskUserQuestion - the group name is the permission family, which
   the rename left unchanged)
 - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers,
@@ -1011,7 +1013,7 @@ Key optimisations include:
 
 ## Project Status
 
-**v1.0.158** — The core architecture, tool system, TUI, HTTP server, memory system,
+**v1.0.169** — The core architecture, tool system, TUI, HTTP server, memory system,
 teams/swarm coordination, spec
 management, skills system, research system, plugin and connector systems, pluggable
 execution backends, ACP integration, the automation service, and multi-layered

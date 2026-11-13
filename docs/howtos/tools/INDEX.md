@@ -6,7 +6,7 @@ worked examples.
 
 > **Scope:** Tool names, parameter schemas, and usage patterns for every
 > registered tool plus the dynamic `mcp_tool`. This is the canonical place for the
-> tool count: the default build registered 150 tools at v1.0.168, and
+> tool count: the default build registers 152 tools at v1.0.169, and
 > `ragent --dry-run --json run x` reports the live figure (the `total` item of its
 > `tools` section, followed by one item per permission category). `mf_screenshot`
 > adds one when a drivable headless browser engine is present. For TUI

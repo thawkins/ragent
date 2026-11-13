@@ -1,9 +1,16 @@
 # Project Statistics
 
-**Version:** 1.0.168
+**Version:** 1.0.169
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
+> **`1.0.169` is a release-only bump.** It publishes the project Properties,
+> project-heading/selection menus, PR/MR history, session context menu and
+> PR/MR Auto-fix work that the paragraphs below already describe as
+> un-re-measured, plus their review fixes and a lockfile-only
+> `quinn-proto`/`quinn-udp` security bump, so no table in this file moves.
+> The tables are measured against the `1.0.168` tree.
+>
 > Metrics below are measured against the current working tree at the
 > `1.0.168` release plus the telemetry review (`a861dd14`, `00d75a77`,
 > `4b4302f7`). The telemetry review changes only `crates/ragent-telemetry`
@@ -186,21 +193,22 @@
 | Tests executed | 15,240 passed / 0 failed / 16 ignored across **40 reporting targets** (`cargo test --workspace --all-targets`, see [`docs/BUILDSTATS.md`](docs/BUILDSTATS.md)) |
 | Line coverage | 86.7% (146,001 of 168,392 instrumented lines; not re-measured for the telemetry review) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
-| Tools registered | 150 in 21 families (`mf_screenshot` engine-gated above the shown count); unchanged by the spec repair and the telemetry review |
+| Tools registered | 152 in 21 families (`mf_screenshot` engine-gated above the shown count); 150 at the `1.0.168` tree, +2 from the `autofix_status` and `autofix_add` tools |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 19 |
 | Specs on disk | 62 directories in `specs/` |
 | Research output formats | 6 (`report`, `executive-summary`, `comparison-table`, `source-bibliography`, `imrad`, `newsletter`) |
 | Documentation | 24 top-level how-tos (including the new `skills.md`), 23 files in `docs/howtos/tools/` (22 per-category tool how-tos + `INDEX.md`, + generated PDFs), 83 files in `docs/howtos/slashcommands/` (82 command pages + `INDEX.md`, + generated PDFs) |
 | Authors | 1 |
-| Version | 1.0.168 |
+| Version | 1.0.169 |
 
-The tool registry is unchanged this pass: the code-audit remediation added a
-shared `no_parameters_schema()` helper and rerouted the eight parameterless tools
-through it without adding or removing a tool, and the 1.0.165/1.0.166 sub-agent,
-team and research passes changed tool *behaviour* (one `TaskStatus::is_terminal()` predicate
-behind reaping, injection, kill refusal and both wait tools) rather than the
-registry, so the count stays at 150 across 21 families. The crate count stays at
+The registry stands at **152 tools across 21 families** at `1.0.169`: the
+`autofix_status` and `autofix_add` tools took it from 150 to 152 (`system` 2 -> 3,
+`git` 18 -> 19) and nothing else added or removed a tool. Earlier passes changed
+tool *behaviour* rather than the registry (one `TaskStatus::is_terminal()`
+predicate behind reaping, injection, kill refusal and both wait tools), and the
+code-audit remediation only routed the eight parameterless tools through the
+shared `no_parameters_schema()` helper. The crate count stays at
 19 - `ragent-hyperresearch` is a workspace member picked up by `crates/*`.
 
 The spec-repair pair (`6953c57c`, `9ed32bd8`) moves `crates/` from 801,292 to
@@ -234,15 +242,15 @@ links one integration binary per crate plus one for the root package
 
 The registered-tool count is a live registry fact, not a constant: `ragent run
 --dry-run` prints the per-family breakdown, and 21 families currently sum to
-150 (`file: 27`, `team: 20`, `gitlab: 19`, `git: 18`, `github: 11`,
+152 (`file: 27`, `team: 20`, `gitlab: 19`, `git: 19`, `github: 11`,
 `codeindex: 10`, `none: 8`, `web: 5`, `cron: 5`, `spec: 5`, `agent: 5`,
-`task: 4`, `bash: 3`, `plan: 2`, `system: 2`, and one each for `model`,
+`task: 4`, `bash: 3`, `system: 3`, `plan: 2`, and one each for `model`,
 `network`, `shell`, `skill`, `storage`, `ask_user`). `team_task_cancel` is
 what moved `team` 19 -> 20; the `agent` family reads 5 because `team_wait` is
 classified `agent:spawn` (it always was), and `none` reads 8 because
 `list_agents` moved to `agent:read`. `mf_screenshot` joins the registry only
 when a drivable headless browser resolves on `PATH`, which is why the advertised
-total is 150 rather than 151.
+total is 152 rather than 153.
 
 ---
 
@@ -514,7 +522,11 @@ most test-dominant crates by ratio are `ragent-tui` (82%), `ragent-tools-extende
 
 ---
 
-_Generated 2026-11-09 (v1.0.168 tree plus the telemetry review `a861dd14`,
+_Generated 2026-11-13 (v1.0.169 release: a version-only bump publishing the
+project Properties, project-heading/selection menu, PR/MR history, session
+context menu and PR/MR Auto-fix work, plus a lockfile-only `quinn-proto`/
+`quinn-udp` security bump - the tables above are still measured on the v1.0.168
+tree plus the telemetry review `a861dd14`,
 `00d75a77` and `4b4302f7` - honest `/telemetry` reporting, a setup dialog that
 merges instead of rebuilding, a reconfigure that retires the old pipeline off
 the runtime lock, an export-health generation that isolates a retired
