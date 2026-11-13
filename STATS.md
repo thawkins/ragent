@@ -52,6 +52,16 @@
 > `crates/ragent-storage` +65/-56. No crate, binary, tool or test file is
 > added.
 >
+> The project Properties dialog and per-session backends (branch
+> `wip/next4`, after PR #72 merged) are not re-measured either. They add
+> 1,393 and remove 44 lines across 24 files: `crates/ragent-tui` +998
+> (`project_properties.rs`, the menu entry, `/project describe` and
+> `/project backend`, heading descriptions and their tests),
+> `crates/ragent-storage` +204 (schema 12 to 13), `crates/ragent-agent`
+> +105 (project setters, session backend at tool dispatch) and
+> `crates/ragent-config` +40 (`Config::with_backend_kind`). No crate,
+> binary or tool is added; 1 test file is added.
+>
 > The `projects` spec (`specs/projects/PLAN.md`), added on top of the
 > multi-session work, is not re-measured in the tables below. It adds 6,879
 > and removes 198 lines across 54 files, tests included:
