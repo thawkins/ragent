@@ -634,7 +634,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `os_info` | Report read-only host OS/hardware introspection (OS identity and distro, CPU, GPU adapters and graphics-API versions, physical hardware, memory, uptime, process environment); also `/osinfo show` |
 | `tool_info` | Return a JSON-encoded dump of the tool registry (name, description, parameters schema, permission category, source, hidden state) |
 | `commands_info` | Return a JSON-encoded catalog of every slash command (trigger, description, subcommands, flags) including plugin-contributed commands |
-| `autofix_add` | Open a pull/merge request on `origin` that merges the current branch into the branch it was derived from, bind it to the session and turn Auto-fix on. The base is the remote branch with the fewest commits missing from `HEAD` (ties prefer the default branch; falls back to it), unless `base` is given. The branch is pushed first with a plain `git push --set-upstream` when the remote lacks it or is behind; an existing open request for the branch is bound instead of opening a duplicate. Optional `title` (default: last commit subject), `body` (default: commit list), `draft`. Category `git:write` |
+| `autofix_add` | Open a pull/merge request on `origin` that merges the current branch into the branch it was derived from, bind it to the session and turn Auto-fix on. The base is the remote branch with the fewest commits missing from `HEAD` (ties prefer the default branch; falls back to it), unless `base` is given. The branch is always pushed with a plain (never forced) `git push --set-upstream` before the request is opened or reused, so the live remote decides what is sent (a branch deleted there is recreated; follow-up commits reach an existing request); an existing open request for the branch is bound instead of opening a duplicate. Optional `title` (default: last commit subject), `body` (default: commit list), `draft`. Category `git:write` |
 | `autofix_status` | Report the pull/merge requests Auto-fix watches (repo, number, title, URL, branch, state, on/off/paused, last poll, last trigger, attempt counts; `all: true` lists every binding) and the watcher state (`running`, `stopped` or `never_started`, from the heartbeat the watcher stores under the `autofix.watcher` setting after every poll: pid, last poll, interval, attempt cap, problems). Read-only, category `system`, auto-approved |
 
 ### 3.2.1 Tool System Categories Summary
@@ -2216,7 +2216,8 @@ are still not reported again. A merged or closed request is reported once and no
 polled; the binding stays so `Open PR/MR` still works. The status bar shows
 the focused session's latest Auto-fix summary, e.g. `PR #67 auto-fix: CI
 failed (attempt 2/3)`; `/autofix status` shows the binding, on/off/paused,
-last poll, last trigger and attempt counts. GitHub review comments come
+last poll, last trigger and attempt counts. `Pinned` stays listed while the
+sidebar is filtered, as the drag-to-pin drop target. GitHub review comments come
 from the REST API, which has no resolved state, so each comment wakes the
 session at most once. After every poll the watcher stores a heartbeat
 (`autofix.watcher` setting: pid, start and last-poll times, interval, attempt

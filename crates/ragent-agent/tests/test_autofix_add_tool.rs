@@ -236,14 +236,16 @@ async fn test_autofix_add_pushes_opens_and_binds() {
 
 #[tokio::test]
 async fn test_autofix_add_guesses_the_branch_it_came_from() {
-    let (work, _bare) = fixture("guess");
+    let (work, bare) = fixture("guess");
     git(&work, &["checkout", "-q", "-b", "develop"]);
     commit(&work, "d.txt", "develop work");
     git(&work, &["push", "-q", "origin", "develop"]);
     git(&work, &["checkout", "-q", "-b", "feature"]);
     commit(&work, "f.txt", "Feature");
-    // Already pushed and up to date: no second push is needed.
+    // Pushed, then deleted on the remote: the local `origin/feature` still
+    // matches HEAD, but the live remote lacks the branch.
     git(&work, &["push", "-q", "origin", "feature"]);
+    git(&bare, &["branch", "-D", "feature"]);
 
     let server = MockServer::start().await;
     no_open_pulls(&server, "feature").await;
@@ -263,16 +265,24 @@ async fn test_autofix_add_guesses_the_branch_it_came_from() {
         .await
         .expect("add");
     assert!(
-        matches!(outcome, AddOutcome::Opened { ref base, pushed: false, .. } if base == "develop"),
+        matches!(outcome, AddOutcome::Opened { ref base, pushed: true, .. } if base == "develop"),
         "{outcome:?}"
+    );
+    assert!(
+        !git(&bare, &["branch", "--list", "feature"]).is_empty(),
+        "the branch deleted on the remote is pushed again"
     );
 }
 
 #[tokio::test]
 async fn test_autofix_add_binds_existing_open_request() {
-    let (work, _bare) = fixture("existing");
+    let (work, bare) = fixture("existing");
     git(&work, &["checkout", "-q", "-b", "wip"]);
     commit(&work, "w.txt", "wip");
+    git(&work, &["push", "-q", "origin", "wip"]);
+    // A follow-up commit not yet on the remote.
+    commit(&work, "w2.txt", "follow-up");
+    let work_head = work.clone();
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -298,8 +308,13 @@ async fn test_autofix_add_binds_existing_open_request() {
     .await
     .expect("add");
     assert!(
-        matches!(outcome, AddOutcome::Existing(ref info) if info.number == 9),
-        "{outcome:?}"
+        matches!(outcome, AddOutcome::Existing { ref info, pushed: true } if info.number == 9),
+        "the follow-up commit is pushed before reusing the PR: {outcome:?}"
+    );
+    assert_eq!(
+        git(&bare, &["rev-parse", "wip"]),
+        git(&work_head, &["rev-parse", "HEAD"]),
+        "the existing PR's branch has the new commit"
     );
     assert_eq!(
         storage

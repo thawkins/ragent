@@ -101,6 +101,10 @@ async fn test_autofix_status_tool_lists_watched_requests() {
     assert_eq!(requests[0]["watched"], true);
     assert!(text.contains("PR #7"), "{text}");
     assert!(!text.contains("MR !8"), "{text}");
+    assert!(
+        text.contains("| b7 |") && text.contains("Attempts at head"),
+        "the branch and attempt columns reach the model: {text}"
+    );
     assert_eq!(meta["watcher"]["state"], "never_started");
     assert!(text.contains("never started"), "{text}");
     assert_eq!(meta["config"]["max_attempts"], 3);
@@ -149,6 +153,7 @@ async fn test_autofix_status_tool_reports_watcher_heartbeat() {
     assert_eq!(meta["watcher"]["state"], "running");
     assert_eq!(meta["watcher"]["pid"], std::process::id());
     assert!(text.contains("Watcher: running"), "{text}");
+    assert!(text.contains("pauses after 3 attempts"), "{text}");
 
     // A heartbeat older than two intervals reads as stopped.
     let stale = WatcherHeartbeat {

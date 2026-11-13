@@ -115,7 +115,8 @@ fn watcher_json(beat: Option<&WatcherHeartbeat>) -> Value {
     }
 }
 
-/// The markdown report.
+/// The markdown report. It carries every field the tool advertises: only
+/// this text reaches the model, not the metadata.
 fn render(report: &Value) -> String {
     let watcher = &report["watcher"];
     let config = &report["config"];
@@ -126,10 +127,13 @@ fn render(report: &Value) -> String {
         }
         state => {
             out.push_str(&format!(
-                "Watcher: {state} (pid {}), last poll {}, every {}s, {} watched, {} triggered\n",
+                "Watcher: {state} (pid {}), started {}, last poll {}, every {}s, pauses after \
+                 {} attempts; last poll: {} watched, {} triggered\n",
                 watcher["pid"],
+                watcher["started_at"].as_str().unwrap_or("-"),
                 watcher["last_poll_at"].as_str().unwrap_or("-"),
                 watcher["poll_secs"],
+                watcher["max_attempts"],
                 watcher["watched_last_poll"],
                 watcher["triggered_last_poll"],
             ));
@@ -157,28 +161,46 @@ fn render(report: &Value) -> String {
         });
         return out;
     }
-    out.push_str("| Request | Repo | State | Auto-fix | Last trigger | Session |\n");
-    out.push_str("|---|---|---|---|---|---|\n");
+    out.push_str(
+        "| Request | Repo | Branch | State | Auto-fix | Last poll | Attempts at head \
+         (ci/conflict/review) | Last trigger | Session |\n",
+    );
+    out.push_str("|---|---|---|---|---|---|---|---|---|\n");
+    let cell = |v: &Value| v.as_str().unwrap_or("-").replace('|', "/");
     for r in requests {
         let session = match r["session_title"].as_str() {
             Some(title) if !title.is_empty() => title.to_string(),
             _ => r["session_id"].as_str().unwrap_or_default().to_string(),
         };
+        let attempts = &r["attempts"];
+        let attempts = match r["head_sha"].as_str() {
+            Some(sha) => format!(
+                "{}/{}/{} at {}",
+                attempts["ci"].as_u64().unwrap_or(0),
+                attempts["conflict"].as_u64().unwrap_or(0),
+                attempts["review"].as_u64().unwrap_or(0),
+                sha.chars().take(10).collect::<String>()
+            ),
+            None => "-".to_string(),
+        };
         out.push_str(&format!(
-            "| [{}]({}) {} | {} | {} | {}{} | {} | {} |\n",
-            r["label"].as_str().unwrap_or_default(),
-            r["url"].as_str().unwrap_or_default(),
-            r["title"].as_str().unwrap_or_default().replace('|', "/"),
-            r["repo"].as_str().unwrap_or_default(),
-            r["state"].as_str().unwrap_or_default(),
-            r["autofix"].as_str().unwrap_or_default(),
+            "| [{}]({}) {} | {} | {} | {} | {}{} | {} | {attempts} | {} | {} (`{}`) |\n",
+            cell(&r["label"]),
+            cell(&r["url"]),
+            cell(&r["title"]),
+            cell(&r["repo"]),
+            cell(&r["branch"]),
+            cell(&r["state"]),
+            cell(&r["autofix"]),
             if r["archived"] == json!(true) {
                 " (archived)"
             } else {
                 ""
             },
-            r["last_trigger"].as_str().unwrap_or("-").replace('|', "/"),
+            cell(&r["last_polled_at"]),
+            cell(&r["last_trigger"]),
             session.replace('|', "/"),
+            cell(&r["session_id"]),
         ));
     }
     out

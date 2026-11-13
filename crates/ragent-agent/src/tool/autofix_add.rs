@@ -7,10 +7,12 @@
 //! the base is the remote branch the current commit diverged from most
 //! recently (fewest commits on `HEAD` that the branch lacks), preferring the
 //! remote's default branch on a tie and falling back to it; a `base`
-//! parameter overrides the guess. The branch is pushed first when the
-//! remote lacks it or it has unpushed commits (a plain push, never forced).
-//! When the branch already has an open request, that one is bound instead
-//! of opening a duplicate.
+//! parameter overrides the guess. The branch is always pushed with a plain
+//! (never forced) `git push --set-upstream` before the request is opened or
+//! reused: the push checks the live remote, so a branch deleted there is
+//! recreated and follow-up commits reach an existing request. When the
+//! branch already has an open request, that one is bound instead of opening
+//! a duplicate.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -91,6 +93,46 @@ async fn git_checked(dir: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Pushes `branch` to the remote with a plain (never forced) push, setting
+/// its upstream. Git compares against the live remote, so this recreates a
+/// branch deleted there and sends commits the remote lacks.
+///
+/// # Returns
+///
+/// `false` when the remote already had every commit.
+///
+/// # Errors
+///
+/// Returns an error with git's (redacted) message when the push fails, for
+/// example when the remote branch has commits this one lacks.
+async fn push_branch(dir: &Path, remote_name: &str, branch: &str) -> Result<bool> {
+    let output = ragent_tools_vcs::git::run_git_output_async(
+        vec![
+            "push".to_string(),
+            "--porcelain".to_string(),
+            "--set-upstream".to_string(),
+            remote_name.to_string(),
+            branch.to_string(),
+        ],
+        dir.to_path_buf(),
+    )
+    .await?;
+    if !output.success {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "git push failed: {}",
+            ragent_types::sanitize::redact_secrets(stderr.trim())
+        );
+    }
+    // Porcelain lines are `<flag>\t<from>:<to>\t<summary>` and are never
+    // translated: `=` means the ref was already up to date.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .lines()
+        .filter(|line| line.contains('\t'))
+        .any(|line| !line.starts_with('=')))
+}
+
 /// Commits on `HEAD` that `reference` lacks.
 async fn ahead_of(dir: &Path, reference: &str) -> Result<Option<u64>> {
     Ok(
@@ -140,8 +182,14 @@ pub enum AddOutcome {
         /// Whether the branch was pushed first.
         pushed: bool,
     },
-    /// The branch already had one open request; it was bound.
-    Existing(RequestInfo),
+    /// The branch already had one open request; it was bound (after
+    /// pushing when `pushed`).
+    Existing {
+        /// The request.
+        info: RequestInfo,
+        /// Whether follow-up commits were pushed to it first.
+        pushed: bool,
+    },
 }
 
 /// Opens or finds the current branch's request on `remote`, binds it to
@@ -181,7 +229,13 @@ pub async fn add_request(
         .await
         .map_err(|e| anyhow::anyhow!("could not look up open {}s: {e}", noun.long))?;
     let outcome = match open.as_slice() {
-        [one] => AddOutcome::Existing(one.clone()),
+        [one] => {
+            let pushed = push_branch(dir, &remote.remote_name, &branch).await?;
+            AddOutcome::Existing {
+                info: one.clone(),
+                pushed,
+            }
+        }
         [] => open_new(dir, input, remote, source, &branch).await?,
         several => {
             let list: Vec<String> = several
@@ -196,7 +250,7 @@ pub async fn add_request(
         }
     };
     let info = match &outcome {
-        AddOutcome::Opened { info, .. } | AddOutcome::Existing(info) => info,
+        AddOutcome::Opened { info, .. } | AddOutcome::Existing { info, .. } => info,
     };
     let root = storage
         .bind_session_request(&info.to_session_request(&ctx.session_id, remote), false)
@@ -235,15 +289,7 @@ async fn open_new(
         bail!("`{branch}` has no commits that `{base_ref}` lacks; nothing to merge");
     }
 
-    // Push when the remote lacks the branch or is behind it.
-    let tracking = format!("{remote_name}/{branch}");
-    let pushed = match ahead_of(dir, &tracking).await? {
-        Some(0) => false,
-        _ => {
-            git_checked(dir, &["push", "--set-upstream", remote_name, branch]).await?;
-            true
-        }
-    };
+    let pushed = push_branch(dir, remote_name, branch).await?;
 
     let title = match input["title"]
         .as_str()
@@ -256,11 +302,20 @@ async fn open_new(
     let body = match input["body"].as_str() {
         Some(body) => body.to_string(),
         None => {
-            let log = git(dir, &["log", "--format=- %s", &format!("{base_ref}..HEAD")])
-                .await?
-                .unwrap_or_default();
-            let lines: Vec<&str> = log.lines().take(MAX_BODY_COMMITS).collect();
-            format!("Commits:\n\n{}", lines.join("\n"))
+            // Bounded in git itself: the runner reads stdout only after git
+            // exits, so an unbounded log could fill the pipe.
+            let log = git(
+                dir,
+                &[
+                    "log",
+                    &format!("--max-count={MAX_BODY_COMMITS}"),
+                    "--format=- %s",
+                    &format!("{base_ref}..HEAD"),
+                ],
+            )
+            .await?
+            .unwrap_or_default();
+            format!("Commits:\n\n{log}")
         }
     };
     let draft = input["draft"].as_bool().unwrap_or(false);
@@ -399,12 +454,12 @@ fn report(kind: RemoteKind, outcome: &AddOutcome) -> ToolOutput {
     let noun = kind.noun();
     let (info, verb, base, pushed) = match outcome {
         AddOutcome::Opened { info, base, pushed } => (info, "Opened", Some(base), *pushed),
-        AddOutcome::Existing(info) => (info, "Found open", None, false),
+        AddOutcome::Existing { info, pushed } => (info, "Found open", None, *pushed),
     };
     let label = format!("{} {}{}", noun.short, noun.sigil, info.number);
     let into = base.map(|b| format!(" into `{b}`")).unwrap_or_default();
     let push_note = if pushed {
-        " Pushed the branch first."
+        " Pushed the branch's new commits first."
     } else {
         ""
     };

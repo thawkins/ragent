@@ -770,3 +770,43 @@ async fn test_sessions_sidebar_drag_session_onto_pinned_pins_it() {
     ));
     assert_eq!(app.storage.pinned_session_ids().expect("pins").len(), 1);
 }
+
+#[tokio::test]
+async fn test_sessions_sidebar_pinned_stays_while_filtering() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    app.storage
+        .update_session(&a, "alpha parser")
+        .expect("title");
+    app.sidebar.dirty = true;
+    app.sidebar.filter = "alpha".to_string();
+    let rows = sessions_sidebar::build_rows(&app);
+    assert!(
+        rows.iter().any(|r| matches!(
+            r,
+            sessions_sidebar::SidebarRow::Header { label, count: 0, .. } if label == "Pinned"
+        )),
+        "the drop target stays while filtering: {rows:#?}"
+    );
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_cursor_leaves_a_spacer_after_rows_change() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    app.storage.set_session_pinned(&a, true).expect("pin");
+    app.sidebar.dirty = true;
+    let _ = sidebar_rows(&mut app);
+    // Rows: New, Search, (blank), Pinned, A, (blank), project ...
+    app.sidebar.cursor = 4;
+    app.storage.set_session_pinned(&a, false).expect("unpin");
+    app.sidebar.dirty = true;
+    let _ = sidebar_rows(&mut app);
+    let rows = sessions_sidebar::build_rows(&app);
+    assert!(
+        !matches!(
+            rows.get(app.sidebar.cursor),
+            Some(sessions_sidebar::SidebarRow::Spacer)
+        ),
+        "cursor at {} rests on a selectable row: {rows:#?}",
+        app.sidebar.cursor
+    );
+}

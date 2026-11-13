@@ -488,7 +488,9 @@ fn push_section(rows: &mut Vec<SidebarRow>, app: &App, section: &SectionData<'_>
         .map(|(s, _)| *s)
         .collect();
     // While filtering only sections with a match are shown.
-    if matching.is_empty() && !(section.show_empty && filter.is_empty()) {
+    // `Pinned` stays even then: it is the drop target for drag-to-pin.
+    let always = section.key == PINNED_KEY;
+    if matching.is_empty() && !always && !(section.show_empty && filter.is_empty()) {
         return;
     }
     // A filter shows every match, collapsed or not.
@@ -621,7 +623,9 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let rows = build_rows(app);
     let height = usize::from(inner.height);
     let state = &mut app.sidebar;
-    state.cursor = state.cursor.min(rows.len().saturating_sub(1));
+    // Rebuilt rows can put a spacer under the cursor (unpinning the only
+    // pinned session, say); move to the next selectable row.
+    state.cursor = selectable(&rows, state.cursor.min(rows.len().saturating_sub(1)), true);
     if state.cursor < state.scroll {
         state.scroll = state.cursor;
     } else if height > 0 && state.cursor >= state.scroll + height {
