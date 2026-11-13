@@ -1368,6 +1368,12 @@ question) its sidebar row shows `!` and the status bar shows `N need you`.
 /session pin                 # pin/unpin the focused session
 /session archive             # archive and close it (/session unarchive <id>)
 /session close               # close it; it stays in storage
+/session unread              # mark unread (shows `o` until you open it)
+/session fork                # copy this conversation into a new session
+/session delete fix-parser   # delete for good (asks first)
+/session section Reviews     # move this session to a sidebar section
+/session section new Ideas   # ...or create one and move it there
+/session section --none      # back under its project
 ```
 
 `ragent` reopens the sessions that were open when it last exited;
@@ -1376,7 +1382,45 @@ the first prompt.
 
 The left-hand sidebar lists sessions by project. `Alt+S` shows, focuses or
 hides it; `Ctrl+N` opens a session; `Ctrl+Up`/`Ctrl+Down` move to the
-previous/next one; `Alt+R` returns to the last one.
+previous/next one; `Alt+R` returns to the last one. Right-click a session
+row (or press `m` on it with the sidebar focused) for its menu: Open PR/MR,
+Auto-fix on/off, Open in (editor, file manager, terminal), Pin, Mark as
+unread, Rename, Fork, Move to section, Archive and Delete.
+
+### Auto-fix for pull and merge requests
+
+A session can be bound to one pull request (GitHub) or merge request
+(GitLab). With Auto-fix on, ragent checks it every minute and sends the
+session a message when CI fails (with the end of the failing job's log),
+the branch has merge conflicts, or someone else leaves a review comment.
+
+```text
+/autofix bind            # bind the open PR/MR of this session's branch
+/autofix bind 67         # ...or a number (#67, !12) or the PR/MR URL
+/autofix on              # start Auto-fix (off by default)
+/autofix status          # binding, last poll, last trigger, attempts
+/autofix off             # stop
+/autofix unbind          # forget the PR/MR
+```
+
+A PR or MR the agent opens with `github_create_pr` or `gitlab_create_mr` is
+bound automatically. The sidebar row shows `#` when bound and `#!` when
+Auto-fix has paused after 3 tries on one commit (`/autofix on` resumes). It
+stops when the request is merged or closed, and never merges, force-pushes
+or resolves review threads. GitHub Enterprise Server hosts and the Auto-fix
+settings go under `vcs` in your global `ragent.json` (a project's config
+cannot set them); the enterprise token comes from `GH_ENTERPRISE_TOKEN`:
+
+```json
+{
+  "vcs": {
+    "github": {
+      "hosts": [{ "host": "github.example.com", "api_url": "https://github.example.com/api/v3" }]
+    },
+    "autofix": { "poll_secs": 60, "max_attempts": 3, "default_on": false }
+  }
+}
+```
 
 ### Projects
 

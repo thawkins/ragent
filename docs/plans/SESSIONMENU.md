@@ -2,7 +2,7 @@
 
 Feature ID: SESSIONMENU
 Title: Per-session context menu in the sessions sidebar, plus PR/MR Auto-fix
-Status: M1-M5 done; M6 planned.
+Status: M1-M6 done.
 Reference UX: Claude desktop app, Code mode (sidebar row context menu, Auto-fix)
 Builds on: [MULTISESSION.md](MULTISESSION.md) (M1-M8 done, schema 5)
 Roadmap: ROADMAP.md items 4 and 5
@@ -504,7 +504,7 @@ M5 - Auto-fix watcher (1 week) - DONE
   - Tests: `ragent-agent` `test_autofix_watcher` (7), `ragent-tui`
     `test_autofix` (4 more) and `test_session_menu` (1 more).
 
-M6 - Docs and polish (1-2 days)
+M6 - Docs and polish (1-2 days) - DONE
 - SPEC.md (sidebar menu, `/autofix`, `vcs` config), QUICKSTART.md and
   TUI-QUICKSTART.md (menu keys, Auto-fix walkthrough for GitHub and GitLab),
   CHANGELOG.md.

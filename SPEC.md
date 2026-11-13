@@ -1695,6 +1695,16 @@ provider entry (`thinking`, `env`, `models`) still merges.
   "openai": {
     "enabled": true,
     "token": "sk-ragent-local"
+  },
+  // GitHub Enterprise hosts and Auto-fix (spec SESSIONMENU FR-21). Global
+  // config only: a project's ragent.json cannot set `vcs`.
+  "vcs": {
+    "github": {
+      "hosts": [
+        { "host": "github.example.com", "api_url": "https://github.example.com/api/v3" }
+      ]
+    },
+    "autofix": { "poll_secs": 60, "max_attempts": 3, "default_on": false }
   }
 }
 ```
@@ -1706,6 +1716,7 @@ provider entry (`thinking`, `env`, `models`) still merges.
 | `ANTHROPIC_API_KEY` | Anthropic |
 | `OPENAI_API_KEY` | OpenAI |
 | `GITHUB_TOKEN` | GitHub / Copilot |
+| `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN` | GitHub Enterprise Server hosts in `vcs.github.hosts` (the github.com token is never sent to them) |
 | `GEMINI_API_KEY` | Google Gemini |
 | `HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN` | Hugging Face |
 | `AZURE_AI_FOUNDRY_API_KEY`, `AZURE_AI_FOUNDRY_BASE` | Azure AI Foundry |
@@ -2026,7 +2037,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | Teammate strip | One row of pills under the status bar, one per active teammate (status glyph, clipped name, focused highlight, `Alt+^v:cycle` hint); omitted when no team is active (spec `agentui` FR-027) |
 | Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` status glyphs, and a background-shell section; openable from the keyboard with `Alt+A` (the chord resolves to `InputAction::ToggleAgentsWindow` and calls the same `App::toggle_agents_window` the button click does, so both share one visibility path, one no-subject no-op and one redraw flag - spec `agentssetup` FR-022); keyboard-first: a block cursor (`Up`/`Down`/`PgUp`/`PgDn`) selects a row, `Space` toggles suspend/resume, `Del` arms the kill confirmation, `Enter` opens the row's output view, and clicking a row selects it; the FR-077 key legend sits in the footer (spec `agentui` FR-006..FR-016) |
 | Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; the block cursor plus `Enter`/`Space`/`Del` drive focus, suspend and shutdown; clicking a teammate selects it (spec `agentui` FR-017..FR-026) |
-| Session sidebar | Left-hand list of every session: `+ New session`, `/ Search`, `Pinned`, then one section per project (launch project first; projects with no sessions are listed too). A project heading shows the project name, a chevron (`v` open, `>` collapsed) and `[github]` / `[gitlab]` when the remote is known. A session row shows the title, relative age, a branch marker `Y` with the count of pull/merge requests for the session's branch, and a right-aligned attention marker (`!` waiting, `*` running, `x` failed, `o` unread). Filter, per-project collapse, drag resize, `Alt+S` toggle; hidden below 100 columns (specs `MULTISESSION` M5, `projects`) |
+| Session sidebar | Left-hand list of every session: `+ New session`, `/ Search`, `Pinned`, then one section per project (launch project first; projects with no sessions are listed too). A project heading shows the project name, a chevron (`v` open, `>` collapsed) and `[github]` / `[gitlab]` when the remote is known. User sections (by name) follow `Pinned`. A session row shows the title, relative age, `#` when bound to a pull/merge request (`#!` when Auto-fix is paused waiting on the user), a branch marker `Y` with the count of pull/merge requests for the session's branch, and a right-aligned attention marker (`!` waiting, `*` running, `x` failed, `o` unread, including a persisted unread mark). Filter, per-project collapse, drag resize, `Alt+S` toggle, per-session context menu (`m`, `Shift+F10`, right-click; section 6.1c); hidden below 100 columns (specs `MULTISESSION` M5, `projects`, `SESSIONMENU`) |
 | Input | Command-line with slash-command autocomplete |
 | Permission dialog | Modal approval dialog with live countdown (120 s) |
 | Question dialog | Modal user question (free-text or multiple-choice) |
@@ -2070,7 +2081,8 @@ on first use. Design and tasks: `specs/projects/PLAN.md`.
 
 - **Remote.** Detected once from the `origin` remote, and again on
   `/project refresh`. `github.com` is GitHub; `gitlab.com`, a host whose
-  first label is `gitlab`, or the configured GitLab instance is GitLab. Any
+  first label is `gitlab`, or the configured GitLab instance is GitLab; a
+  host listed in `vcs.github.hosts` is GitHub Enterprise Server. Any
   other host leaves the project without a remote description. Credentials
   embedded in the URL are never stored.
 - **Base model.** A new session starts on its project's base model when one
@@ -2116,12 +2128,89 @@ on first use. Design and tasks: `specs/projects/PLAN.md`.
   name, remote and branch; an imported session is attached to the project
   of the directory it is imported into.
 
+### 6.1c Session context menu and Auto-fix
+
+Each session row in the sidebar has a context menu, opened with `m` or
+`Shift+F10` while the sidebar is focused, or by right-clicking the row
+(`crates/ragent-tui/src/session_menu.rs`). Items run with `Enter`, a click,
+or their accelerator letter; `Esc` closes a submenu, then the menu. Design
+and milestones: `docs/plans/SESSIONMENU.md`.
+
+| Item | Key | Shown | Action |
+|------|-----|-------|--------|
+| Open PR / Open MR | `G` | session bound to a request | Opens the request's web URL in the default browser (`xdg-open`, `open`, `explorer`); only `http(s)://` URLs are opened |
+| Auto-fix: on/off | `X` | session bound to a request | Turns Auto-fix on or off (same as `/autofix on\|off`) |
+| Open in | | an opener exists | Submenu: Editor (`$VISUAL`/`$EDITOR`; a terminal editor runs in a new terminal window), File manager, Terminal (`$TERMINAL`, else the first common terminal on `PATH`) |
+| Pin / Unpin | `P` | always | Same as `p` |
+| Mark as unread / read | `U` | always | Persisted unread mark (`sessions.unread`), cleared when the session is focused; same as `u` |
+| Rename | `R` | always | Prefills `/session rename`; same as `F2` |
+| Fork | `F` | always | Copies the transcript into a new session (`kind = 'fork'`) and focuses it; refused while the session is running; same as `f` |
+| Move to section | | always | Submenu: back to its project, each section, `New section...` (prefills `/session section new`) |
+| Archive | `A` | always | Same as `a`; refused while running |
+| Delete | `D` | always | Asks first (default No), naming the child-session count; deletes the session, its sub-agent sessions, messages, binding and Auto-fix records; forks survive, unlinked. Refused while running |
+
+Sections are stored in `sidebar_sections`; a session's section is
+`sessions.section_id`. A pinned session shows under `Pinned` even when it
+is in a section. Deleting a section returns its sessions to their projects.
+
+**Binding.** A session is bound to at most one pull request (GitHub) or
+merge request (GitLab), stored on its top-level session in
+`session_requests`. `github_create_pr` and `gitlab_create_mr` bind the
+request they create (a binding failure is logged, never fails the tool);
+`/autofix bind [number|#n|!n|url]` binds an existing one, or with no
+argument the session branch's single open request; `/autofix status`
+offers the branch's open requests when the session is not bound. A GitHub
+Enterprise host uses its `api_url` and `GH_ENTERPRISE_TOKEN`; a GitHub host
+that is neither github.com nor configured, or a GitLab host other than the
+configured instance, gets no API client. Wording follows the host: PR / `#`
+on GitHub, MR / `!` on GitLab.
+
+**Auto-fix** (`crates/ragent-agent/src/autofix.rs`). With Auto-fix on
+(default off; `vcs.autofix.default_on` turns it on for a session's first
+binding), one watcher task started with the TUI polls each bound, open
+request every `vcs.autofix.poll_secs` (default 60, minimum 30) and at once
+after `/autofix on`. A poll reads the request's state and head commit and:
+
+- CI: GitHub check runs that concluded `failure` or `timed_out` and failed
+  commit statuses, with the tail of the Actions job log; GitLab failed jobs
+  of the head pipeline (jobs allowed to fail are skipped), with the tail of
+  the job log.
+- Conflicts: GitHub `mergeable == false` or `mergeable_state == dirty`;
+  GitLab `detailed_merge_status == conflict` or `has_conflicts`.
+- Review: GitHub inline review comments and review bodies, GitLab
+  unresolved resolvable notes, by anyone other than the token's user.
+
+Each new item (job, conflict, comment) fires once per head commit; the
+items already acted on are stored in `autofix_events`, so a restart neither
+loses nor repeats a trigger, and a second ragent process that loses the
+insert race does not wake the session again. Each kind with new items
+publishes `Event::AutofixTrigger { session_id, kind, summary, prompt }`. The
+TUI sends the prompt to the session as a user message, or queues it when
+the session is busy; a session that is not open is opened in the
+background. A background session is marked unread and the
+`on_notification` hook runs with `RAGENT_NOTIFICATION_KIND=autofix`. The
+prompt names the request, branch, commit and details, and tells the agent
+never to merge, force-push or resolve review threads; pushing still goes
+through the session's permission mode.
+
+After `vcs.autofix.max_attempts` (default 3) wake-ups of one kind at one
+head commit, the next one pauses Auto-fix instead (sidebar `#!`) until
+`/autofix on`. A merged or closed request is reported once and no longer
+polled; the binding stays so `Open PR/MR` still works. The status bar shows
+the focused session's latest Auto-fix summary, e.g. `PR #67 auto-fix: CI
+failed (attempt 2/3)`; `/autofix status` shows the binding, on/off/paused,
+last poll, last trigger and attempt counts. GitHub review comments come
+from the REST API, which has no resolved state, so each comment wakes the
+session at most once. Polling is per request; it is not batched per
+repository and does not use ETags.
+
 ### 6.2 Slash Commands
 
 | Command | Description |
 |---------|-------------|
 | `/quit` / `/exit` | Exit ragent |
-| `/session` | Multiple sessions: `[list] \| list --all \| list --archived \| new [path] [--project <name>] [--branch <branch>] \| switch <id-or-title> \| close \| rename <title> \| pin \| archive \| unarchive <id-or-title> \| help` (specs `MULTISESSION`, `projects`) |
+| `/session` | Multiple sessions: `[list] \| list --all \| list --archived \| new [path] [--project <name>] [--branch <branch>] \| switch <id-or-title> \| close \| rename <title> \| pin \| archive \| unarchive <id-or-title> \| unread [id-or-title] \| fork [id-or-title] \| delete <id-or-title> \| section [<name> \| --none \| new <name> \| rename <name> \| delete [name]] \| help` (specs `MULTISESSION`, `projects`, `SESSIONMENU`) |
+| `/autofix` | Pull/merge request binding and Auto-fix: `[status] \| bind [number\|url] \| unbind \| on \| off \| help` (spec `SESSIONMENU`, section 6.1c) |
 | `/project` | Projects: `[show [name]] \| list \| add <path-or-url> \| rename <name> \| model <provider>/<model>\|current\|clear \| refresh \| prune \| remove <name> \| help` (spec `projects`) |
 | `/provider` | Open provider setup dialog (always allows editing the stored key) |
 | `/model` | Select model (jumps to model list when a provider is already configured) |

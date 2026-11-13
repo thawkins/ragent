@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+### Added - session context menu and PR/MR Auto-fix
+
+- Session context menu in the sidebar (`m`, `Shift+F10` or right-click a
+  session row): Open PR / Open MR (`G`), Auto-fix on/off (`X`), Open in
+  (editor, file manager, terminal), Pin, Mark as unread, Rename, Fork, Move
+  to section, Archive and Delete. Plan: `docs/plans/SESSIONMENU.md`.
+- Sidebar keys `u` (mark unread/read, persisted), `f` (fork) and `D`
+  (delete after a Yes/No question, default No).
+- `/session unread`, `/session fork`, `/session delete`, and user-defined
+  sidebar sections with `/session section [<name> | --none | new | rename |
+  delete]`.
+- A session can be bound to a pull request (GitHub) or merge request
+  (GitLab): automatically when `github_create_pr` / `gitlab_create_mr`
+  opens one, or with `/autofix bind [number|url]`. `/autofix status` and
+  `/autofix unbind`.
+- Auto-fix (`/autofix on|off`): a background watcher wakes the bound session
+  when CI fails (with the failing job's log tail), the branch conflicts with
+  its target, or someone else comments on the review. Each item fires once
+  per commit; after `max_attempts` wake-ups of one kind on one commit it
+  pauses until `/autofix on`; it stops when the request is merged or
+  closed. It never merges, force-pushes or resolves review threads.
+- The sidebar shows `#` on a bound session and `#!` when Auto-fix is
+  paused; the status bar shows the focused session's latest Auto-fix line.
+- GitHub Enterprise Server: hosts listed in `vcs.github.hosts` are
+  recognised as GitHub and called through their `api_url` with
+  `GH_ENTERPRISE_TOKEN` / `GITHUB_ENTERPRISE_TOKEN`; the github.com token is
+  never sent to them.
+- Config `vcs.autofix { poll_secs, max_attempts, default_on }` (global
+  config only).
+- `Event::AutofixTrigger`, also sent over SSE as `autofix_trigger`.
+
+### Changed - storage
+
+- Storage schema 10 (additive): unread mark and section on sessions,
+  `sidebar_sections`, `session_requests` with Auto-fix state, and
+  `autofix_events`. Deleting a session also deletes its binding and Auto-fix
+  records.
+
 ### Added - projects, session worktrees and request counts in the sidebar
 
 - A project is now a stored record: a local checkout with a name, an

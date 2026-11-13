@@ -980,6 +980,7 @@ wide) lists:
 - `+ New session`
 - `/ Search`, which filters the list
 - a `Pinned` section
+- your own sections (see "Session menu" below), by name
 - one section per project, the current project first. The heading shows
   the project's name, `v` (open) or `>` (collapsed), and `[github]` or
   `[gitlab]` when the project has a known remote. A project with no
@@ -988,6 +989,8 @@ wide) lists:
 Each session row shows its title, how long ago it was active, and at the
 right edge:
 
+- `#` when the session is bound to a pull request (GitHub) or merge
+  request (GitLab); `#!` when Auto-fix has paused and is waiting on you.
 - `Y` when the session has its own branch, followed by the number of
   pull/merge requests for that branch (no number when there are none or the
   count is not known yet). It is magenta when the session owns its git
@@ -999,7 +1002,7 @@ right edge:
 | `!`    | Waiting on you (permission or question) |
 | `*`    | Running |
 | `x`    | Its run failed while you were elsewhere |
-| `o`    | Its run finished while you were elsewhere |
+| `o`    | Its run finished while you were elsewhere, or you marked it unread |
 
 Keys:
 
@@ -1012,6 +1015,8 @@ Keys:
 | `Up`/`Down`, `Enter` | (sidebar focused) move, open the row |
 | `Left`/`Right` | (sidebar focused) collapse / expand a project |
 | `p` / `a` / `F2` | (sidebar focused) pin, archive, rename |
+| `u` / `f` / `D` | (sidebar focused) mark unread/read, fork, delete (asks first) |
+| `m` / `Shift+F10` | (sidebar focused) open the session menu; right-click a row also opens it |
 | `/` | (sidebar focused) filter by title or project |
 | `n` | (on a project heading) new session in that project (its checkout must be under the launch directory or in `dirs.allowed_roots`) |
 | `b` | (on a project heading) prefill the command for a new session on its own branch |
@@ -1021,6 +1026,76 @@ With the mouse, click a row to open it and drag the sidebar's right border
 to resize it. The same actions are available as `/session` commands
 (`/session help`); projects are managed with `/project` (`/project help`). ragent reopens your open sessions on the next start;
 use `ragent --new` to start fresh.
+
+### Session menu
+
+Right-click a session row, or focus the sidebar and press `m` (or
+`Shift+F10`) on it. Press an item's letter, or move with `Up`/`Down` and
+press `Enter`. `Esc` closes it.
+
+| Item | Key | What it does |
+| ---- | --- | ------------ |
+| Open PR / Open MR | `G` | Open the bound pull/merge request in your browser (only when bound) |
+| Auto-fix: on/off | `X` | Turn Auto-fix on or off (only when bound) |
+| Open in | | Open the session's folder in your editor, file manager or a terminal |
+| Pin / Unpin | `P` | Keep the session at the top |
+| Mark as unread / read | `U` | Show `o` until you open the session |
+| Rename | `R` | Prefills `/session rename` |
+| Fork | `F` | Copy the conversation into a new session and switch to it |
+| Move to section | | Put the session in one of your sections, a new one, or back under its project |
+| Archive | `A` | Hide it from the list (`/session unarchive` brings it back) |
+| Delete | `D` | Delete it for good, after a Yes/No question (default No) |
+
+The same actions as commands: `/session unread`, `/session fork`,
+`/session delete <id-or-title>`, `/session section <name>`,
+`/session section new <name>`, `/session section rename <name>`,
+`/session section delete [name]`.
+
+### Auto-fix for a pull or merge request
+
+Auto-fix wakes a session when its pull request (GitHub) or merge request
+(GitLab) needs work: CI failed, the branch has merge conflicts, or someone
+left a review comment. The session gets a message describing the problem
+(with the end of the failing job's log) and fixes it like any other prompt.
+
+GitHub (github.com):
+
+1. Make sure `GITHUB_TOKEN` is set, or log in with `/github login`.
+2. Ask the agent to open a pull request; `github_create_pr` binds it to the
+   session. For an existing one, run `/autofix bind 67` (or `/autofix bind`
+   for the open PR of the session's branch, or paste its URL).
+3. Run `/autofix on`, or press `X` in the session menu.
+
+GitLab (gitlab.com or your own instance):
+
+1. Set up GitLab with `/gitlab setup` (or `GITLAB_URL` and `GITLAB_TOKEN`).
+2. Let the agent open a merge request with `gitlab_create_mr`, or run
+   `/autofix bind !12`.
+3. Run `/autofix on`.
+
+The row shows `#`, and the status bar shows lines like
+`PR #67 auto-fix: CI failed (attempt 1/3)`. If the session is busy, the
+message is queued; if you are in another session, its row turns `o`. After
+3 tries on the same commit Auto-fix pauses (`#!`) until you run
+`/autofix on` again. It stops when the request is merged or closed. It never
+merges, force-pushes or resolves review threads, and a `git push` still asks
+for permission unless your permission mode allows it. `/autofix status`
+shows what it last did; `/autofix off` turns it off; `/autofix unbind`
+removes the binding.
+
+GitHub Enterprise and settings go in your global `ragent.json` (not a
+project's), with the token in `GH_ENTERPRISE_TOKEN`:
+
+```json
+{
+  "vcs": {
+    "github": {
+      "hosts": [{ "host": "github.example.com", "api_url": "https://github.example.com/api/v3" }]
+    },
+    "autofix": { "poll_secs": 60, "max_attempts": 3, "default_on": false }
+  }
+}
+```
 
 ---
 
