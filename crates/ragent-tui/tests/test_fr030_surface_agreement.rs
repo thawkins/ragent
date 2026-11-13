@@ -58,10 +58,11 @@ use slash_support::{app_with_session, enter_project, last_message};
 
 /// The FR-030 surface size `specs/uniformtools/T-041-BASELINE.md` measured
 /// before the rename, plus the tools added afterwards (`DateTime`, then
-/// `team_task_cancel` for spec `teamssetup` T-012). Pinned as a number for the
-/// same reason the agent-side file pins it: a derived expectation would agree
+/// `team_task_cancel` for spec `teamssetup` T-012, then `autofix_status` and
+/// `autofix_add` for spec SESSIONMENU). Pinned as a number for the same
+/// reason the agent-side file pins it: a derived expectation would agree
 /// with whatever the tree did.
-const FR030_TOTAL: usize = 150;
+const FR030_TOTAL: usize = 152;
 
 /// An app in an isolated project with a live session.
 ///

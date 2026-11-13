@@ -88,7 +88,11 @@ use serde_json::Value;
 /// surface from 149 to 150 and the `team` family from 19 to 20. The rename's own
 /// `before`/`after` pairs are untouched, which the pair-by-pair assertions below
 /// still pin.
-const FR030_TOTAL: usize = 150;
+///
+/// **Recomputed for `autofix_status` and `autofix_add`** (spec
+/// SESSIONMENU): two legitimate additions, 150 -> 152, joining the existing
+/// `system` and `git` families.
+const FR030_TOTAL: usize = 152;
 
 /// One canary family per T-041 §2.1: the pair whose split tells a family count
 /// taken from `permission_category()` from one taken off the name prefix.
@@ -314,8 +318,11 @@ fn test_the_registry_names_match_the_recorded_after_rename_digest() {
     // `teamssetup` T-012); the FR-023 rename itself is unchanged, which the
     // `after`-column assertion above still pins. The previous value
     // `f08eb2d4...` was the 149-name digest before the new tool.
+    //
+    // Recomputed again for the 152-name surface with `autofix_status` and
+    // `autofix_add` (spec SESSIONMENU); `282b7298...` was the 150-name digest.
     const AFTER_RENAME_DIGEST: &str =
-        "282b7298caba8abf68f96770657ab82a4e8d4b5a2d95ccfa6db4f2ed9c285766";
+        "dd0080cc44df55d46ac9a439e359c9995d02d0af317c880fa24f97c717f799a6";
     assert_eq!(
         names_digest(&names),
         AFTER_RENAME_DIGEST,

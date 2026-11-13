@@ -979,9 +979,10 @@ wide) lists:
 
 - `+ New session`
 - `/ Search`, which filters the list
-- a `Pinned` section
+- a `Pinned` section, always shown; drag a session row onto it to pin it
 - your own sections (see "Session menu" below), by name
-- one section per project, the current project first. The heading shows
+- one section per project, the current project first. A blank line sits
+  above `Pinned` and above each project heading. The heading shows
   the project's name, `v` (open) or `>` (collapsed), and `[github]` or
   `[gitlab]` when the project has a known remote. A project with no
   sessions is listed too, so you can start one in it.

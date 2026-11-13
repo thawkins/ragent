@@ -154,8 +154,9 @@ async fn test_sessions_sidebar_left_collapses_a_section() {
     app.handle_key_event(key(KeyCode::Char('s'), KeyModifiers::ALT))
         .await;
     assert!(app.sidebar.focused, "Alt+S focuses the visible sidebar");
-    // New session, Search, then the project heading.
-    for _ in 0..2 {
+    // New session, Search, (blank), Pinned, (blank), then the project
+    // heading: the cursor skips the blank rows, so three steps.
+    for _ in 0..3 {
         app.handle_key_event(key(KeyCode::Down, KeyModifiers::NONE))
             .await;
     }
@@ -301,7 +302,7 @@ async fn test_sessions_sidebar_collapsed_sections_persist() {
     let (mut app, _a, _b) = app_with_sidebar().await;
     let _ = sidebar_rows(&mut app);
     app.sidebar.focused = true;
-    app.sidebar.cursor = 2;
+    app.sidebar.cursor = project_heading(&app);
     app.handle_key_event(key(KeyCode::Left, KeyModifiers::NONE))
         .await;
 
@@ -676,4 +677,96 @@ async fn test_sessions_sidebar_n_on_a_heading_outside_permitted_roots_is_refused
             .is_empty(),
         "no session was created in the project"
     );
+}
+
+/// Index of the first project heading (the first heading after `Pinned`).
+fn project_heading(app: &App) -> usize {
+    sessions_sidebar::build_rows(app)
+        .iter()
+        .position(|row| {
+            matches!(row, sessions_sidebar::SidebarRow::Header { label, .. } if label != "Pinned")
+        })
+        .expect("a project heading")
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_blank_line_above_pinned_and_projects() {
+    let (mut app, _a, _b) = app_with_sidebar().await;
+    let _ = sidebar_rows(&mut app);
+    let rows = sessions_sidebar::build_rows(&app);
+    use sessions_sidebar::SidebarRow;
+    assert!(matches!(rows[0], SidebarRow::NewSession));
+    assert!(matches!(rows[1], SidebarRow::Search));
+    assert!(matches!(rows[2], SidebarRow::Spacer));
+    assert!(
+        matches!(&rows[3], SidebarRow::Header { label, count: 0, .. } if label == "Pinned"),
+        "Pinned is listed with nothing pinned: {rows:#?}"
+    );
+    assert!(matches!(rows[4], SidebarRow::Spacer));
+    let project = project_heading(&app);
+    assert!(matches!(rows[project - 1], SidebarRow::Spacer));
+
+    // The cursor never rests on a blank row, moving either way.
+    app.sidebar.focused = true;
+    app.sidebar.cursor = 1;
+    app.handle_key_event(key(KeyCode::Down, KeyModifiers::NONE))
+        .await;
+    assert_eq!(app.sidebar.cursor, 3, "Down skips the blank row");
+    app.handle_key_event(key(KeyCode::Up, KeyModifiers::NONE))
+        .await;
+    assert_eq!(app.sidebar.cursor, 1, "Up skips it too");
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_drag_session_onto_pinned_pins_it() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let rows = sidebar_rows(&mut app);
+    let area = app.sidebar.area;
+    let screen_row = |index: usize| area.y + 1 + u16::try_from(index).expect("row");
+    let session_index = sessions_sidebar::build_rows(&app)
+        .iter()
+        .position(|r| matches!(r, sessions_sidebar::SidebarRow::Session { id, .. } if *id == a))
+        .expect("session row");
+    let pinned_index = 3;
+    let mouse = |kind, row| MouseEvent {
+        kind,
+        column: area.x + 2,
+        row,
+        modifiers: KeyModifiers::NONE,
+    };
+    assert!(rows.len() > session_index, "{rows:#?}");
+
+    app.handle_mouse_event(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        screen_row(session_index),
+    ));
+    app.handle_mouse_event(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        screen_row(pinned_index),
+    ));
+    app.handle_mouse_event(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        screen_row(pinned_index),
+    ));
+
+    assert!(
+        app.storage.pinned_session_ids().expect("pins").contains(&a),
+        "dropped on Pinned, so pinned"
+    );
+    assert!(app.sidebar.drag_session.is_none());
+
+    // A drop anywhere else does nothing.
+    let b_index = sessions_sidebar::build_rows(&app)
+        .iter()
+        .position(|r| matches!(r, sessions_sidebar::SidebarRow::Session { id, .. } if *id != a))
+        .expect("other session");
+    app.handle_mouse_event(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        screen_row(b_index),
+    ));
+    app.handle_mouse_event(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        screen_row(project_heading(&app)),
+    ));
+    assert_eq!(app.storage.pinned_session_ids().expect("pins").len(), 1);
 }

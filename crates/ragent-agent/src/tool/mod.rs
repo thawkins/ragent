@@ -77,6 +77,14 @@ pub mod skill_manage;
 /// Model metadata introspection - report the currently connected provider/model.
 pub mod model_info;
 
+/// Auto-fix introspection - watched pull/merge requests and watcher state
+/// (spec SESSIONMENU).
+pub mod autofix_status;
+
+/// Open (or find) the current branch's PR/MR, bind it and turn Auto-fix on
+/// (spec SESSIONMENU).
+pub mod autofix_add;
+
 /// Build and execution introspection - report the running ragent version, when
 /// the binary was built, and runtime details of the current process.
 pub mod ragent_info;
@@ -1843,6 +1851,9 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(model_info::ModelInfoTool));
     // Build/version introspection
     registry.register(Arc::new(ragent_info::RagentInfoTool));
+    // Auto-fix introspection (watched PRs/MRs and watcher state)
+    registry.register(Arc::new(autofix_status::AutofixStatusTool));
+    registry.register(Arc::new(autofix_add::AutofixAddTool));
     // Host operating-system introspection
     registry.register(Arc::new(os_info::OsInfoTool));
     // Registry introspection (tool_info/commands_info)

@@ -817,6 +817,10 @@ mod test_project_report;
 #[path = "test_pull_request_counts.rs"]
 mod test_pull_request_counts;
 
+#[path = "test_autofix_add_tool.rs"]
+mod test_autofix_add_tool;
+#[path = "test_autofix_status_tool.rs"]
+mod test_autofix_status_tool;
 #[path = "test_autofix_watcher.rs"]
 mod test_autofix_watcher;
 #[path = "test_request_binding.rs"]

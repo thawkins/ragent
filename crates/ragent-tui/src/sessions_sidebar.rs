@@ -101,6 +101,9 @@ pub struct SidebarState {
     pub area: Rect,
     /// Whether the right border is being dragged to resize.
     pub dragging: bool,
+    /// The session whose row the left button went down on; releasing it
+    /// over the `Pinned` heading pins that session.
+    pub drag_session: Option<String>,
     /// The open session context menu, if any (spec SESSIONMENU).
     pub menu: Option<crate::session_menu::SessionMenu>,
     /// Test hook: when set, `Open in` records what it would start here
@@ -131,6 +134,7 @@ impl Default for SidebarState {
             checkouts: HashMap::new(),
             area: Rect::default(),
             dragging: false,
+            drag_session: None,
             menu: None,
             launch_log: None,
         }
@@ -204,6 +208,9 @@ impl SidebarState {
 pub enum SidebarRow {
     /// The `+ New session` action.
     NewSession,
+    /// A blank line above the `Pinned` heading and each project heading.
+    /// It cannot be selected: the cursor skips it and a click does nothing.
+    Spacer,
     /// The `/ Search` action: starts the filter.
     Search,
     /// A section heading.
@@ -387,6 +394,8 @@ struct SectionData<'a> {
     remote: Option<String>,
     /// Whether the heading is shown when the section has no sessions.
     show_empty: bool,
+    /// Whether a blank line goes above the heading (`Pinned` and projects).
+    spaced: bool,
 }
 
 /// Every section in display order: `Pinned`, the user sections by name,
@@ -418,7 +427,9 @@ fn sections(app: &App) -> Vec<SectionData<'_>> {
         sessions: pinned,
         missing: false,
         remote: None,
-        show_empty: false,
+        // Always listed, so a session can be dragged onto it to pin it.
+        show_empty: true,
+        spaced: true,
     });
 
     let placed = |id: &str| state.session_section.get(id);
@@ -434,6 +445,7 @@ fn sections(app: &App) -> Vec<SectionData<'_>> {
             missing: false,
             remote: None,
             show_empty: false,
+            spaced: false,
         });
     }
 
@@ -457,6 +469,7 @@ fn sections(app: &App) -> Vec<SectionData<'_>> {
             // A project with no sessions is still listed, so a session
             // can be started in it (spec `projects`).
             show_empty: true,
+            spaced: true,
         });
     }
     out
@@ -480,6 +493,9 @@ fn push_section(rows: &mut Vec<SidebarRow>, app: &App, section: &SectionData<'_>
     }
     // A filter shows every match, collapsed or not.
     let collapsed = filter.is_empty() && app.sidebar.collapsed.contains(&section.key);
+    if section.spaced {
+        rows.push(SidebarRow::Spacer);
+    }
     rows.push(SidebarRow::Header {
         key: section.key.clone(),
         label: section.label.clone(),
@@ -644,6 +660,7 @@ fn row_line(
             fit(" + New session", width),
             Style::default().fg(Color::Green),
         )),
+        SidebarRow::Spacer => Line::from(""),
         SidebarRow::Search => {
             let state = &app.sidebar;
             let text = if state.filter_editing || !state.filter.is_empty() {
@@ -845,6 +862,7 @@ fn activate_row(app: &mut App, index: usize) {
             app.sidebar.focused = false;
         }
         Some(SidebarRow::Search) => start_filter(app),
+        Some(SidebarRow::Spacer) => {}
         Some(SidebarRow::Header { key, .. }) => toggle_section(app, key, None),
         Some(SidebarRow::Session { id, .. }) => {
             let result = app.switch_to_session(id);
@@ -853,6 +871,48 @@ fn activate_row(app: &mut App, index: usize) {
         }
         None => {}
     }
+}
+
+/// Drops session `id` on the row painted at screen row `row`: on the
+/// `Pinned` heading it pins the session (an already pinned one is left as
+/// is); anywhere else nothing happens.
+fn drop_session(app: &mut App, id: &str, area: Rect, row: u16) {
+    let top = area.y + 1;
+    if row < top || row >= area.y + area.height.saturating_sub(1) {
+        return;
+    }
+    let index = app.sidebar.scroll + usize::from(row - top);
+    let on_pinned = matches!(
+        build_rows(app).get(index),
+        Some(SidebarRow::Header { key, .. }) if key == PINNED_KEY
+    );
+    if on_pinned && !app.sidebar.pinned.contains(id) {
+        let result = app.toggle_session_pin(id);
+        report(app, result);
+    }
+}
+
+/// The nearest selectable row to `index`, moving `forward` (down) or back
+/// past [`SidebarRow::Spacer`] rows, and the other way when that runs off
+/// the end.
+fn selectable(rows: &[SidebarRow], index: usize, forward: bool) -> usize {
+    let is_spacer = |i: usize| matches!(rows.get(i), Some(SidebarRow::Spacer));
+    if !is_spacer(index) {
+        return index;
+    }
+    let ahead = if forward {
+        (index + 1..rows.len()).find(|&i| !is_spacer(i))
+    } else {
+        (0..index).rev().find(|&i| !is_spacer(i))
+    };
+    let behind = || {
+        if forward {
+            (0..index).rev().find(|&i| !is_spacer(i))
+        } else {
+            (index + 1..rows.len()).find(|&i| !is_spacer(i))
+        }
+    };
+    ahead.or_else(behind).unwrap_or(index)
 }
 
 /// Starts typing a new filter (the `/` key and the `/ Search` row).
@@ -999,15 +1059,20 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
         return true;
     }
     let page = usize::from(app.sidebar.area.height.saturating_sub(2)).max(1);
-    let last = build_rows(app).len().saturating_sub(1);
+    let rows = build_rows(app);
+    let last = rows.len().saturating_sub(1);
     let state = &mut app.sidebar;
     match key.code {
-        KeyCode::Up => state.cursor = state.cursor.saturating_sub(1),
-        KeyCode::Down => state.cursor = (state.cursor + 1).min(last),
-        KeyCode::PageUp => state.cursor = state.cursor.saturating_sub(page),
-        KeyCode::PageDown => state.cursor = (state.cursor + page).min(last),
+        KeyCode::Up => state.cursor = selectable(&rows, state.cursor.saturating_sub(1), false),
+        KeyCode::Down => state.cursor = selectable(&rows, (state.cursor + 1).min(last), true),
+        KeyCode::PageUp => {
+            state.cursor = selectable(&rows, state.cursor.saturating_sub(page), false);
+        }
+        KeyCode::PageDown => {
+            state.cursor = selectable(&rows, (state.cursor + page).min(last), true);
+        }
         KeyCode::Home => state.cursor = 0,
-        KeyCode::End => state.cursor = last,
+        KeyCode::End => state.cursor = selectable(&rows, last, false),
         KeyCode::Enter | KeyCode::Char(' ') => activate_row(app, app.sidebar.cursor),
         KeyCode::Left | KeyCode::Right => {
             if let Some(SidebarRow::Header { key: section, .. }) =
@@ -1118,8 +1183,11 @@ pub fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
     }
     let inside = area.width > 0 && area.contains((event.column, event.row).into());
     if !inside {
-        if matches!(event.kind, MouseEventKind::Down(_)) {
-            app.sidebar.focused = false;
+        match event.kind {
+            MouseEventKind::Down(_) => app.sidebar.focused = false,
+            // A drag that ends outside the sidebar drops nothing.
+            MouseEventKind::Up(MouseButton::Left) => app.sidebar.drag_session = None,
+            _ => {}
         }
         return false;
     }
@@ -1133,10 +1201,19 @@ pub fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
             let top = area.y + 1;
             if event.row >= top && event.row < area.y + area.height - 1 {
                 let index = app.sidebar.scroll + usize::from(event.row - top);
-                if index < build_rows(app).len() {
+                let rows = build_rows(app);
+                if let Some(SidebarRow::Session { id, .. }) = rows.get(index) {
+                    app.sidebar.drag_session = Some(id.clone());
+                }
+                if index < rows.len() && !matches!(rows.get(index), Some(SidebarRow::Spacer)) {
                     app.sidebar.cursor = index;
                     activate_row(app, index);
                 }
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            if let Some(id) = app.sidebar.drag_session.take() {
+                drop_session(app, &id, area, event.row);
             }
         }
         MouseEventKind::Down(MouseButton::Right) => {
@@ -1152,12 +1229,14 @@ pub fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
             }
         }
         MouseEventKind::ScrollUp => {
+            let rows = build_rows(app);
             app.sidebar.scroll = app.sidebar.scroll.saturating_sub(1);
-            app.sidebar.cursor = app.sidebar.cursor.saturating_sub(1);
+            app.sidebar.cursor = selectable(&rows, app.sidebar.cursor.saturating_sub(1), false);
         }
         MouseEventKind::ScrollDown => {
-            let last = build_rows(app).len().saturating_sub(1);
-            app.sidebar.cursor = (app.sidebar.cursor + 1).min(last);
+            let rows = build_rows(app);
+            let last = rows.len().saturating_sub(1);
+            app.sidebar.cursor = selectable(&rows, (app.sidebar.cursor + 1).min(last), true);
         }
         _ => {}
     }
