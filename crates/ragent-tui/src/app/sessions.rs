@@ -1155,6 +1155,16 @@ impl App {
     /// Returns a message when storage cannot be read or updated.
     pub(crate) fn toggle_session_unread(&mut self, id: &str) -> Result<(), String> {
         let unread = !self.session_unread(id)?;
+        self.set_session_unread_mark(id, unread)
+    }
+
+    /// Sets session `id`'s unread mark to `unread`: stored, and copied to
+    /// the session's open view.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when storage cannot be updated.
+    pub(crate) fn set_session_unread_mark(&mut self, id: &str, unread: bool) -> Result<(), String> {
         self.storage
             .set_session_unread(id, unread)
             .map_err(|e| e.to_string())?;

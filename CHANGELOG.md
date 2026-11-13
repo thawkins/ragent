@@ -24,6 +24,12 @@
   cut long titles with `..`.
 - `/project rename --project` with no id and name prints the usage instead
   of renaming the focused project to `--project`.
+- The `PR/MRs` submenu no longer shows `[open]` for a request merged or
+  closed since: the sidebar re-reads every request still recorded as open
+  in a live session's history at most once per 5 minutes (backing off
+  after a rate limit), with or without Auto-fix
+  (`PullRequestCounts::refresh_request_history`). Selection Mark
+  read/unread no longer re-reads every unread mark per session.
 
 ### Added - project heading menu and session multi-selection
 

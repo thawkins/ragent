@@ -407,6 +407,24 @@ impl App {
         self.last_request_sweep = Some(Instant::now());
         self.spawn_remote_check();
         self.spawn_request_refresh(None);
+        self.spawn_history_refresh();
+    }
+
+    /// Refreshes, off the UI thread, the state of every request still
+    /// recorded as open in a session's PR/MR history, so the `PR/MRs`
+    /// submenu shows `[merged]` / `[closed]` without Auto-fix. The service
+    /// runs it at most once per interval.
+    fn spawn_history_refresh(&self) {
+        if !self.request_counts.is_due_history() {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let service = Arc::clone(&self.request_counts);
+        runtime.spawn(async move {
+            service.refresh_request_history().await;
+        });
     }
 
     /// Detects, off the UI thread, the remote of every project never

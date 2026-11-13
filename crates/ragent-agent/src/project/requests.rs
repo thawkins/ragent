@@ -33,6 +33,9 @@ pub const MAX_INTERVAL: Duration = Duration::from_hours(1);
 /// Shortest gap between two refreshes of one project that an activity hint
 /// ([`PullRequestCounts::nudge`]) can bring about.
 pub const NUDGE_GAP: Duration = Duration::from_mins(1);
+/// Schedule key of the PR/MR history refresh
+/// ([`PullRequestCounts::refresh_request_history`]); never a project id.
+const HISTORY_KEY: &str = "\0request-history";
 /// Requests per page; the maximum both APIs allow.
 const PER_PAGE: usize = 100;
 /// Pages read per project per refresh. A repository with more requests than
@@ -724,6 +727,97 @@ impl PullRequestCounts {
                 RefreshOutcome::Failed { rate_limited }
             }
         }
+    }
+
+    /// Whether the PR/MR history refresh
+    /// ([`PullRequestCounts::refresh_request_history`]) may run now.
+    #[must_use]
+    pub fn is_due_history(&self) -> bool {
+        self.is_due(HISTORY_KEY)
+    }
+
+    /// Refreshes the state and title of every request still recorded as
+    /// open in a live session's PR/MR history, if due. Requests whose
+    /// session has Auto-fix off, and earlier requests after a rebind, are
+    /// otherwise never read again. Shares the per-project schedule (one
+    /// pass per [`BASE_INTERVAL`], backing off after a rate limit) under its
+    /// own key; a request with no credentials or a failed read is left as
+    /// it was.
+    ///
+    /// # Returns
+    ///
+    /// The number of history rows that changed.
+    pub async fn refresh_request_history(&self) -> usize {
+        self.refresh_request_history_with(|remote| self.source_for(remote))
+            .await
+    }
+
+    /// [`PullRequestCounts::refresh_request_history`] with an explicit API
+    /// client per remote (`None` when there are no credentials).
+    ///
+    /// # Returns
+    ///
+    /// The number of history rows that changed.
+    pub async fn refresh_request_history_with(
+        &self,
+        sources: impl Fn(&ProjectRemote) -> Option<RequestSource>,
+    ) -> usize {
+        if !self.is_due(HISTORY_KEY) {
+            return 0;
+        }
+        let Some(_running) = self.begin(HISTORY_KEY) else {
+            return 0;
+        };
+        let open = match self.storage.open_request_history() {
+            Ok(open) => open,
+            Err(e) => {
+                tracing::debug!(error = %e, "could not read request history");
+                self.reschedule(HISTORY_KEY, false);
+                return 0;
+            }
+        };
+        let mut changed = 0;
+        let mut rate_limited = false;
+        for row in &open {
+            let Some(kind) = RemoteKind::parse(&row.forge) else {
+                continue;
+            };
+            let remote = ProjectRemote {
+                kind,
+                host: row.host.clone(),
+                path: row.repo.clone(),
+                url: String::new(),
+                remote_name: String::new(),
+                default_branch: None,
+            };
+            let Some(source) = sources(&remote) else {
+                continue;
+            };
+            let info = match get_request(&source, &remote, row.number).await {
+                Ok(info) => info,
+                Err(FetchError::RateLimited(_)) => {
+                    rate_limited = true;
+                    break;
+                }
+                Err(e) => {
+                    tracing::debug!(repo = %row.repo, number = row.number, error = %e,
+                        "request state not refreshed");
+                    continue;
+                }
+            };
+            match self.storage.set_request_history_state(
+                &row.host,
+                &row.repo,
+                row.number,
+                info.state.as_str(),
+                &info.title,
+            ) {
+                Ok(n) => changed += n,
+                Err(e) => tracing::debug!(error = %e, "could not store request state"),
+            }
+        }
+        self.reschedule(HISTORY_KEY, rate_limited);
+        changed
     }
 
     /// Stores the fetched counts for the project's session branches.

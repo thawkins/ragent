@@ -92,3 +92,53 @@ fn test_session_request_history_ignores_a_dropped_poll() {
     assert_eq!(history[0].state, "open");
     assert_eq!(history[0].title, "MR 1");
 }
+
+#[test]
+fn test_session_request_history_open_rows_and_state_update() {
+    let storage = Storage::open_in_memory().expect("storage");
+    for id in ["s", "t", "old"] {
+        storage
+            .create_session(id, "/nonexistent/history")
+            .expect("session");
+    }
+    // One request seen by two sessions, one already merged, one in an
+    // archived session.
+    storage
+        .set_session_request(&request("s", 1, "open"))
+        .expect("s1");
+    storage
+        .set_session_request(&request("t", 1, "open"))
+        .expect("t1");
+    storage
+        .set_session_request(&request("s", 2, "merged"))
+        .expect("s2");
+    storage
+        .set_session_request(&request("old", 3, "open"))
+        .expect("old3");
+    storage.archive_session("old").expect("archive");
+
+    let open: Vec<u64> = storage
+        .open_request_history()
+        .expect("open")
+        .iter()
+        .map(|r| r.number)
+        .collect();
+    assert_eq!(open, [1], "one row per request, live sessions only");
+
+    let changed = storage
+        .set_request_history_state("gitlab.example.com", "group/app", 1, "merged", "Done")
+        .expect("update");
+    assert_eq!(changed, 2, "every session's row");
+    assert_eq!(
+        storage
+            .set_request_history_state("gitlab.example.com", "group/app", 1, "merged", "Done")
+            .expect("again"),
+        0,
+        "unchanged rows are not rewritten"
+    );
+    assert!(storage.open_request_history().expect("open").is_empty());
+    assert_eq!(
+        storage.session_request_history("t").expect("t")[0].title,
+        "Done"
+    );
+}

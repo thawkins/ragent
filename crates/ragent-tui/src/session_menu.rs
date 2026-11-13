@@ -806,7 +806,7 @@ fn dispatch_selection(app: &mut App, action: MenuAction) -> Result<(), String> {
                 if marks.contains(id) == unread {
                     return Ok(());
                 }
-                app.toggle_session_unread(id)
+                app.set_session_unread_mark(id, unread)
             })?;
         }
         MenuAction::MoveToSection(section) => {

@@ -518,3 +518,64 @@ fn test_pull_request_counts_gitlab_token_only_goes_to_the_configured_host() {
         "the token is never offered to another host"
     );
 }
+
+#[tokio::test]
+async fn test_pull_request_counts_refreshes_open_history_rows() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/app/pulls/7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "number": 7, "state": "closed", "merged_at": "2026-11-01T00:00:00Z",
+            "title": "Fix login", "html_url": "https://github.com/acme/app/pull/7",
+            "head": { "ref": "fix" }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let m = managers();
+    let project = project_with_sessions(&m, "history", RemoteKind::GitHub, &["fix"]);
+    let session = m
+        .storage
+        .list_sessions_grouped()
+        .expect("sessions")
+        .into_iter()
+        .find(|g| g.project_id == project.id)
+        .and_then(|g| g.sessions.first().map(|s| s.id.clone()))
+        .expect("session");
+    m.storage
+        .set_session_request(&ragent_storage::SessionRequest {
+            session_id: session.clone(),
+            forge: "github".to_string(),
+            host: "github.com".to_string(),
+            repo: "acme/app".to_string(),
+            number: 7,
+            title: "Fix".to_string(),
+            web_url: "https://github.com/acme/app/pull/7".to_string(),
+            head_branch: "fix".to_string(),
+            state: "open".to_string(),
+        })
+        .expect("bind");
+    // Auto-fix stays off, so no poll ever reads it.
+    m.storage.clear_session_request(&session).expect("unbind");
+    let service = PullRequestCounts::new(m.storage.clone(), m.events.clone());
+
+    let changed = service
+        .refresh_request_history_with(|_| Some(github(&server)))
+        .await;
+
+    assert_eq!(changed, 1);
+    let history = m
+        .storage
+        .session_request_history(&session)
+        .expect("history");
+    assert_eq!(history[0].state, "merged");
+    assert_eq!(history[0].title, "Fix login");
+    assert_eq!(m.storage.open_request_history().expect("open"), Vec::new());
+    // Not due again within the interval: no second call (`expect(1)`).
+    assert_eq!(
+        service
+            .refresh_request_history_with(|_| Some(github(&server)))
+            .await,
+        0
+    );
+}

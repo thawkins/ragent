@@ -2264,6 +2264,63 @@ impl Storage {
         Ok(rows)
     }
 
+    /// One history row per pull/merge request still recorded as `open` in a
+    /// live (not archived) session, so its state can be refreshed. The
+    /// `session_id` is any one session that had it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn open_request_history(&self) -> Result<Vec<SessionRequest>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT MIN(h.session_id), h.forge, h.host, h.repo, h.number, MAX(h.title), \
+             MAX(h.web_url), MAX(h.head_branch), h.state FROM session_request_history h \
+             JOIN sessions s ON s.id = h.session_id \
+             WHERE h.state = 'open' AND s.archived_at IS NULL \
+             GROUP BY h.forge, h.host, h.repo, h.number \
+             ORDER BY h.host, h.repo, h.number",
+        )?;
+        let rows = stmt
+            .query_map([], session_request_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Records the current `state` and `title` of request `number` of
+    /// `repo` on `host` in every session's history.
+    ///
+    /// # Returns
+    ///
+    /// The number of history rows that changed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn set_request_history_state(
+        &self,
+        host: &str,
+        repo: &str,
+        number: u64,
+        state: &str,
+        title: &str,
+    ) -> Result<usize> {
+        let conn = lock_conn!(self)?;
+        let changed = conn.execute(
+            "UPDATE session_request_history SET state = ?4, title = ?5 \
+             WHERE host = ?1 AND repo = ?2 AND number = ?3 \
+               AND (state <> ?4 OR title <> ?5)",
+            params![
+                host,
+                repo,
+                i64::try_from(number).unwrap_or(i64::MAX),
+                state,
+                title
+            ],
+        )?;
+        Ok(changed)
+    }
+
     /// How many pull/merge requests each session has had (see
     /// [`Storage::session_request_history`]); sessions with none are absent.
     ///
