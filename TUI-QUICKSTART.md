@@ -1017,11 +1017,12 @@ Keys:
 | `Left`/`Right` | (sidebar focused) collapse / expand a project |
 | `p` / `a` / `F2` | (sidebar focused) pin, archive, rename |
 | `u` / `f` / `D` | (sidebar focused) mark unread/read, fork, delete (asks first) |
-| `m` / `Shift+F10` | (sidebar focused) open the session menu; right-click a row also opens it |
+| `m` / `Shift+F10` | (sidebar focused) open the menu of the session or project heading; right-click also opens it |
+| `v` / `Ctrl`+click | (sidebar focused) add a session to the selection, or take it out |
 | `/` | (sidebar focused) filter by title or project |
 | `n` | (on a project heading) new session in that project (its checkout must be under the launch directory or in `dirs.allowed_roots`) |
-| `b` | (on a project heading) prefill the command for a new session on its own branch |
-| `Esc` | (sidebar focused) clear the filter, then return to the input |
+| `b` | (on a project heading) prefill the command for a new session on its own branch, with the project's name and a random branch name such as `focused_turing` (edit it before `Enter`) |
+| `Esc` | (sidebar focused) clear the selection, then the filter, then return to the input |
 
 With the mouse, click a row to open it and drag the sidebar's right border
 to resize it. The same actions are available as `/session` commands
@@ -1038,6 +1039,7 @@ press `Enter`. `Esc` closes it.
 | ---- | --- | ------------ |
 | Open PR / Open MR | `G` | Open the bound pull/merge request in your browser (only when bound) |
 | Auto-fix: on/off | `X` | Turn Auto-fix on or off (only when bound) |
+| PR/MRs (N) | | List every pull/merge request the session has had; click one to open it in your browser |
 | Open in | | Open the session's folder in your editor, file manager or a terminal |
 | Pin / Unpin | `P` | Keep the session at the top |
 | Mark as unread / read | `U` | Show `o` until you open the session |
@@ -1046,6 +1048,16 @@ press `Enter`. `Esc` closes it.
 | Move to section | | Put the session in one of your sections, a new one, or back under its project |
 | Archive | `A` | Hide it from the list (`/session unarchive` brings it back) |
 | Delete | `D` | Delete it for good, after a Yes/No question (default No) |
+
+Right-click a project heading (or press `m` on it) for the project menu:
+New session (`N`), New session on branch (`B`), Open in, Rename project
+(`R`), Move up/down (`K`/`J`, the order is remembered), Select all (`S`),
+Collapse all/Expand all (`C`/`E`), Archive all (`A`) and Delete all
+sessions (`D`, asks once). Greyed items cannot run right now.
+
+With several sessions selected (`v`, `Ctrl`+click or Select all; selected
+rows show `*`), the menu on a selected session acts on all of them: Pin,
+Mark as unread, Move to section, Clear selection, Archive and Delete.
 
 The same actions as commands: `/session unread`, `/session fork`,
 `/session delete <id-or-title>`, `/session section <name>`,

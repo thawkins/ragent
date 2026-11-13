@@ -2,6 +2,52 @@
 
 ## [Unreleased]
 
+### Added - project heading menu and session multi-selection
+
+- Right-click a project heading in the session sidebar (or `m`/`Shift+F10`
+  on it) for a project menu: New session, New session on branch, Open in,
+  Rename project, Move up/down (saved manual project order), Select all,
+  Collapse all/Expand all, Archive all (N) and Delete all sessions (N, one
+  confirmation). Items that cannot run now are greyed out.
+- `v` or `Ctrl`+click selects sessions (marked `*`); the menu on a selected
+  session acts on the whole selection (pin, mark unread, move to section,
+  archive, delete). `Esc` clears the selection.
+- `/project rename --project <id> <name>` renames a listed project.
+- `b` on a project heading and the menu's New session on branch prefill
+  the project's name (its id when another project shares the name) and a
+  random branch name in Docker's naming scheme, e.g. `focused_turing`.
+
+### Added - PR/MR history per session
+
+- Every pull/merge request created or bound in a session is kept
+  (`session_request_history`, schema 12). The session row shows `#N`, the
+  number it has had, and a `PR/MRs (N)` menu item lists them; choosing one
+  opens it in the default browser.
+
+### Changed - session sidebar look
+
+- Project headings are quieter (grey name, dim chevron and `[github]`);
+  session titles are brighter, unread and waiting ones bold.
+- The open session keeps a soft full-width bar; the cursor bar spans the
+  whole row.
+- The title shows the session count; `+ New session` and `/ Search` show
+  their shortcuts.
+
+### Changed - missing projects hidden
+
+- Projects whose directory no longer exists are no longer listed in the
+  session sidebar (previously shown greyed with `(missing)`).
+- A parent folder that was recorded as a project (not a git repository,
+  containing another project, e.g. the home directory) is no longer listed
+  once it has no open session, unless ragent was launched in it.
+
+### Fixed - project forge tag without opening a session
+
+- The sidebar detects the remote of every project whose remote was never
+  checked (projects recorded by the migration or added as a folder), so
+  `[github]` / `[gitlab]` shows without first starting a session there
+  (`ProjectManager::check_unchecked_remotes`).
+
 ### Changed - session sidebar layout
 
 - A blank line now sits above the `Pinned` heading and above each project

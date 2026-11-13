@@ -6,7 +6,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ragent_tui::App;
-use ragent_tui::session_menu::{self, MenuAction};
+use ragent_tui::session_menu::{self, MenuAction, MenuTarget};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -84,7 +84,7 @@ async fn test_session_menu_m_opens_menu_with_accelerators_and_rules() {
     app.handle_key_event(key(KeyCode::Char('m'))).await;
 
     let menu = app.sidebar.menu.clone().expect("menu open");
-    assert_eq!(menu.session_id, a);
+    assert_eq!(menu.target, MenuTarget::Session(a.clone()));
     let actions: Vec<MenuAction> = menu.items.iter().map(|i| i.action.clone()).collect();
     assert_eq!(
         actions,
@@ -177,7 +177,7 @@ async fn test_session_menu_right_click_opens_for_clicked_row() {
     ));
 
     let menu = app.sidebar.menu.as_ref().expect("menu open");
-    assert_eq!(menu.session_id, a);
+    assert_eq!(menu.target, MenuTarget::Session(a.clone()));
     assert_eq!(
         app.sidebar.cursor,
         row - 1,
@@ -742,7 +742,7 @@ async fn test_session_menu_autofix_toggle_and_sidebar_glyphs() {
     let row = row_of_session(&mut app, &a);
     let width = usize::from(app.sidebar.area.width);
     let text: String = draw(&mut app)[row].chars().take(width).collect();
-    assert!(text.contains(" # "), "bound glyph: {text}");
+    assert!(text.contains(" #1 "), "bound glyph with count: {text}");
 
     put_cursor_on(&mut app, &a);
     app.handle_key_event(key(KeyCode::Char('m'))).await;
@@ -779,7 +779,7 @@ async fn test_session_menu_autofix_toggle_and_sidebar_glyphs() {
     app.storage.set_autofix_paused(&a, true).expect("pause");
     app.sidebar.dirty = true;
     let text: String = draw(&mut app)[row].chars().take(width).collect();
-    assert!(text.contains(" #! "), "paused glyph: {text}");
+    assert!(text.contains(" #!1 "), "paused glyph: {text}");
 }
 
 #[tokio::test]
@@ -865,4 +865,93 @@ async fn test_session_menu_scrolls_to_keep_cursor_visible() {
         "the clicked item ran: {}",
         app.session.input
     );
+}
+
+/// A GitHub request bound to session `id`.
+fn github_request(id: &str, number: u64) -> ragent_storage::SessionRequest {
+    ragent_storage::SessionRequest {
+        session_id: id.to_string(),
+        forge: "github".to_string(),
+        host: "github.com".to_string(),
+        repo: "acme/app".to_string(),
+        number,
+        title: format!("Change {number}"),
+        web_url: format!("https://github.com/acme/app/pull/{number}"),
+        head_branch: format!("b{number}"),
+        state: "open".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn test_session_menu_requests_submenu_lists_history_and_opens_url() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    app.storage
+        .set_session_request(&github_request(&a, 12))
+        .expect("bind 12");
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    app.storage
+        .set_session_request(&github_request(&a, 15))
+        .expect("rebind 15");
+    app.sidebar.dirty = true;
+    app.sidebar.launch_log = Some(Vec::new());
+    let row = row_of_session(&mut app, &a);
+    let width = usize::from(app.sidebar.area.width);
+    let text: String = draw(&mut app)[row].chars().take(width).collect();
+    assert!(text.contains(" #2 "), "two requests so far: {text}");
+
+    menu_on(&mut app, &a, &MenuAction::Requests).await;
+    let label = app.sidebar.menu.as_ref().expect("menu").items
+        [app.sidebar.menu.as_ref().expect("menu").cursor]
+        .label
+        .clone();
+    assert_eq!(label, "PR/MRs (2)");
+    app.handle_key_event(key(KeyCode::Enter)).await;
+    assert_eq!(
+        submenu_labels(&app),
+        ["PR #15 [open] Change 15", "PR #12 [open] Change 12"],
+        "newest first"
+    );
+
+    // Clicking an entry opens its URL.
+    let _ = draw(&mut app);
+    let sub = app
+        .sidebar
+        .menu
+        .as_ref()
+        .and_then(|m| m.submenu.as_ref())
+        .expect("submenu")
+        .area;
+    app.handle_mouse_event(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        sub.x + 2,
+        sub.y + 2,
+    ));
+
+    assert!(app.sidebar.menu.is_none(), "the menu closes");
+    let log = app.sidebar.launch_log.as_ref().expect("log");
+    assert_eq!(log.len(), 1, "{}", app.status);
+    assert_eq!(log[0].args, ["https://github.com/acme/app/pull/12"]);
+}
+
+#[tokio::test]
+async fn test_session_menu_requests_item_absent_without_history() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    put_cursor_on(&mut app, &a);
+    app.handle_key_event(key(KeyCode::Char('m'))).await;
+    let menu = app.sidebar.menu.as_ref().expect("menu open");
+    assert!(menu.items.iter().all(|i| i.action != MenuAction::Requests));
+}
+
+#[tokio::test]
+async fn test_session_menu_unbound_session_keeps_grey_request_count() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    app.storage
+        .set_session_request(&github_request(&a, 3))
+        .expect("bind");
+    app.storage.clear_session_request(&a).expect("unbind");
+    app.sidebar.dirty = true;
+    let row = row_of_session(&mut app, &a);
+    let width = usize::from(app.sidebar.area.width);
+    let text: String = draw(&mut app)[row].chars().take(width).collect();
+    assert!(text.contains(" #1 "), "history survives unbinding: {text}");
 }

@@ -128,3 +128,31 @@ fn test_project_manager_parse_model_ref() {
         assert!(parse_model_ref(bad).is_err(), "{bad:?} must be rejected");
     }
 }
+
+#[test]
+fn test_project_manager_checks_unchecked_remotes_once() {
+    let root = fixture_dir("manager_unchecked");
+    let repo = root.join("oteldev");
+    init_repo(&repo);
+    git(
+        &repo,
+        &["remote", "add", "origin", "https://github.com/acme/oteldev"],
+    );
+    let m = managers();
+    // Recorded without a session starting in it, as the migration does.
+    let row = m
+        .storage
+        .ensure_project(&repo.display().to_string())
+        .expect("project");
+    m.storage
+        .ensure_project(&root.join("gone").display().to_string())
+        .expect("missing project");
+    assert!(!row.remote_checked);
+
+    assert_eq!(m.projects.check_unchecked_remotes().expect("check"), 1);
+    let project = m.projects.get(&row.id).expect("get").expect("project");
+    let remote = project.remote.expect("remote detected");
+    assert_eq!(remote.kind, RemoteKind::GitHub);
+    assert_eq!(remote.path, "acme/oteldev");
+    assert_eq!(m.projects.check_unchecked_remotes().expect("again"), 0);
+}

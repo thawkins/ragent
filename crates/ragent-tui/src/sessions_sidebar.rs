@@ -11,7 +11,7 @@
 //! the right edge; the focused session is highlighted.
 //!
 //! Data from storage (groups, titles, pins, branches, request counts,
-//! missing project directories) is cached in [`SidebarState`] and rebuilt
+//! hidden projects) is cached in [`SidebarState`] and rebuilt
 //! only when the state is marked dirty by a session or project event or a
 //! command (NFR-03). Attention markers come from the open views in memory,
 //! so they are read live each frame.
@@ -25,8 +25,11 @@
 //! `Esc` clears the filter or returns focus to the input. On a project
 //! heading `n` starts a session in that project and `b` prefills the command
 //! that starts one in its own worktree at a branch. `m`, `Shift+F10` or a
-//! right-click on a session row opens its context menu
-//! ([`crate::session_menu`]).
+//! right-click on a session row opens its context menu, and on a project
+//! heading the project's menu ([`crate::session_menu`]). `v` or
+//! `Ctrl`+click adds a session to the selection (or takes it out); `m` on a
+//! selected session opens a menu acting on the whole selection, and `Esc`
+//! clears it. Projects keep a manual order once one is moved up or down.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
@@ -52,6 +55,8 @@ pub const MIN_WIDTH: u16 = 20;
 pub const MIN_TERMINAL_WIDTH: u16 = 100;
 /// Section key of the `Pinned` pseudo-project; NUL keeps it apart from ids.
 const PINNED_KEY: &str = "\0pinned";
+/// Background of the open session's row when the cursor is elsewhere.
+const OPEN_SESSION_BG: Color = Color::Indexed(236);
 /// ASCII marker shown before a session's request count; it stands for a
 /// branch.
 pub const BRANCH_MARK: char = 'Y';
@@ -88,12 +93,18 @@ pub struct SidebarState {
     /// Cached bound sessions, each with whether Auto-fix is paused waiting
     /// on the user (SESSIONMENU FR-22).
     pub bound: HashMap<String, bool>,
+    /// Cached number of pull/merge requests each session has had (created
+    /// or bound); sessions with none are absent.
+    pub request_totals: HashMap<String, usize>,
     /// Cached user-defined sections, in display order (SESSIONMENU FR-11).
     pub sections: Vec<SidebarSection>,
     /// Cached section id of each session placed in a section.
     pub session_section: HashMap<String, String>,
-    /// Cached ids of projects whose directory no longer exists.
-    pub missing: HashSet<String>,
+    /// Cached ids of projects not listed: the directory no longer exists,
+    /// or it is a parent folder (not a git repository, holding another
+    /// project) with no open session. The launch project is listed
+    /// regardless.
+    pub hidden: HashSet<String>,
     /// Cached branch, worktree and request count of each session that has a
     /// branch (spec `projects`).
     pub checkouts: HashMap<String, SessionCheckout>,
@@ -106,6 +117,11 @@ pub struct SidebarState {
     pub drag_session: Option<String>,
     /// The open session context menu, if any (spec SESSIONMENU).
     pub menu: Option<crate::session_menu::SessionMenu>,
+    /// Ids of the sessions in the multi-selection (not persisted).
+    pub selected: BTreeSet<String>,
+    /// Manual project order (project ids, top first), set by the project
+    /// menu's `Move up`/`Move down`; empty means the default order.
+    pub project_order: Vec<String>,
     /// Test hook: when set, `Open in` records what it would start here
     /// instead of starting it.
     #[doc(hidden)]
@@ -128,14 +144,17 @@ impl Default for SidebarState {
             pinned: HashSet::new(),
             unread: HashSet::new(),
             bound: HashMap::new(),
+            request_totals: HashMap::new(),
             sections: Vec::new(),
             session_section: HashMap::new(),
-            missing: HashSet::new(),
+            hidden: HashSet::new(),
             checkouts: HashMap::new(),
             area: Rect::default(),
             dragging: false,
             drag_session: None,
             menu: None,
+            selected: BTreeSet::new(),
+            project_order: Vec::new(),
             launch_log: None,
         }
     }
@@ -147,6 +166,9 @@ struct Persisted {
     visible: bool,
     width: u16,
     collapsed: Vec<String>,
+    /// Manual project order; absent in layouts saved before it existed.
+    #[serde(default)]
+    project_order: Vec<String>,
 }
 
 impl SidebarState {
@@ -175,13 +197,14 @@ impl SidebarState {
                 state.visible = p.visible;
                 state.width = p.width.max(MIN_WIDTH);
                 state.collapsed = p.collapsed.into_iter().collect();
+                state.project_order = p.project_order;
             }
             Err(e) => tracing::warn!(error = %e, "ignoring malformed sidebar settings"),
         }
         state
     }
 
-    /// Saves visibility, width and collapsed sections.
+    /// Saves visibility, width, collapsed sections and the project order.
     ///
     /// # Arguments
     ///
@@ -191,6 +214,7 @@ impl SidebarState {
             visible: self.visible,
             width: self.width,
             collapsed: self.collapsed.iter().cloned().collect(),
+            project_order: self.project_order.clone(),
         };
         match serde_json::to_string(&persisted) {
             Ok(json) => {
@@ -223,8 +247,6 @@ pub enum SidebarRow {
         count: usize,
         /// Whether the section's sessions are hidden.
         collapsed: bool,
-        /// Whether the project directory no longer exists.
-        missing: bool,
         /// The project's remote host kind (`github`, `gitlab`), if any.
         remote: Option<String>,
     },
@@ -279,6 +301,10 @@ pub fn refresh_if_dirty(app: &mut App) {
         Ok(bound) => app.sidebar.bound = bound,
         Err(e) => tracing::warn!(error = %e, "session sidebar: bound sessions not read"),
     }
+    match app.storage.session_request_totals() {
+        Ok(totals) => app.sidebar.request_totals = totals,
+        Err(e) => tracing::warn!(error = %e, "session sidebar: request totals not read"),
+    }
     match (
         app.storage.list_sessions_grouped(),
         app.storage.pinned_session_ids(),
@@ -288,11 +314,28 @@ pub fn refresh_if_dirty(app: &mut App) {
         app.storage.session_sections(),
     ) {
         (Ok(groups), Ok(pinned), Ok(checkouts), Ok(unread), Ok(sections), Ok(session_section)) => {
-            app.sidebar.missing = groups
+            app.sidebar.hidden = groups
                 .iter()
-                .filter(|g| !Path::new(&g.project.worktree).exists())
+                .filter(|g| {
+                    let dir = Path::new(&g.project.worktree);
+                    // A parent folder: holds another project, is no repo itself.
+                    let container = || {
+                        !dir.join(".git").exists()
+                            && groups.iter().any(|other| {
+                                let inner = Path::new(&other.project.worktree);
+                                inner != dir && inner.starts_with(dir)
+                            })
+                    };
+                    !dir.exists() || (g.sessions.is_empty() && container())
+                })
                 .map(|g| g.project_id.clone())
                 .collect();
+            // A session that is gone (archived, deleted) leaves the selection.
+            app.sidebar.selected.retain(|id| {
+                groups
+                    .iter()
+                    .any(|g| g.sessions.iter().any(|s| s.id == *id))
+            });
             app.sidebar.groups = groups;
             app.sidebar.pinned = pinned;
             app.sidebar.checkouts = checkouts;
@@ -388,8 +431,6 @@ struct SectionData<'a> {
     label: String,
     /// Sessions, each with its project label (matched by the filter).
     sessions: Vec<(&'a ragent_storage::SessionRow, String)>,
-    /// Whether the project directory no longer exists.
-    missing: bool,
     /// Forge kind of the project's remote (`github`, `gitlab`), if any.
     remote: Option<String>,
     /// Whether the heading is shown when the section has no sessions.
@@ -425,7 +466,6 @@ fn sections(app: &App) -> Vec<SectionData<'_>> {
         key: PINNED_KEY.to_string(),
         label: "Pinned".to_string(),
         sessions: pinned,
-        missing: false,
         remote: None,
         // Always listed, so a session can be dragged onto it to pin it.
         show_empty: true,
@@ -442,16 +482,31 @@ fn sections(app: &App) -> Vec<SectionData<'_>> {
             key: user_section_key(&section.id),
             label: section.name.clone(),
             sessions,
-            missing: false,
             remote: None,
             show_empty: false,
             spaced: false,
         });
     }
 
-    let mut ordered: Vec<&ProjectSessions> = state.groups.iter().collect();
+    // A hidden project is not listed, unless ragent was launched in it.
+    let mut ordered: Vec<&ProjectSessions> = state
+        .groups
+        .iter()
+        .filter(|g| !state.hidden.contains(&g.project_id) || g.project.worktree == launch)
+        .collect();
     // Stable sort: the launch project first, the rest keep recency order.
     ordered.sort_by_key(|g| g.project.worktree != launch);
+    // A manual order wins; projects not in it follow in the order above.
+    if !state.project_order.is_empty() {
+        let place = |g: &&ProjectSessions| {
+            state
+                .project_order
+                .iter()
+                .position(|id| *id == g.project_id)
+                .unwrap_or(usize::MAX)
+        };
+        ordered.sort_by_key(place);
+    }
     for group in ordered {
         let label = labels.get(&group.project_id).cloned().unwrap_or_default();
         let sessions = group
@@ -464,7 +519,6 @@ fn sections(app: &App) -> Vec<SectionData<'_>> {
             key: group.project_id.clone(),
             label,
             sessions,
-            missing: state.missing.contains(&group.project_id),
             remote: group.project.remote.as_ref().map(|r| r.kind.clone()),
             // A project with no sessions is still listed, so a session
             // can be started in it (spec `projects`).
@@ -503,7 +557,6 @@ fn push_section(rows: &mut Vec<SidebarRow>, app: &App, section: &SectionData<'_>
         label: section.label.clone(),
         count: matching.len(),
         collapsed,
-        missing: section.missing,
         remote: section.remote.clone(),
     });
     if !collapsed {
@@ -576,6 +629,22 @@ fn attention_marker(attention: Attention) -> (char, Color) {
     }
 }
 
+/// An action row: `text` in `colour`, with its shortcut `hint` dimmed at the
+/// right edge when there is room for both.
+fn with_hint(text: &str, colour: Color, hint: &str, width: usize) -> Line<'static> {
+    let text_width = text.chars().count();
+    let hint_width = hint.chars().count();
+    let mut spans = vec![Span::styled(fit(text, width), Style::default().fg(colour))];
+    if !hint.is_empty() && text_width + 1 + hint_width < width {
+        spans.push(Span::raw(" ".repeat(width - text_width - hint_width - 1)));
+        spans.push(Span::styled(
+            hint.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    Line::from(spans)
+}
+
 /// Truncates `text` to `max` characters, marking a cut with `..`.
 fn fit(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
@@ -601,7 +670,8 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         let caret = if app.sidebar.filter_editing { "_" } else { "" };
         format!(" SESSIONS /{}{caret} ", app.sidebar.filter)
     } else {
-        " SESSIONS ".to_string()
+        let total: usize = app.sidebar.groups.iter().map(|g| g.sessions.len()).sum();
+        format!(" SESSIONS ({total}) ")
     };
     let border = if app.sidebar.focused {
         Color::Yellow
@@ -643,8 +713,24 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         .take(height)
         .map(|(index, row)| {
             let mut line = row_line(app, row, width, now);
+            let open_session = matches!(
+                row,
+                SidebarRow::Session { id, .. } if app.session.session_id.as_deref() == Some(id)
+            );
             if focused && index == cursor {
+                // Pad to the full width so the bar spans the whole row.
+                let pad = width.saturating_sub(line.width());
+                if pad > 0 {
+                    line.spans.push(Span::raw(" ".repeat(pad)));
+                }
                 line = line.patch_style(Style::default().bg(Color::DarkGray));
+            } else if open_session {
+                // The open session keeps a soft full-width bar.
+                let pad = width.saturating_sub(line.width());
+                if pad > 0 {
+                    line.spans.push(Span::raw(" ".repeat(pad)));
+                }
+                line = line.patch_style(Style::default().bg(OPEN_SESSION_BG));
             }
             line
         })
@@ -660,10 +746,7 @@ fn row_line(
     now: chrono::DateTime<chrono::Utc>,
 ) -> Line<'static> {
     match row {
-        SidebarRow::NewSession => Line::from(Span::styled(
-            fit(" + New session", width),
-            Style::default().fg(Color::Green),
-        )),
+        SidebarRow::NewSession => with_hint(" + New session", Color::Green, "Ctrl+N", width),
         SidebarRow::Spacer => Line::from(""),
         SidebarRow::Search => {
             let state = &app.sidebar;
@@ -673,42 +756,43 @@ fn row_line(
             } else {
                 " / Search".to_string()
             };
-            Line::from(Span::styled(
-                fit(&text, width),
-                Style::default().fg(Color::Gray),
-            ))
+            let hint = if state.filter_editing || !state.filter.is_empty() {
+                ""
+            } else {
+                "/"
+            };
+            with_hint(&text, Color::Gray, hint, width)
         }
         SidebarRow::Header {
+            key,
             label,
             count,
             collapsed,
-            missing,
             remote,
-            ..
         } => {
-            // Name first, chevron after it: `ragent v`, `ragent >` when
-            // collapsed.
+            // A quiet heading so the session titles carry the list: the name
+            // in grey (yellow for `Pinned`), then a dimmer chevron (`v` open,
+            // `>` collapsed), the hidden-session count when collapsed, and
+            // the remote host kind: `ragent v [github]`.
             let arrow = if *collapsed { '>' } else { 'v' };
-            let mut suffix = String::new();
+            let mut suffix = format!(" {arrow}");
             if *collapsed && *count > 0 {
-                suffix.push_str(&format!(" ({count})"));
+                suffix.push_str(&format!(" {count}"));
             }
             if let Some(kind) = remote {
                 suffix.push_str(&format!(" [{kind}]"));
             }
-            if *missing {
-                suffix.push_str(" (missing)");
-            }
-            Line::from(Span::styled(
-                fit(&format!("{label} {arrow}{suffix}"), width),
-                Style::default()
-                    .fg(if *missing {
-                        Color::DarkGray
-                    } else {
-                        Color::Gray
-                    })
-                    .add_modifier(Modifier::BOLD),
-            ))
+            let name_colour = if key == PINNED_KEY {
+                Color::Yellow
+            } else {
+                Color::Gray
+            };
+            let name = fit(label, width);
+            let suffix = fit(&suffix, width.saturating_sub(name.chars().count()));
+            Line::from(vec![
+                Span::styled(name, Style::default().fg(name_colour)),
+                Span::styled(suffix, Style::default().fg(Color::DarkGray)),
+            ])
         }
         SidebarRow::Session {
             id,
@@ -718,26 +802,28 @@ fn row_line(
             owns_worktree,
             requests,
         } => {
-            let (marker, colour) = attention_marker(attention_of(app, id));
+            let attention = attention_of(app, id);
+            let (marker, colour) = attention_marker(attention);
             // Branch marker and request count, e.g. `Y3`; the count is left
             // out when it is zero or not known yet.
             let branch_part = branch.as_ref().map(|_| match requests.filter(|n| *n > 0) {
                 Some(n) => format!("{BRANCH_MARK}{n}"),
                 None => BRANCH_MARK.to_string(),
             });
-            // `#` when bound to a PR/MR, `#!` when Auto-fix waits on the
-            // user (FR-22).
-            let request_part = app.sidebar.bound.get(id).map(|paused| {
-                if *paused {
-                    ("#!", Color::Yellow)
-                } else {
-                    ("#", Color::Blue)
-                }
-            });
+            // `#N`: the session has had N pull/merge requests; blue while
+            // one is bound, grey when none is any more, and `#!N` when
+            // Auto-fix waits on the user (FR-22).
+            let total = app.sidebar.request_totals.get(id).copied().unwrap_or(0);
+            let request_part = match (app.sidebar.bound.get(id), total) {
+                (Some(true), n) => Some((format!("#!{}", n.max(1)), Color::Yellow)),
+                (Some(false), n) => Some((format!("#{}", n.max(1)), Color::Blue)),
+                (None, 0) => None,
+                (None, n) => Some((format!("#{n}"), Color::DarkGray)),
+            };
             // Right edge: `[age ][#][branch ]state`. Indent of two before the
             // title and one space after it.
             let branch_width = branch_part.as_ref().map_or(0, |b| b.len() + 1);
-            let request_width = request_part.map_or(0, |(p, _)| p.len() + 1);
+            let request_width = request_part.as_ref().map_or(0, |(p, _)| p.len() + 1);
             let fixed = 2 + 1 + branch_width + request_width + 1;
             let mut age = relative_age(updated_at, now);
             // When space is short the age goes first, then the title is cut.
@@ -749,15 +835,27 @@ fn row_line(
             let title = fit(title, title_width);
             let pad = title_width.saturating_sub(title.chars().count());
             let focused = app.session.session_id.as_deref() == Some(id.as_str());
+            // Focused: cyan bold. Needing a look (unread, waiting): white
+            // bold. Others: white, brighter than the headings above them.
             let title_style = if focused {
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD)
-            } else {
+            } else if matches!(attention, Attention::Unread | Attention::Waiting) {
                 Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            // A selected session is marked with `*` in place of the indent.
+            let lead = if app.sidebar.selected.contains(id) {
+                Span::styled("* ", Style::default().fg(Color::Yellow))
+            } else {
+                Span::raw("  ")
             };
             let mut spans = vec![
-                Span::raw("  "),
+                lead,
                 Span::styled(title, title_style),
                 Span::raw(" ".repeat(pad + 1)),
             ];
@@ -939,6 +1037,51 @@ fn cursor_project(app: &App) -> Option<ragent_storage::ProjectRow> {
     }
 }
 
+/// The `/session new` command that starts a session in `project` on a new
+/// branch with a random name ([`crate::branch_names`]). The project is
+/// named by its name (quoted when it has spaces) when that name picks it
+/// out alone, else by its id.
+pub(crate) fn branch_session_command(app: &App, project: &ragent_storage::ProjectRow) -> String {
+    // The stored name, which may be newer than the cached sidebar row.
+    let (name, unique) = match app.storage.list_projects() {
+        Ok(all) => {
+            let name = all
+                .iter()
+                .find(|p| p.id == project.id)
+                .map_or_else(|| project.name.clone(), |p| p.name.clone());
+            let count = all
+                .iter()
+                .filter(|p| p.name.eq_ignore_ascii_case(&name))
+                .count();
+            (name, count == 1)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "could not list projects");
+            (project.name.clone(), false)
+        }
+    };
+    // A name that cannot be written as one `--project` value falls back to
+    // the id: shared with another project, empty, flag-like, or holding
+    // both quote characters.
+    let key = if !unique
+        || name.is_empty()
+        || name.starts_with("--")
+        || (name.contains('"') && name.contains('\''))
+    {
+        project.id.clone()
+    } else if name.contains('"') {
+        format!("'{name}'")
+    } else if name.contains(char::is_whitespace) || name.contains('\'') {
+        format!("\"{name}\"")
+    } else {
+        name
+    };
+    format!(
+        "/session new --project {key} --branch {}",
+        crate::branch_names::random_branch_name()
+    )
+}
+
 /// Collapses, expands (`Some`) or toggles (`None`) a section and saves it.
 fn toggle_section(app: &mut App, key: &str, collapse: Option<bool>) {
     let collapsed = &mut app.sidebar.collapsed;
@@ -978,14 +1121,122 @@ pub(crate) fn begin_prefill(app: &mut App, id: &str, text: &str) {
     }
 }
 
-/// Opens the context menu for the session under the cursor, if any.
+/// Opens the context menu for the row under the cursor: a session's, the
+/// selection's (on a selected session) or a project heading's.
 fn open_menu_at_cursor(app: &mut App) {
-    if let Some(id) = cursor_session(app) {
-        let state = &app.sidebar;
-        let line = state.cursor.saturating_sub(state.scroll);
-        let row_y = state.area.y + 1 + u16::try_from(line).unwrap_or(u16::MAX);
-        crate::session_menu::open(app, &id, row_y);
+    let state = &app.sidebar;
+    let line = state.cursor.saturating_sub(state.scroll);
+    let row_y = state.area.y + 1 + u16::try_from(line).unwrap_or(u16::MAX);
+    open_menu_for_row(app, app.sidebar.cursor, row_y);
+}
+
+/// Opens the context menu for row `index`, painted at screen row `row_y`.
+/// Rows other than sessions and project headings have no menu.
+fn open_menu_for_row(app: &mut App, index: usize, row_y: u16) {
+    match build_rows(app).get(index) {
+        Some(SidebarRow::Session { id, .. }) => {
+            let id = id.clone();
+            if app.sidebar.selected.len() > 1 && app.sidebar.selected.contains(&id) {
+                crate::session_menu::open_selection(app, row_y);
+            } else {
+                crate::session_menu::open(app, &id, row_y);
+            }
+        }
+        Some(SidebarRow::Header { key, .. }) if is_project_key(app, key) => {
+            let key = key.clone();
+            crate::session_menu::open_project(app, &key, row_y);
+        }
+        _ => {}
     }
+}
+
+/// Whether section `key` is a listed project (not `Pinned`, not a user
+/// section).
+fn is_project_key(app: &App, key: &str) -> bool {
+    app.sidebar.groups.iter().any(|g| g.project_id == key)
+}
+
+/// Adds session `id` to the selection, or takes it out.
+fn toggle_selected(app: &mut App, id: &str) {
+    let selected = &mut app.sidebar.selected;
+    if !selected.remove(id) {
+        selected.insert(id.to_string());
+    }
+}
+
+/// The sessions listed under project `project_id`'s heading (not pinned,
+/// not in a user section), newest first.
+pub(crate) fn project_session_ids(app: &App, project_id: &str) -> Vec<String> {
+    sections(app)
+        .into_iter()
+        .find(|section| section.key == project_id)
+        .map(|section| {
+            section
+                .sessions
+                .into_iter()
+                .map(|(s, _)| s.id.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Project ids in display order.
+fn project_ids_in_order(app: &App) -> Vec<String> {
+    sections(app)
+        .into_iter()
+        .filter(|section| is_project_key(app, &section.key))
+        .map(|section| section.key)
+        .collect()
+}
+
+/// Where project `project_id` can move: `(can move up, can move down)`.
+pub(crate) fn project_moves(app: &App, project_id: &str) -> (bool, bool) {
+    let order = project_ids_in_order(app);
+    match order.iter().position(|id| id == project_id) {
+        Some(at) => (at > 0, at + 1 < order.len()),
+        None => (false, false),
+    }
+}
+
+/// Moves project `project_id` one place up or down and saves the order.
+/// The cursor follows the heading.
+pub(crate) fn move_project(app: &mut App, project_id: &str, up: bool) {
+    let mut order = project_ids_in_order(app);
+    let Some(at) = order.iter().position(|id| id == project_id) else {
+        return;
+    };
+    let to = if up { at.checked_sub(1) } else { Some(at + 1) };
+    let Some(to) = to.filter(|&to| to < order.len()) else {
+        return;
+    };
+    order.swap(at, to);
+    app.sidebar.project_order = order;
+    app.sidebar.save(&app.storage);
+    if let Some(index) = build_rows(app)
+        .iter()
+        .position(|row| matches!(row, SidebarRow::Header { key, .. } if key == project_id))
+    {
+        app.sidebar.cursor = index;
+    }
+}
+
+/// Every section key shown in the sidebar.
+pub(crate) fn section_keys(app: &App) -> Vec<String> {
+    sections(app)
+        .into_iter()
+        .map(|section| section.key)
+        .collect()
+}
+
+/// Collapses every section (`true`) or expands every section (`false`).
+pub(crate) fn set_all_collapsed(app: &mut App, collapse: bool) {
+    if collapse {
+        let keys = section_keys(app);
+        app.sidebar.collapsed.extend(keys);
+    } else {
+        app.sidebar.collapsed.clear();
+    }
+    app.sidebar.save(&app.storage);
 }
 
 /// The session id under the cursor, if the cursor is on a session row.
@@ -1101,7 +1352,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
         }
         KeyCode::Char('b') => {
             if let Some(project) = cursor_project(app) {
-                let text = format!("/session new --project {} --branch ", project.id);
+                let text = branch_session_command(app, &project);
                 app.session.input_cursor = text.chars().count();
                 app.session.input = text;
                 app.sidebar.focused = false;
@@ -1125,6 +1376,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
             }
         }
         KeyCode::Char('m') => open_menu_at_cursor(app),
+        KeyCode::Char('v') => {
+            if let Some(id) = cursor_session(app) {
+                toggle_selected(app, &id);
+            }
+        }
         KeyCode::Char('u') => {
             if let Some(id) = cursor_session(app) {
                 let result = app.toggle_session_unread(&id);
@@ -1147,6 +1403,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> bool {
         KeyCode::F(10) if key.modifiers.contains(KeyModifiers::SHIFT) => {
             open_menu_at_cursor(app);
         }
+        KeyCode::Esc if !state.selected.is_empty() => state.selected.clear(),
         KeyCode::Esc if !state.filter.is_empty() => {
             state.filter.clear();
             state.cursor = 0;
@@ -1206,6 +1463,17 @@ pub fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
             if event.row >= top && event.row < area.y + area.height - 1 {
                 let index = app.sidebar.scroll + usize::from(event.row - top);
                 let rows = build_rows(app);
+                // `Ctrl`+click adds the session to the selection or takes it
+                // out; a plain click clears the selection.
+                if event.modifiers.contains(KeyModifiers::CONTROL) {
+                    if let Some(SidebarRow::Session { id, .. }) = rows.get(index) {
+                        let id = id.clone();
+                        app.sidebar.cursor = index;
+                        toggle_selected(app, &id);
+                    }
+                    return true;
+                }
+                app.sidebar.selected.clear();
                 if let Some(SidebarRow::Session { id, .. }) = rows.get(index) {
                     app.sidebar.drag_session = Some(id.clone());
                 }
@@ -1225,10 +1493,12 @@ pub fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
             let top = area.y + 1;
             if event.row >= top && event.row < area.y + area.height - 1 {
                 let index = app.sidebar.scroll + usize::from(event.row - top);
-                if let Some(SidebarRow::Session { id, .. }) = build_rows(app).get(index) {
-                    let id = id.clone();
+                if matches!(
+                    build_rows(app).get(index),
+                    Some(SidebarRow::Session { .. } | SidebarRow::Header { .. })
+                ) {
                     app.sidebar.cursor = index;
-                    crate::session_menu::open(app, &id, event.row);
+                    open_menu_for_row(app, index, event.row);
                 }
             }
         }

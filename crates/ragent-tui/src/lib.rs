@@ -7,6 +7,7 @@
 #![deny(unsafe_code)]
 
 pub mod app;
+pub mod branch_names;
 pub mod clipboard;
 pub mod deck_progress;
 pub mod input;

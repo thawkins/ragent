@@ -165,7 +165,7 @@ async fn test_sessions_sidebar_left_collapses_a_section() {
 
     let rows = sidebar_rows(&mut app);
     assert!(
-        row_of(&rows, &format!("{} > (2)", launch_label(&app))).is_some(),
+        row_of(&rows, &format!("{} > 2", launch_label(&app))).is_some(),
         "{rows:#?}"
     );
     assert!(row_of(&rows, &untitled(&a)).is_none(), "sessions hidden");
@@ -614,14 +614,77 @@ async fn test_sessions_sidebar_b_on_a_heading_prefills_the_branch_command() {
     app.sidebar.cursor = heading_index(&mut app, &project_id);
     app.sidebar.focused = true;
 
+    app.storage
+        .rename_project(&project_id, "My Shop")
+        .expect("rename");
+    app.sidebar.dirty = true;
+
     app.handle_key_event(key(KeyCode::Char('b'), KeyModifiers::NONE))
         .await;
 
-    assert_eq!(
-        app.session.input,
-        format!("/session new --project {project_id} --branch ")
+    let prefix = "/session new --project \"My Shop\" --branch ";
+    let input = app.session.input.clone();
+    let branch = input
+        .strip_prefix(prefix)
+        .unwrap_or_else(|| panic!("names the project by name: {input}"));
+    let (left, right) = branch.split_once('_').expect("adjective_surname");
+    assert!(
+        !left.is_empty()
+            && !right.is_empty()
+            && branch.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+        "{branch}"
     );
     assert!(!app.sidebar.focused);
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_b_uses_the_id_when_the_name_is_shared() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project_id = app
+        .storage
+        .get_session(&a)
+        .expect("get")
+        .expect("row")
+        .project_id;
+    let other = fixture_dir("shared_name").join("twin");
+    std::fs::create_dir_all(&other).expect("dir");
+    let twin = app
+        .storage
+        .ensure_project(&other.display().to_string())
+        .expect("project");
+    for id in [&project_id, &twin.id] {
+        app.storage.rename_project(id, "Twin").expect("rename");
+    }
+    app.sidebar.dirty = true;
+    app.sidebar.cursor = heading_index(&mut app, &project_id);
+    app.sidebar.focused = true;
+
+    app.handle_key_event(key(KeyCode::Char('b'), KeyModifiers::NONE))
+        .await;
+
+    assert!(
+        app.session
+            .input
+            .starts_with(&format!("/session new --project {project_id} --branch ")),
+        "{}",
+        app.session.input
+    );
+}
+
+#[test]
+fn test_sessions_sidebar_random_branch_names_are_adjective_surname() {
+    let names: std::collections::HashSet<String> = (0..200)
+        .map(|_| ragent_tui::branch_names::random_branch_name())
+        .collect();
+    assert!(names.len() > 100, "names vary: {}", names.len());
+    assert!(!names.contains("boring_wozniak"));
+    for name in &names {
+        assert_eq!(name.matches('_').count(), 1, "{name}");
+        assert!(
+            name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+            "{name}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -809,4 +872,113 @@ async fn test_sessions_sidebar_cursor_leaves_a_spacer_after_rows_change() {
         "cursor at {} rests on a selectable row: {rows:#?}",
         app.sidebar.cursor
     );
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_hides_a_project_whose_directory_is_gone() {
+    let (mut app, _a, _b) = app_with_sidebar().await;
+    let gone = fixture_dir("gone_project").join("vanished");
+    app.storage
+        .ensure_project(&gone.display().to_string())
+        .expect("project");
+    let kept = fixture_dir("kept_project").join("present");
+    std::fs::create_dir_all(&kept).expect("dir");
+    app.storage
+        .ensure_project(&kept.display().to_string())
+        .expect("project");
+    app.sidebar.dirty = true;
+
+    let rows = sidebar_rows(&mut app);
+
+    assert!(row_of(&rows, "present v").is_some(), "{rows:#?}");
+    assert!(row_of(&rows, "vanished").is_none(), "{rows:#?}");
+    assert!(!rows.iter().any(|r| r.contains("(missing)")), "{rows:#?}");
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_hides_an_empty_parent_folder_project() {
+    let (mut app, _a, _b) = app_with_sidebar().await;
+    let root = fixture_dir("parent_folder_projects");
+    let project = |path: &str| {
+        let dir = root.join(path);
+        std::fs::create_dir_all(&dir).expect("dir");
+        app.storage
+            .ensure_project(&dir.display().to_string())
+            .expect("project")
+    };
+    project("homefolder");
+    project("homefolder/inner");
+    let busy = project("busyfolder");
+    project("busyfolder/nested");
+    project("repofolder");
+    project("repofolder/sub");
+    std::fs::create_dir_all(root.join("repofolder/.git")).expect(".git");
+    app.storage
+        .create_session_in_project(
+            "s-busy",
+            &busy.id,
+            &busy.worktree,
+            &ragent_storage::SessionCheckout::default(),
+        )
+        .expect("session");
+    app.sidebar.dirty = true;
+
+    let rows = sidebar_rows(&mut app);
+
+    assert!(row_of(&rows, "homefolder").is_none(), "{rows:#?}");
+    assert!(row_of(&rows, "inner v").is_some(), "child: {rows:#?}");
+    assert!(row_of(&rows, "busyfolder").is_some(), "session: {rows:#?}");
+    assert!(row_of(&rows, "repofolder v").is_some(), "repo: {rows:#?}");
+}
+
+#[tokio::test]
+async fn test_sessions_sidebar_visual_title_hints_heading_and_cursor_bar() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let project_id = app
+        .storage
+        .get_session(&a)
+        .expect("get")
+        .expect("row")
+        .project_id;
+    let heading = heading_index(&mut app, &project_id);
+    app.sidebar.focused = true;
+    app.sidebar.cursor = heading;
+    let (rows, terminal) = draw(&mut app, 120, 30);
+    let area = app.sidebar.area;
+    let width = usize::from(area.width);
+    let side: Vec<String> = rows
+        .iter()
+        .map(|r| r.chars().take(width).collect())
+        .collect();
+
+    assert!(row_of(&side, "SESSIONS (2)").is_some(), "{side:#?}");
+    let new_row = row_of(&side, "+ New session").expect("new session row");
+    assert!(
+        side[new_row]
+            .trim_end_matches('\u{2502}')
+            .trim_end()
+            .ends_with("Ctrl+N"),
+        "{}",
+        side[new_row]
+    );
+    let search = row_of(&side, "/ Search").expect("search row");
+    assert!(side[search].trim_end().len() > "| / Search".len());
+
+    let buffer = terminal.backend().buffer();
+    let y = area.y + 1 + u16::try_from(heading - app.sidebar.scroll).expect("row");
+    let name = buffer[(area.x + 1, y)].style();
+    assert_eq!(name.fg, Some(Color::Gray), "project name is a quiet grey");
+    let label = launch_label(&app);
+    let chevron_x = area.x + 1 + u16::try_from(label.chars().count() + 1).expect("x");
+    assert_eq!(buffer[(chevron_x, y)].symbol(), "v");
+    assert_eq!(buffer[(chevron_x, y)].style().fg, Some(Color::DarkGray));
+    // The cursor bar reaches the last column inside the border.
+    let last = area.x + area.width - 2;
+    assert_eq!(buffer[(last, y)].style().bg, Some(Color::DarkGray));
+    // The open session keeps a soft bar of its own.
+    let open = app.session.session_id.clone().expect("open session");
+    let label = format!("untitled {}", &open[open.len() - 8..]);
+    let row = row_of(&side, &label).expect("open session row");
+    let y = u16::try_from(row).expect("row");
+    assert_eq!(buffer[(last, y)].style().bg, Some(Color::Indexed(236)));
 }

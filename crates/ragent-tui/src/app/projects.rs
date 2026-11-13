@@ -405,7 +405,24 @@ impl App {
             return;
         }
         self.last_request_sweep = Some(Instant::now());
+        self.spawn_remote_check();
         self.spawn_request_refresh(None);
+    }
+
+    /// Detects, off the UI thread, the remote of every project never
+    /// checked, so its forge tag shows without a session being opened in
+    /// it. Each check publishes `ProjectUpdated`, which reloads the sidebar;
+    /// a checked project is skipped on later sweeps.
+    fn spawn_remote_check(&self) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let manager = self.project_manager();
+        runtime.spawn_blocking(move || {
+            if let Err(e) = manager.check_unchecked_remotes() {
+                tracing::debug!(error = %e, "project remote check failed");
+            }
+        });
     }
 
     /// Refreshes request counts off the UI thread: for `only`, or for every
@@ -644,12 +661,30 @@ impl App {
             "add" if rest.is_empty() => Err("usage: /project add <path-or-url>".to_string()),
             "add" => self.project_add(rest),
             "rename" if rest.is_empty() => Err("usage: /project rename <name>".to_string()),
-            "rename" => self.focused_project().and_then(|p| {
-                self.project_manager()
-                    .rename(&p.id, rest)
-                    .map_err(|e| e.to_string())?;
-                Ok(format!("Project renamed to **{}**.", rest.trim()))
-            }),
+            "rename" => {
+                // `--project <id> <name>` renames a listed project (the
+                // sidebar's project menu); otherwise the focused one.
+                let target = match rest.strip_prefix("--project ") {
+                    Some(tail) => tail
+                        .trim_start()
+                        .split_once(char::is_whitespace)
+                        .map(|(id, name)| (Some(id), name.trim()))
+                        .ok_or_else(|| {
+                            "usage: /project rename [--project <id>] <name>".to_string()
+                        }),
+                    None => Ok((None, rest)),
+                };
+                target.and_then(|(id, name)| {
+                    let project = match id {
+                        Some(id) => self.named_project(id)?,
+                        None => self.focused_project()?,
+                    };
+                    self.project_manager()
+                        .rename(&project.id, name)
+                        .map_err(|e| e.to_string())?;
+                    Ok(format!("Project renamed to **{}**.", name.trim()))
+                })
+            }
             "model" => self.project_model(rest),
             "refresh" => self.focused_project().and_then(|p| {
                 let refreshed = self
