@@ -879,6 +879,8 @@ The AI agent can use these tools during a session:
 | `os_info`  | Report host OS/hardware (also `/osinfo show`)   | `none`          |
 | `tool_info`| JSON dump of the tool registry                | `none`          |
 | `commands_info`| JSON dump of the slash-command catalog      | `none`          |
+| `autofix_status`| Watched Auto-fix PRs/MRs and the watcher's state (`all: true` lists every binding) | `system` |
+| `autofix_add`| Push the current branch, open (or reuse) its PR/MR against the branch it came from, bind it and turn Auto-fix on | `git:write` |
 | `DateTime` | Current date/time: RFC 3339 UTC instant, an optional fixed UTC-offset rendering, date/time fields, Unix timestamp | `none`          |
 
 Run `/tools` in the TUI to list every registered tool, or `ragent --dry-run --json
@@ -1404,7 +1406,10 @@ the branch has merge conflicts, or someone else leaves a review comment.
 ```
 
 A PR or MR the agent opens with `github_create_pr` or `gitlab_create_mr` is
-bound automatically. The sidebar row shows `#` when bound and `#!` when
+bound automatically. To do it all in one step, ask the agent to use
+`autofix_add`: it pushes the current branch, opens a PR/MR into the branch it
+was created from (or reuses the branch's open one), binds it and turns
+Auto-fix on. The sidebar row shows `#` when bound and `#!` when
 Auto-fix has paused after 3 tries on one commit (`/autofix on` resumes). It
 stops when the request is merged or closed, and never merges, force-pushes
 or resolves review threads. GitHub Enterprise Server hosts and the Auto-fix

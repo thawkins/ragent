@@ -634,6 +634,8 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `os_info` | Report read-only host OS/hardware introspection (OS identity and distro, CPU, GPU adapters and graphics-API versions, physical hardware, memory, uptime, process environment); also `/osinfo show` |
 | `tool_info` | Return a JSON-encoded dump of the tool registry (name, description, parameters schema, permission category, source, hidden state) |
 | `commands_info` | Return a JSON-encoded catalog of every slash command (trigger, description, subcommands, flags) including plugin-contributed commands |
+| `autofix_add` | Open a pull/merge request on `origin` that merges the current branch into the branch it was derived from, bind it to the session and turn Auto-fix on. The base is the remote branch with the fewest commits missing from `HEAD` (ties prefer the default branch; falls back to it), unless `base` is given. The branch is always pushed with a plain (never forced) `git push --set-upstream` before the request is opened or reused, so the live remote decides what is sent (a branch deleted there is recreated; follow-up commits reach an existing request); an existing open request for the branch is bound instead of opening a duplicate. Optional `title` (default: last commit subject), `body` (default: commit list), `draft`. Category `git:write` |
+| `autofix_status` | Report the pull/merge requests Auto-fix watches (repo, number, title, URL, branch, state, on/off/paused, last poll, last trigger, attempt counts; `all: true` lists every binding) and the watcher state (`running`, `stopped` or `never_started`, from the heartbeat the watcher stores under the `autofix.watcher` setting after every poll: pid, last poll, interval, attempt cap, problems). Read-only, category `system`, auto-approved |
 
 ### 3.2.1 Tool System Categories Summary
 
@@ -656,7 +658,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Initiatives / skills | `initiative`, `Skill` |
 | Interactive | `AskUserQuestion`, `think` |
 | Task management | `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList` |
-| Utility | `get_env`, `calculator`, `ragent_info`, `os_info`, `tool_info`, `commands_info` |
+| Utility | `get_env`, `calculator`, `ragent_info`, `os_info`, `tool_info`, `commands_info`, `autofix_status`, `autofix_add` |
 
 #### Team Tools
 
@@ -2037,7 +2039,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | Teammate strip | One row of pills under the status bar, one per active teammate (status glyph, clipped name, focused highlight, `Alt+^v:cycle` hint); omitted when no team is active (spec `agentui` FR-027) |
 | Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` status glyphs, and a background-shell section; openable from the keyboard with `Alt+A` (the chord resolves to `InputAction::ToggleAgentsWindow` and calls the same `App::toggle_agents_window` the button click does, so both share one visibility path, one no-subject no-op and one redraw flag - spec `agentssetup` FR-022); keyboard-first: a block cursor (`Up`/`Down`/`PgUp`/`PgDn`) selects a row, `Space` toggles suspend/resume, `Del` arms the kill confirmation, `Enter` opens the row's output view, and clicking a row selects it; the FR-077 key legend sits in the footer (spec `agentui` FR-006..FR-016) |
 | Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; the block cursor plus `Enter`/`Space`/`Del` drive focus, suspend and shutdown; clicking a teammate selects it (spec `agentui` FR-017..FR-026) |
-| Session sidebar | Left-hand list of every session: `+ New session`, `/ Search`, `Pinned`, then one section per project (launch project first; projects with no sessions are listed too). A project heading shows the project name, a chevron (`v` open, `>` collapsed) and `[github]` / `[gitlab]` when the remote is known. User sections (by name) follow `Pinned`. A session row shows the title, relative age, `#` when bound to a pull/merge request (`#!` when Auto-fix is paused waiting on the user), a branch marker `Y` with the count of pull/merge requests for the session's branch, and a right-aligned attention marker (`!` waiting, `*` running, `x` failed, `o` unread, including a persisted unread mark). Filter, per-project collapse, drag resize, `Alt+S` toggle, per-session context menu (`m`, `Shift+F10`, right-click; section 6.1c); hidden below 100 columns (specs `MULTISESSION` M5, `projects`, `SESSIONMENU`) |
+| Session sidebar | Left-hand list of every session: `+ New session`, `/ Search`, `Pinned`, then one section per project (launch project first; projects with no sessions are listed too). A project heading shows the project name, a chevron (`v` open, `>` collapsed) and `[github]` / `[gitlab]` when the remote is known. `Pinned` is always listed, even when nothing is pinned, and dragging a session row onto it pins that session. A blank, non-selectable line sits above `Pinned` and above each project heading (the cursor skips it). User sections (by name) follow `Pinned`. A session row shows the title, relative age, `#` when bound to a pull/merge request (`#!` when Auto-fix is paused waiting on the user), a branch marker `Y` with the count of pull/merge requests for the session's branch, and a right-aligned attention marker (`!` waiting, `*` running, `x` failed, `o` unread, including a persisted unread mark). Filter, per-project collapse, drag resize, `Alt+S` toggle, per-session context menu (`m`, `Shift+F10`, right-click; section 6.1c); hidden below 100 columns (specs `MULTISESSION` M5, `projects`, `SESSIONMENU`) |
 | Input | Command-line with slash-command autocomplete |
 | Permission dialog | Modal approval dialog with live countdown (120 s) |
 | Question dialog | Modal user question (free-text or multiple-choice) |
@@ -2157,6 +2159,8 @@ is in a section. Deleting a section returns its sessions to their projects.
 merge request (GitLab), stored on its top-level session in
 `session_requests`. `github_create_pr` and `gitlab_create_mr` bind the
 request they create (a binding failure is logged, never fails the tool);
+the `autofix_add` tool pushes the current branch, opens (or reuses) its
+request against the branch it came from and turns Auto-fix on;
 `/autofix bind [number|#n|!n|url]` binds an existing one, or with no
 argument the session branch's single open request (a URL must be on the
 project remote's host and name its repository); `/autofix status`
@@ -2212,9 +2216,13 @@ are still not reported again. A merged or closed request is reported once and no
 polled; the binding stays so `Open PR/MR` still works. The status bar shows
 the focused session's latest Auto-fix summary, e.g. `PR #67 auto-fix: CI
 failed (attempt 2/3)`; `/autofix status` shows the binding, on/off/paused,
-last poll, last trigger and attempt counts. GitHub review comments come
+last poll, last trigger and attempt counts. `Pinned` stays listed while the
+sidebar is filtered, as the drag-to-pin drop target. GitHub review comments come
 from the REST API, which has no resolved state, so each comment wakes the
-session at most once. Polling is per request; it is not batched per
+session at most once. After every poll the watcher stores a heartbeat
+(`autofix.watcher` setting: pid, start and last-poll times, interval, attempt
+cap, counts and poll problems); the `autofix_status` tool reads it together
+with the bindings. Polling is per request; it is not batched per
 repository and does not use ETags.
 
 ### 6.2 Slash Commands

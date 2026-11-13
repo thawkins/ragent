@@ -263,7 +263,8 @@ where
 /// prompt). Covers codeindex tools, team tools, sub-agent tools
 /// (`new_agent`, `cancel_agent`, `list_agents`, `wait_agents`,
 /// `agent_complete`), the four `Task*` tools (T-011, FR-017),
-/// and `AskUserQuestion`.
+/// `AskUserQuestion`, and the read-only introspection tools (`model_info`,
+/// `ragent_info`, `tool_info`, `commands_info`, `autofix_status`).
 pub fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
     is_hardwired_codeindex_tool(tool_name)
         || tool_name.starts_with("team_")
@@ -272,6 +273,7 @@ pub fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
         || tool_name == "AskUserQuestion"
         || tool_name == "model_info"
         || tool_name == "ragent_info"
+        || tool_name == "autofix_status"
         || tool_name == "tool_info"
         || tool_name == "commands_info"
 }

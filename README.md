@@ -142,7 +142,9 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   hardware, memory, uptime, and process environment; also `/osinfo show`),
   tool_info and commands_info (registry and slash-command dumps)
 - One each: **model** (model_info), **network** (http_request), **system**
-  (mf_version, mf_cache_clear), **skill** (Skill), **storage** (initiative),
+  (mf_version, mf_cache_clear, autofix_status - watched PR/MR Auto-fix requests and
+  watcher state), **git** also has autofix_add (push the current branch, open or
+  reuse its PR/MR against the branch it came from, bind it and turn Auto-fix on), **skill** (Skill), **storage** (initiative),
   **ask_user** (AskUserQuestion - the group name is the permission family, which
   the rename left unchanged)
 - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers,

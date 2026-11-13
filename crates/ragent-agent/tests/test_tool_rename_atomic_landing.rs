@@ -65,7 +65,11 @@ use ragent_agent::tool::rename::TOOL_RENAMES;
 ///
 /// Recomputed for `team_task_cancel` (spec `teamssetup` T-012, FR-005): a
 /// legitimate addition, 149 -> 150 names, `team` 19 -> 20.
-const FR030_TOTAL: usize = 150;
+///
+/// Recomputed for `autofix_status` and `autofix_add` (spec SESSIONMENU):
+/// legitimate additions, 150 -> 152 names, in the `system` and `git`
+/// families.
+const FR030_TOTAL: usize = 152;
 
 /// The two family counts T-041 records as the canary against a name-prefix count.
 ///

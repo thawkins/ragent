@@ -553,6 +553,71 @@ fn snapshot(
     }
 }
 
+/// Settings key of the watcher heartbeat ([`WatcherHeartbeat`]).
+pub const HEARTBEAT_KEY: &str = "autofix.watcher";
+/// Most poll problems kept in the heartbeat.
+const MAX_PROBLEMS: usize = 10;
+
+/// What the running watcher last did, stored as JSON under
+/// [`HEARTBEAT_KEY`] after every poll so any process sharing the database
+/// (the `autofix_status` tool, the server) can tell whether a watcher is
+/// running and how its last poll went.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WatcherHeartbeat {
+    /// Process id of the ragent running the watcher.
+    pub pid: u32,
+    /// RFC 3339 time the watcher started.
+    pub started_at: String,
+    /// RFC 3339 time of the last finished poll.
+    pub last_tick_at: String,
+    /// Seconds between polls.
+    pub poll_secs: u64,
+    /// Wake-ups per kind per commit before pausing.
+    pub max_attempts: u32,
+    /// Bindings polled in the last tick.
+    pub watched: usize,
+    /// Wake-ups published in the last tick.
+    pub triggered: usize,
+    /// Why a binding could not be polled in the last tick (no credentials,
+    /// an API error), at most [`MAX_PROBLEMS`].
+    pub problems: Vec<String>,
+}
+
+impl WatcherHeartbeat {
+    /// Reads the stored heartbeat; `None` when no watcher ever ran against
+    /// this database or the value cannot be read.
+    #[must_use]
+    pub fn load(storage: &Storage) -> Option<Self> {
+        let json = match storage.get_setting(HEARTBEAT_KEY) {
+            Ok(json) => json?,
+            Err(e) => {
+                tracing::debug!(error = %e, "autofix: heartbeat unreadable");
+                return None;
+            }
+        };
+        match serde_json::from_str(&json) {
+            Ok(beat) => Some(beat),
+            Err(e) => {
+                tracing::debug!(error = %e, "autofix: heartbeat malformed");
+                None
+            }
+        }
+    }
+
+    /// Whether the watcher looks alive at `now`: its last poll finished
+    /// within two intervals plus a minute (a poll can take a while).
+    #[must_use]
+    pub fn is_live(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        let Ok(last) = chrono::DateTime::parse_from_rfc3339(&self.last_tick_at) else {
+            return false;
+        };
+        let grace = i64::try_from(self.poll_secs.saturating_mul(2) + 60).unwrap_or(i64::MAX);
+        now.signed_duration_since(last.with_timezone(&chrono::Utc))
+            .num_seconds()
+            <= grace
+    }
+}
+
 /// Resolves the API client for a remote; `None` when there are no usable
 /// credentials for its host.
 pub type SourceResolver = Arc<dyn Fn(&ProjectRemote) -> Option<RequestSource> + Send + Sync>;
@@ -566,6 +631,7 @@ pub struct AutofixWatcher {
     max_attempts: u32,
     poll: Duration,
     wake: Arc<Notify>,
+    started_at: String,
 }
 
 impl std::fmt::Debug for AutofixWatcher {
@@ -600,6 +666,7 @@ impl AutofixWatcher {
             max_attempts: config.max_attempts(),
             poll: Duration::from_secs(config.poll_secs()),
             wake: Arc::new(Notify::new()),
+            started_at: chrono::Utc::now().to_rfc3339(),
         }
     }
 
@@ -639,17 +706,40 @@ impl AutofixWatcher {
             }
         };
         let mut published = Vec::new();
-        for binding in bindings {
-            for event in self.check(&binding).await {
+        let mut problems = Vec::new();
+        for binding in &bindings {
+            for event in self.check(binding, &mut problems).await {
                 self.event_bus.publish(event.clone());
                 published.push(event);
             }
         }
+        problems.truncate(MAX_PROBLEMS);
+        self.beat(bindings.len(), published.len(), problems);
         published
     }
 
+    /// Stores the heartbeat for this tick.
+    fn beat(&self, watched: usize, triggered: usize, problems: Vec<String>) {
+        let beat = WatcherHeartbeat {
+            pid: std::process::id(),
+            started_at: self.started_at.clone(),
+            last_tick_at: chrono::Utc::now().to_rfc3339(),
+            poll_secs: self.poll.as_secs(),
+            max_attempts: self.max_attempts,
+            watched,
+            triggered,
+            problems,
+        };
+        let stored = serde_json::to_string(&beat)
+            .map_err(anyhow::Error::from)
+            .and_then(|json| self.storage.set_setting(HEARTBEAT_KEY, &json));
+        if let Err(e) = stored {
+            tracing::warn!(error = %e, "autofix: could not store heartbeat");
+        }
+    }
+
     /// The events one binding's poll produces; records what it acts on.
-    async fn check(&self, binding: &SessionRequest) -> Vec<Event> {
+    async fn check(&self, binding: &SessionRequest, problems: &mut Vec<String>) -> Vec<Event> {
         let Some(kind) = RemoteKind::parse(&binding.forge) else {
             return Vec::new();
         };
@@ -661,14 +751,23 @@ impl AutofixWatcher {
             remote_name: String::new(),
             default_branch: None,
         };
+        let noun = kind.noun();
+        let request = format!("{} {}{}", noun.short, noun.sigil, binding.number);
         let Some(source) = (self.sources)(&remote) else {
             tracing::debug!(session_id = %binding.session_id, "autofix: no credentials");
+            problems.push(format!(
+                "{request} ({}): no {} credentials for {}",
+                binding.repo, kind, binding.host
+            ));
             return Vec::new();
         };
         let snap = match fetch_snapshot(&source, &remote, binding.number).await {
             Ok(snap) => snap,
             Err(e) => {
                 tracing::warn!(error = %e, session_id = %binding.session_id, "autofix: poll failed");
+                let text = ragent_types::sanitize::redact_secrets(&e.to_string());
+                let short: String = text.chars().take(200).collect();
+                problems.push(format!("{request} ({}): {short}", binding.repo));
                 return Vec::new();
             }
         };
@@ -690,8 +789,6 @@ impl AutofixWatcher {
                 return Vec::new();
             }
         }
-        let noun = kind.noun();
-        let request = format!("{} {}{}", noun.short, noun.sigil, binding.number);
         if snap.state != RequestState::Open {
             return vec![Event::AutofixTrigger {
                 session_id: session_id.to_string(),

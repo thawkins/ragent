@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Changed - session sidebar layout
+
+- A blank line now sits above the `Pinned` heading and above each project
+  heading; the cursor and mouse wheel skip it.
+- `Pinned` is always listed, even when nothing is pinned, and dragging a
+  session row onto it pins that session.
+
+### Added - `autofix_status` and `autofix_add` tools
+
+- `autofix_add` (`git:write`) opens a pull/merge request on `origin` that
+  merges the current branch into the branch it was derived from (the remote
+  branch it diverged from most recently, or `base`), pushing it first when
+  needed (never forced), or binds the branch's existing open request; it
+  then binds the request to the session and turns Auto-fix on.
+
+- `autofix_status` (read-only, `system`, auto-approved) lists the pull/merge
+  requests Auto-fix watches - or every binding with `all: true` - with
+  state, on/off/paused, last poll, last trigger and attempt counts, and
+  reports whether the watcher is running, from a heartbeat the watcher now
+  stores after every poll (including why a request could not be polled).
+
 ### Added - session context menu and PR/MR Auto-fix
 
 - Session context menu in the sidebar (`m`, `Shift+F10` or right-click a

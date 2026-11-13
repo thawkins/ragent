@@ -20,7 +20,7 @@ pub use project::{
 };
 pub use snapshot::{IncrementalSnapshot, Snapshot};
 pub use storage::{
-    AutofixState, BackgroundTaskRow, ConversationStats, CronEventRow, CycleError,
+    AutofixBinding, AutofixState, BackgroundTaskRow, ConversationStats, CronEventRow, CycleError,
     InitiativeMilestone, InitiativeRow, KgEntityRow, KgRelationshipRow, MemoryRow,
     MessageSearchResult, ProjectSessions, RunCostSummaryRow, SCHEMA_VERSION, SessionKind,
     SessionRequest, SessionRow, SessionSearchParams, SidebarSection, Storage, TaskDerived, TaskRow,

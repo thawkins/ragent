@@ -2398,6 +2398,51 @@ impl Storage {
         Ok(rows)
     }
 
+    /// Every binding with its Auto-fix state and whether its session is
+    /// archived, ordered by session id (`autofix_status` tool).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn autofix_bindings(&self) -> Result<Vec<AutofixBinding>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT r.session_id, r.forge, r.host, r.repo, r.number, r.title, r.web_url, \
+             r.head_branch, r.state, r.autofix, r.autofix_paused, r.head_sha, \
+             r.last_polled_at, r.last_trigger, s.archived_at IS NOT NULL, \
+             COALESCE(s.title, '') \
+             FROM session_requests r LEFT JOIN sessions s ON s.id = r.session_id \
+             ORDER BY r.session_id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(AutofixBinding {
+                    request: SessionRequest {
+                        session_id: r.get(0)?,
+                        forge: r.get(1)?,
+                        host: r.get(2)?,
+                        repo: r.get(3)?,
+                        number: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
+                        title: r.get(5)?,
+                        web_url: r.get(6)?,
+                        head_branch: r.get(7)?,
+                        state: r.get(8)?,
+                    },
+                    state: AutofixState {
+                        enabled: r.get::<_, i64>(9)? != 0,
+                        paused: r.get::<_, i64>(10)? != 0,
+                        head_sha: r.get(11)?,
+                        last_polled_at: r.get(12)?,
+                        last_trigger: r.get(13)?,
+                    },
+                    archived: r.get(14)?,
+                    session_title: r.get(15)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     /// Ids of all bound sessions, each with whether Auto-fix is paused
     /// waiting on the user (sidebar glyphs, FR-22).
     ///
@@ -6252,6 +6297,20 @@ pub struct SessionRequest {
     pub head_branch: String,
     /// `open`, `merged` or `closed`, when last seen.
     pub state: String,
+}
+
+/// One binding as the `autofix_status` tool reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutofixBinding {
+    /// The binding.
+    pub request: SessionRequest,
+    /// Its Auto-fix state.
+    pub state: AutofixState,
+    /// Whether the bound session is archived (archived sessions are not
+    /// polled).
+    pub archived: bool,
+    /// The bound session's title; empty when untitled.
+    pub session_title: String,
 }
 
 /// Auto-fix state of a bound session (spec SESSIONMENU FR-16, FR-19).
