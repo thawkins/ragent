@@ -249,7 +249,10 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   to a GitHub pull request or GitLab merge request (including GitHub
   Enterprise and self-managed GitLab) can run Auto-fix: it is woken when CI
   fails, the branch conflicts, or a reviewer comments, and pauses after a
-  set number of tries (`/autofix`)
+  set number of tries (`/autofix`). Project headings and multi-selections
+  (`v` or `Ctrl`+click) have their own menus, and each session row shows
+  `#N`, the number of pull/merge requests it has had, with a `PR/MRs`
+  submenu that opens any of them in the browser
 - **Session management** — persistent conversation history stored in SQLite;
   list, resume, export-archive, and import sessions. A session's transcript can be
   aged out with `/db prune [--days N] [--dry-run]` (TUI) or `ragent db prune`
