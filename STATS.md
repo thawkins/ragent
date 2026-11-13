@@ -46,6 +46,12 @@
 > +57 (`check_unchecked_remotes`). No crate, binary or tool is added; 2 test
 > files are added.
 >
+> The review fixes for those menus (branch `wip/next3`, after PR #71
+> merged) are not re-measured either. They add 415 and remove 207 lines
+> across 10 files: `crates/ragent-tui` +350/-151 and
+> `crates/ragent-storage` +65/-56. No crate, binary, tool or test file is
+> added.
+>
 > The `projects` spec (`specs/projects/PLAN.md`), added on top of the
 > multi-session work, is not re-measured in the tables below. It adds 6,879
 > and removes 198 lines across 54 files, tests included:

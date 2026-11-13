@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Fixed - project and selection menu review
+
+- A project whose directory is gone stays listed while it has sessions, so
+  they can still be opened, archived and deleted; only session-less ones
+  are hidden. The `SESSIONS (N)` count matches the listed sessions.
+- The selection menu acts only on selected sessions the filter shows.
+  Pin, Mark read/unread and Move to section try every session and report
+  a count instead of stopping at the first error.
+- New session on branch never picks a name that already exists as a local
+  or remote branch (it would have checked that branch out).
+- Archive all / Archive skip a session whose sub-agent or teammate is
+  still running; bulk delete refuses a session that no longer exists.
+- Move up/down moves past the next project shown (the filter hides some);
+  a launch project not in the saved order is listed first.
+- Binding a request writes the binding and its history row in one
+  transaction; an Auto-fix poll that is dropped no longer updates history.
+- `Ctrl`+click on a heading or action row acts as a plain click; a
+  right-click on `Pinned` or a user section heading does nothing.
+- `PR/MRs` labels read `request #N` for an unknown forge (was `# #N`) and
+  cut long titles with `..`.
+- `/project rename --project` with no id and name prints the usage instead
+  of renaming the focused project to `--project`.
+
 ### Added - project heading menu and session multi-selection
 
 - Right-click a project heading in the session sidebar (or `m`/`Shift+F10`
@@ -35,8 +58,9 @@
 
 ### Changed - missing projects hidden
 
-- Projects whose directory no longer exists are no longer listed in the
-  session sidebar (previously shown greyed with `(missing)`).
+- Projects whose directory no longer exists and that have no sessions are
+  no longer listed in the session sidebar (previously shown greyed with
+  `(missing)`).
 - A parent folder that was recorded as a project (not a git repository,
   containing another project, e.g. the home directory) is no longer listed
   once it has no open session, unless ragent was launched in it.
