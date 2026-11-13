@@ -136,7 +136,7 @@ fn test_session_request_history_open_rows_and_state_update() {
         0,
         "unchanged rows are not rewritten"
     );
-    assert!(storage.open_request_history().expect("open").is_empty());
+    assert_eq!(storage.open_request_history().expect("open"), Vec::new());
     assert_eq!(
         storage.session_request_history("t").expect("t")[0].title,
         "Done"
