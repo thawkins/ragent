@@ -2,7 +2,7 @@
 
 Feature ID: SESSIONMENU
 Title: Per-session context menu in the sessions sidebar, plus PR/MR Auto-fix
-Status: M1-M3 done; M4 revised after PR #68; M5-M6 planned.
+Status: M1-M5 done; M6 planned.
 Reference UX: Claude desktop app, Code mode (sidebar row context menu, Auto-fix)
 Builds on: [MULTISESSION.md](MULTISESSION.md) (M1-M8 done, schema 5)
 Roadmap: ROADMAP.md items 4 and 5
@@ -403,7 +403,7 @@ M3 - Sections and Open in (3 days) - DONE
   only the submenu, pin beats section, Open in records the file-manager
   launch, `/session section` commands).
 
-M4 - Binding on top of projects (about 3 days) - REVISED after PR #68
+M4 - Binding on top of projects (about 3 days) - DONE (revised after PR #68)
 PR #68 (spec `projects`) landed while M4 was starting. It already has:
 `ragent_agent::project::remote` (`RemoteKind`, `ProjectRemote { kind,
 host, path }`, `parse_remote_url`, `detect_remote`; github.com, gitlab.com,
@@ -440,8 +440,25 @@ row). M4 builds on these instead of adding a second remote parser.
 - Verify: request lookups against a `wiremock` server for GitHub, GitHub
   Enterprise (`/api/v3`) and GitLab self-managed; binding storage
   round trip; `/autofix` commands and the menu item in `ragent-tui`.
+- Done as planned, with these details:
+  - The remote parser keeps its old signatures; `parse_remote_url_with_hosts`
+    and `detect_remote_with_hosts` take the `vcs.github.hosts` list.
+    `ProjectManager` and `PullRequestCounts` get the hosts through
+    `with_github_hosts` (TUI, server and `ragent project` CLI pass them).
+  - A GitHub remote on a host that is neither github.com nor configured gets
+    no API client, so no token is sent to it.
+  - `bind_session(storage, session, source, remote, BindTarget)` returns
+    `Bound`, `NoneOpen` or `Several`; only `Bound` writes. Storage gained
+    `bind_session_request` (binds the top-level session); the VCS
+    `StorageBackend` trait gained the same method with a refusing default.
+  - `RequestNoun` also carries the number sigil (`#` / `!`).
+  - The menu item is shown only when bound; it opens the stored URL with
+    `open_in::url_spec`, which refuses anything but `http(s)://`.
+  - Tests: `ragent-agent` `test_request_binding` (7), `ragent-tools-vcs`
+    `test_request_binding` (3), `ragent-tui` `test_autofix` (4) and two
+    more in `test_session_menu`.
 
-M5 - Auto-fix watcher (1 week)
+M5 - Auto-fix watcher (1 week) - DONE
 - T5.1 `AutofixWatcher`, trigger computation, dedup, attempt cap, merge/close
   lifecycle (FR-17, FR-19, FR-20).
 - T5.2 `AutofixTrigger` event routing into focused and background sessions,
@@ -453,6 +470,39 @@ M5 - Auto-fix watcher (1 week)
   needing the user; conflict and review triggers; merged -> stops. A TUI
   test asserts a background session gets the prompt queued and the `!`
   marker without a dialog over the focused session.
+- Done as planned, with these details:
+  - Storage (schema 10): `session_requests` gains `autofix`,
+    `autofix_paused`, `head_sha`, `last_polled_at`, `last_trigger`; new
+    `autofix_events` table. Rebinding keeps the on/off setting; paused state
+    and head commit are kept only when the same request is bound again.
+    Deleting a session deletes its `autofix_events` rows.
+  - `vcs.autofix { poll_secs, max_attempts, default_on }` (global config
+    only, like `vcs.github`). `default_on` applies when a session is bound
+    for the first time, by a create tool or by `/autofix bind`.
+  - `ragent_agent::autofix::AutofixWatcher` takes a source resolver (the
+    TUI passes `PullRequestCounts::source_for`, so the GHES and GitLab host
+    rules of M4 apply) and is started once at TUI startup; `/autofix on`
+    wakes it at once. One poll per bound request per tick (not batched per
+    repository; NFR-01 batching and ETags are not done).
+  - Triggers: GitHub failed check runs (`failure`, `timed_out`) and failed
+    commit statuses, Actions job log tail; `mergeable == false` or
+    `mergeable_state == dirty`; inline review comments and review bodies by
+    anyone but the token's user (REST, so dedup on id per R1). GitLab head
+    pipeline failed jobs (`allow_failure` jobs left out) with the job log
+    tail; `detailed_merge_status == conflict` or `has_conflicts`;
+    unresolved resolvable notes by anyone but the token's user.
+  - Attempts are wake-ups per kind per head commit; the next one pauses
+    Auto-fix (`paused` event, `#!` glyph) until `/autofix on`. R3's
+    `max_daily` is not done.
+  - `Event::AutofixTrigger { session_id, kind, summary, prompt }`. The TUI
+    sends the prompt as a user message, queues it when the session is busy,
+    and opens a session that is not open in the background first. A
+    background session is marked unread and fires `on_notification` with
+    kind `autofix`. `paused` and `closed` events only add a notice.
+  - Menu `Auto-fix: on/off` (`X`) under `Open PR/MR`; sidebar `#` / `#!`;
+    the status bar shows the focused session's latest summary.
+  - Tests: `ragent-agent` `test_autofix_watcher` (7), `ragent-tui`
+    `test_autofix` (4 more) and `test_session_menu` (1 more).
 
 M6 - Docs and polish (1-2 days)
 - SPEC.md (sidebar menu, `/autofix`, `vcs` config), QUICKSTART.md and

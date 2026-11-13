@@ -139,6 +139,17 @@ impl App {
     ///
     /// * `event` - the event received from the bus.
     pub async fn handle_event(&mut self, event: Event) {
+        // Auto-fix wake-ups go to the bound session, opening it if needed.
+        if let Event::AutofixTrigger {
+            session_id,
+            kind,
+            summary,
+            prompt,
+        } = &event
+        {
+            self.handle_autofix_trigger(session_id, kind, summary, prompt);
+            return;
+        }
         // Session activity changes the sidebar's titles and ordering (NFR-03).
         if matches!(
             event,
@@ -886,6 +897,28 @@ impl App {
             dir.display(),
             target.label().to_lowercase()
         );
+        Ok(())
+    }
+
+    /// Opens the pull/merge request session `id` is bound to in the browser
+    /// (SESSIONMENU T4.4).
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the session is not bound or its stored URL is
+    /// not a web URL.
+    pub(crate) fn open_session_request(&mut self, id: &str) -> Result<(), String> {
+        let request = self
+            .session_request_of(id)
+            .ok_or("this session is not bound to a pull or merge request")?;
+        let env = crate::open_in::LaunchEnv::current();
+        let spec = crate::open_in::url_spec(&request.web_url, &env)
+            .ok_or_else(|| format!("`{}` is not a web URL", request.web_url))?;
+        match self.sidebar.launch_log.as_mut() {
+            Some(log) => log.push(spec),
+            None => crate::open_in::spawn(&spec)?,
+        }
+        self.status = format!("opened {}", request.web_url);
         Ok(())
     }
 

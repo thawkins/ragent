@@ -46,7 +46,7 @@ use ragent_types::message::{Message, MessagePart, Role};
 ///
 /// Public so tests can assert the persisted `schema_version` setting against
 /// the compiler-enforced value instead of a hard-coded literal.
-pub const SCHEMA_VERSION: u32 = 9;
+pub const SCHEMA_VERSION: u32 = 10;
 
 // PERF-071: static SQL bodies hoisted to `const &str` so the session read
 // paths build no `String` and the prepared-statement cache sees a stable
@@ -1306,6 +1306,38 @@ impl Storage {
                  updated_at TEXT NOT NULL
              );",
         )?;
+        // SESSIONMENU M5: Auto-fix state on the binding, and the triggers
+        // already acted on (dedup and attempt count, FR-17, FR-19).
+        for (col, ty) in &[
+            ("autofix", "INTEGER NOT NULL DEFAULT 0"),
+            ("autofix_paused", "INTEGER NOT NULL DEFAULT 0"),
+            ("head_sha", "TEXT"),
+            ("last_polled_at", "TEXT"),
+            ("last_trigger", "TEXT"),
+        ] {
+            let has_col: bool = tx
+                .prepare_cached(&format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('session_requests') WHERE name='{col}'"
+                ))?
+                .query_row([], |r| r.get::<_, i64>(0))
+                .unwrap_or(0)
+                > 0;
+            if !has_col {
+                tx.execute_batch(&format!(
+                    "ALTER TABLE session_requests ADD COLUMN {col} {ty};"
+                ))?;
+            }
+        }
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS autofix_events (
+                 session_id TEXT NOT NULL,
+                 head_sha TEXT NOT NULL,
+                 kind TEXT NOT NULL,
+                 item_id TEXT NOT NULL,
+                 fired_at TEXT NOT NULL,
+                 PRIMARY KEY (session_id, head_sha, kind, item_id)
+             );",
+        )?;
         tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS sidebar_sections (
                  id TEXT PRIMARY KEY,
@@ -1998,6 +2030,7 @@ impl Storage {
                 "message_fts_keys",
                 "messages",
                 "session_requests",
+                "autofix_events",
                 "run_cost_summaries",
                 "background_tasks",
                 "todos",
@@ -2103,7 +2136,9 @@ impl Storage {
     }
 
     /// Binds a session to a pull/merge request, replacing any earlier
-    /// binding (SESSIONMENU FR-14).
+    /// binding (SESSIONMENU FR-14). The session's Auto-fix on/off setting is
+    /// kept; its paused state and last-seen head commit are kept only when
+    /// the same request is bound again.
     ///
     /// # Errors
     ///
@@ -2133,9 +2168,18 @@ impl Storage {
     pub fn set_session_request(&self, request: &SessionRequest) -> Result<()> {
         let conn = lock_conn!(self)?;
         conn.execute(
-            "INSERT OR REPLACE INTO session_requests \
+            "INSERT INTO session_requests \
              (session_id, forge, host, repo, number, title, web_url, head_branch, state, \
-              updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+              updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+             ON CONFLICT(session_id) DO UPDATE SET \
+              autofix_paused = CASE WHEN number = excluded.number AND repo = excluded.repo \
+                  THEN autofix_paused ELSE 0 END, \
+              head_sha = CASE WHEN number = excluded.number AND repo = excluded.repo \
+                  THEN head_sha ELSE NULL END, \
+              forge = excluded.forge, host = excluded.host, repo = excluded.repo, \
+              number = excluded.number, title = excluded.title, web_url = excluded.web_url, \
+              head_branch = excluded.head_branch, state = excluded.state, \
+              updated_at = excluded.updated_at",
             params![
                 request.session_id,
                 request.forge,
@@ -2186,6 +2230,9 @@ impl Storage {
     /// (see [`Storage::root_session_id`]), so a request created by a
     /// sub-agent belongs to the session the user sees.
     ///
+    /// A session that had no binding before gets Auto-fix turned on when
+    /// `autofix_default` is set (`vcs.autofix.default_on`, FR-16).
+    ///
     /// # Returns
     ///
     /// The id of the session the request was bound to.
@@ -2193,13 +2240,21 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if a query or the write fails.
-    pub fn bind_session_request(&self, request: &SessionRequest) -> Result<String> {
+    pub fn bind_session_request(
+        &self,
+        request: &SessionRequest,
+        autofix_default: bool,
+    ) -> Result<String> {
         let root = self.root_session_id(&request.session_id)?;
+        let was_bound = self.session_request(&root)?.is_some();
         let bound = SessionRequest {
             session_id: root.clone(),
             ..request.clone()
         };
         self.set_session_request(&bound)?;
+        if autofix_default && !was_bound {
+            self.set_session_autofix(&root, true)?;
+        }
         Ok(root)
     }
 
@@ -2215,6 +2270,249 @@ impl Storage {
             params![session_id],
         )?;
         Ok(())
+    }
+
+    /// Auto-fix state of session `session_id`'s binding; `None` when the
+    /// session is not bound (SESSIONMENU FR-16, FR-22).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn session_autofix(&self, session_id: &str) -> Result<Option<AutofixState>> {
+        let conn = lock_conn_read!(self)?;
+        let row = conn
+            .query_row(
+                "SELECT autofix, autofix_paused, head_sha, last_polled_at, last_trigger \
+                 FROM session_requests WHERE session_id = ?1",
+                params![session_id],
+                |r| {
+                    Ok(AutofixState {
+                        enabled: r.get::<_, i64>(0)? != 0,
+                        paused: r.get::<_, i64>(1)? != 0,
+                        head_sha: r.get(2)?,
+                        last_polled_at: r.get(3)?,
+                        last_trigger: r.get(4)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Turns Auto-fix on or off for session `session_id`'s binding. Either
+    /// way the paused state is cleared, so `on` resumes a paused watcher.
+    ///
+    /// # Returns
+    ///
+    /// `false` when the session has no binding (nothing changed).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::{SessionRequest, Storage};
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("s", "/tmp/project").unwrap();
+    /// assert!(!storage.set_session_autofix("s", true).unwrap());
+    /// storage
+    ///     .set_session_request(&SessionRequest {
+    ///         session_id: "s".into(),
+    ///         forge: "github".into(),
+    ///         host: "github.com".into(),
+    ///         repo: "o/r".into(),
+    ///         number: 7,
+    ///         title: "Fix".into(),
+    ///         web_url: "https://github.com/o/r/pull/7".into(),
+    ///         head_branch: "fix".into(),
+    ///         state: "open".into(),
+    ///     })
+    ///     .unwrap();
+    /// assert!(storage.set_session_autofix("s", true).unwrap());
+    /// assert!(storage.session_autofix("s").unwrap().unwrap().enabled);
+    /// ```
+    pub fn set_session_autofix(&self, session_id: &str, enabled: bool) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let changed = conn.execute(
+            "UPDATE session_requests SET autofix = ?2, autofix_paused = 0 WHERE session_id = ?1",
+            params![session_id, i64::from(enabled)],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Pauses (or resumes) Auto-fix for session `session_id` without
+    /// changing its on/off setting (FR-19).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn set_autofix_paused(&self, session_id: &str, paused: bool) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "UPDATE session_requests SET autofix_paused = ?2 WHERE session_id = ?1",
+            params![session_id, i64::from(paused)],
+        )?;
+        Ok(())
+    }
+
+    /// Bindings the Auto-fix watcher polls: Auto-fix on, not paused, the
+    /// request open when last seen, and the session not archived.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn autofix_watch_list(&self) -> Result<Vec<SessionRequest>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT r.session_id, r.forge, r.host, r.repo, r.number, r.title, r.web_url, \
+             r.head_branch, r.state FROM session_requests r \
+             JOIN sessions s ON s.id = r.session_id \
+             WHERE r.autofix = 1 AND r.autofix_paused = 0 AND r.state = 'open' \
+               AND s.archived_at IS NULL \
+             ORDER BY r.session_id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(SessionRequest {
+                    session_id: r.get(0)?,
+                    forge: r.get(1)?,
+                    host: r.get(2)?,
+                    repo: r.get(3)?,
+                    number: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
+                    title: r.get(5)?,
+                    web_url: r.get(6)?,
+                    head_branch: r.get(7)?,
+                    state: r.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Ids of all bound sessions, each with whether Auto-fix is paused
+    /// waiting on the user (sidebar glyphs, FR-22).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn bound_sessions(&self) -> Result<HashMap<String, bool>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt =
+            conn.prepare_cached("SELECT session_id, autofix_paused FROM session_requests")?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? != 0))
+            })?
+            .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+        Ok(rows)
+    }
+
+    /// Records one Auto-fix poll of session `session_id`'s request: its
+    /// state, title and head commit as seen now.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn record_autofix_poll(
+        &self,
+        session_id: &str,
+        state: &str,
+        title: &str,
+        head_sha: &str,
+    ) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "UPDATE session_requests SET state = ?2, title = ?3, head_sha = ?4, \
+             last_polled_at = ?5 WHERE session_id = ?1",
+            params![session_id, state, title, head_sha, Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// The items of `kind` at `head_sha` not yet acted on for session
+    /// `session_id`, in the order given (dedup, FR-17).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn new_autofix_items(
+        &self,
+        session_id: &str,
+        head_sha: &str,
+        kind: &str,
+        items: &[String],
+    ) -> Result<Vec<String>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT 1 FROM autofix_events \
+             WHERE session_id = ?1 AND head_sha = ?2 AND kind = ?3 AND item_id = ?4",
+        )?;
+        let mut fresh = Vec::new();
+        for item in items {
+            if !stmt.exists(params![session_id, head_sha, kind, item])? {
+                fresh.push(item.clone());
+            }
+        }
+        Ok(fresh)
+    }
+
+    /// How many wake-ups of `kind` session `session_id` has had at
+    /// `head_sha` (attempt cap, FR-19). Items recorded together count once.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn autofix_attempts(&self, session_id: &str, head_sha: &str, kind: &str) -> Result<u32> {
+        let conn = lock_conn_read!(self)?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT fired_at) FROM autofix_events \
+             WHERE session_id = ?1 AND head_sha = ?2 AND kind = ?3",
+            params![session_id, head_sha, kind],
+            |r| r.get(0),
+        )?;
+        Ok(u32::try_from(count).unwrap_or(u32::MAX))
+    }
+
+    /// Records one wake-up of `kind` at `head_sha` covering `items`, and
+    /// remembers `summary` as the session's last trigger.
+    ///
+    /// # Returns
+    ///
+    /// How many of `items` were newly recorded. `0` means another process
+    /// recorded them first, so the caller must not wake the session again
+    /// (spec SESSIONMENU R2).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a write fails; then nothing is recorded.
+    pub fn record_autofix_wakeup(
+        &self,
+        session_id: &str,
+        head_sha: &str,
+        kind: &str,
+        items: &[String],
+        summary: &str,
+    ) -> Result<usize> {
+        let mut conn = lock_conn!(self)?;
+        let tx = conn.transaction()?;
+        let fired_at = Utc::now().to_rfc3339();
+        let mut inserted = 0;
+        for item in items {
+            inserted += tx.execute(
+                "INSERT OR IGNORE INTO autofix_events \
+                 (session_id, head_sha, kind, item_id, fired_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![session_id, head_sha, kind, item, fired_at],
+            )?;
+        }
+        tx.execute(
+            "UPDATE session_requests SET last_trigger = ?2 WHERE session_id = ?1",
+            params![session_id, summary],
+        )?;
+        tx.commit()?;
+        Ok(inserted)
     }
 
     /// The top-level session of `session_id`: follows `parent_id` up from a
@@ -5907,6 +6205,21 @@ pub struct SessionRequest {
     pub head_branch: String,
     /// `open`, `merged` or `closed`, when last seen.
     pub state: String,
+}
+
+/// Auto-fix state of a bound session (spec SESSIONMENU FR-16, FR-19).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AutofixState {
+    /// Auto-fix is on for this session.
+    pub enabled: bool,
+    /// Paused after too many attempts; waiting on the user.
+    pub paused: bool,
+    /// Head commit when last polled.
+    pub head_sha: Option<String>,
+    /// RFC 3339 time of the last poll.
+    pub last_polled_at: Option<String>,
+    /// Summary of the last wake-up.
+    pub last_trigger: Option<String>,
 }
 
 /// A user-defined sidebar section (spec SESSIONMENU FR-11).

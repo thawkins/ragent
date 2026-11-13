@@ -1370,8 +1370,14 @@ impl ragent_tools_vcs::storage::StorageBackend for CoreVcsStorageAdapter {
         self.inner.delete_setting(key)
     }
 
-    fn bind_session_request(&self, request: &ragent_storage::SessionRequest) -> anyhow::Result<()> {
-        self.inner.bind_session_request(request).map(|_| ())
+    fn bind_session_request(
+        &self,
+        request: &ragent_storage::SessionRequest,
+        autofix_default: bool,
+    ) -> anyhow::Result<()> {
+        self.inner
+            .bind_session_request(request, autofix_default)
+            .map(|_| ())
     }
 }
 

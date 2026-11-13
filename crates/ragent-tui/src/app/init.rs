@@ -218,6 +218,8 @@ impl App {
             ),
             pending_project_sessions: Arc::new(std::sync::Mutex::new(Vec::new())),
             last_request_sweep: None,
+            autofix_wake: None,
+            autofix_status: std::collections::HashMap::new(),
             worktree_root: None,
             project_services: std::collections::HashMap::new(),
             bench_origin_session: None,

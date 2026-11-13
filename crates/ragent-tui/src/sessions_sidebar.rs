@@ -85,6 +85,9 @@ pub struct SidebarState {
     pub pinned: HashSet<String>,
     /// Cached ids of sessions marked unread in storage (SESSIONMENU FR-08).
     pub unread: HashSet<String>,
+    /// Cached bound sessions, each with whether Auto-fix is paused waiting
+    /// on the user (SESSIONMENU FR-22).
+    pub bound: HashMap<String, bool>,
     /// Cached user-defined sections, in display order (SESSIONMENU FR-11).
     pub sections: Vec<SidebarSection>,
     /// Cached section id of each session placed in a section.
@@ -121,6 +124,7 @@ impl Default for SidebarState {
             groups: Vec::new(),
             pinned: HashSet::new(),
             unread: HashSet::new(),
+            bound: HashMap::new(),
             sections: Vec::new(),
             session_section: HashMap::new(),
             missing: HashSet::new(),
@@ -263,6 +267,10 @@ pub fn split_area(app: &App, area: Rect) -> (Option<Rect>, Rect) {
 pub fn refresh_if_dirty(app: &mut App) {
     if !app.sidebar.dirty {
         return;
+    }
+    match app.storage.bound_sessions() {
+        Ok(bound) => app.sidebar.bound = bound,
+        Err(e) => tracing::warn!(error = %e, "session sidebar: bound sessions not read"),
     }
     match (
         app.storage.list_sessions_grouped(),
@@ -696,10 +704,20 @@ fn row_line(
                 Some(n) => format!("{BRANCH_MARK}{n}"),
                 None => BRANCH_MARK.to_string(),
             });
-            // Right edge: `[age ][branch ]state`. Indent of two before the
+            // `#` when bound to a PR/MR, `#!` when Auto-fix waits on the
+            // user (FR-22).
+            let request_part = app.sidebar.bound.get(id).map(|paused| {
+                if *paused {
+                    ("#!", Color::Yellow)
+                } else {
+                    ("#", Color::Blue)
+                }
+            });
+            // Right edge: `[age ][#][branch ]state`. Indent of two before the
             // title and one space after it.
             let branch_width = branch_part.as_ref().map_or(0, |b| b.len() + 1);
-            let fixed = 2 + 1 + branch_width + 1;
+            let request_width = request_part.map_or(0, |(p, _)| p.len() + 1);
+            let fixed = 2 + 1 + branch_width + request_width + 1;
             let mut age = relative_age(updated_at, now);
             // When space is short the age goes first, then the title is cut.
             if width.saturating_sub(fixed + age.len() + 1) < MIN_TITLE_WIDTH {
@@ -724,6 +742,10 @@ fn row_line(
             ];
             if !age.is_empty() {
                 spans.push(Span::styled(age, Style::default().fg(Color::DarkGray)));
+                spans.push(Span::raw(" "));
+            }
+            if let Some((part, colour)) = request_part {
+                spans.push(Span::styled(part, Style::default().fg(colour)));
                 spans.push(Span::raw(" "));
             }
             if let Some(part) = branch_part {

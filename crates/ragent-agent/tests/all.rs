@@ -816,6 +816,11 @@ mod test_project_remote;
 mod test_project_report;
 #[path = "test_pull_request_counts.rs"]
 mod test_pull_request_counts;
+
+#[path = "test_autofix_watcher.rs"]
+mod test_autofix_watcher;
+#[path = "test_request_binding.rs"]
+mod test_request_binding;
 #[path = "test_security_analyzer_request.rs"]
 mod test_security_analyzer_request;
 #[path = "test_session_archive_project.rs"]

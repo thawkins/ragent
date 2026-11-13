@@ -17,6 +17,7 @@ pub mod event;
 
 pub use ragent_types::event::{Event, EventBus, FinishReason};
 pub use ragent_types::startup::StartupTimings;
+pub mod autofix;
 pub mod automation;
 pub mod backend;
 pub mod file_ops;

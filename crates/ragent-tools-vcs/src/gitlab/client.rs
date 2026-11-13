@@ -111,6 +111,32 @@ impl GitLabClient {
         }
     }
 
+    /// GET request for a plain-text API resource, such as a job log
+    /// (`/projects/{id}/jobs/{job}/trace`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on a non-2xx response or a body-read failure.
+    pub async fn get_text(&self, path: &str) -> Result<String> {
+        let url = format!("{}/api/v4{path}", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .header("User-Agent", "ragent/0.1")
+            .send()
+            .await
+            .with_context(|| format!("GitLab GET {path} failed"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GitLab API error {status} for {path}: {body}");
+        }
+        resp.text()
+            .await
+            .with_context(|| format!("Failed to read GitLab text for {path}"))
+    }
+
     /// POST request to the GitLab API.
     pub async fn post(&self, path: &str, body: &Value) -> Result<Value> {
         let url = format!("{}/api/v4{path}", self.base_url);

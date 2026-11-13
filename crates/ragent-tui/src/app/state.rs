@@ -949,7 +949,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "autofix",
-        description: "Pull/merge request binding: /autofix [status] | bind [number|url] | unbind",
+        description: "PR/MR Auto-fix: /autofix [status] | bind [number|url] | unbind | on | off",
     },
     SlashCommandDef {
         trigger: "project",
@@ -3087,6 +3087,12 @@ pub struct App {
         Arc<std::sync::Mutex<Vec<crate::app::projects::PendingProjectSession>>>,
     /// When the poll loop last looked for projects with due request counts.
     pub last_request_sweep: Option<std::time::Instant>,
+    /// Wakes the running Auto-fix watcher; `None` until
+    /// [`App::start_autofix_watcher`] runs (spec SESSIONMENU D5).
+    pub autofix_wake: Option<Arc<tokio::sync::Notify>>,
+    /// Latest Auto-fix status line per bound session, e.g.
+    /// `PR #67 auto-fix: CI failed (attempt 2/3)` (FR-22).
+    pub autofix_status: HashMap<String, String>,
     /// Where session worktrees are created; `None` uses the ragent data
     /// directory. Tests point this at `target/temp/`.
     pub worktree_root: Option<std::path::PathBuf>,

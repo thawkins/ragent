@@ -676,3 +676,108 @@ async fn test_session_menu_section_slash_commands() {
         "A was never moved"
     );
 }
+
+#[tokio::test]
+async fn test_session_menu_open_request_first_when_bound() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    app.storage
+        .set_session_request(&ragent_storage::SessionRequest {
+            session_id: a.clone(),
+            forge: "github".to_string(),
+            host: "github.com".to_string(),
+            repo: "acme/app".to_string(),
+            number: 12,
+            title: "Add menu".to_string(),
+            web_url: "https://github.com/acme/app/pull/12".to_string(),
+            head_branch: "menu".to_string(),
+            state: "open".to_string(),
+        })
+        .expect("bind");
+    app.sidebar.launch_log = Some(Vec::new());
+    put_cursor_on(&mut app, &a);
+
+    app.handle_key_event(key(KeyCode::Char('m'))).await;
+    let menu = app.sidebar.menu.clone().expect("menu open");
+    assert_eq!(menu.items[0].action, MenuAction::OpenRequest);
+    assert_eq!(menu.items[0].label, "Open PR");
+    assert_eq!(menu.items[0].accel, Some('g'));
+
+    app.handle_key_event(key(KeyCode::Char('g'))).await;
+
+    assert!(app.sidebar.menu.is_none(), "the menu closes");
+    let log = app.sidebar.launch_log.as_ref().expect("log");
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].args, ["https://github.com/acme/app/pull/12"]);
+}
+
+#[tokio::test]
+async fn test_session_menu_no_open_request_when_unbound() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    put_cursor_on(&mut app, &a);
+    app.handle_key_event(key(KeyCode::Char('m'))).await;
+    let menu = app.sidebar.menu.clone().expect("menu open");
+    assert!(
+        menu.items
+            .iter()
+            .all(|i| i.action != MenuAction::OpenRequest)
+    );
+}
+
+#[tokio::test]
+async fn test_session_menu_autofix_toggle_and_sidebar_glyphs() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let request = ragent_storage::SessionRequest {
+        session_id: a.clone(),
+        forge: "gitlab".to_string(),
+        host: "gitlab.example.com".to_string(),
+        repo: "group/app".to_string(),
+        number: 4,
+        title: "Fix".to_string(),
+        web_url: "https://gitlab.example.com/group/app/-/merge_requests/4".to_string(),
+        head_branch: "fix".to_string(),
+        state: "open".to_string(),
+    };
+    app.storage.set_session_request(&request).expect("bind");
+    app.sidebar.dirty = true;
+    let row = row_of_session(&mut app, &a);
+    let width = usize::from(app.sidebar.area.width);
+    let text: String = draw(&mut app)[row].chars().take(width).collect();
+    assert!(text.contains(" # "), "bound glyph: {text}");
+
+    put_cursor_on(&mut app, &a);
+    app.handle_key_event(key(KeyCode::Char('m'))).await;
+    let menu = app.sidebar.menu.clone().expect("menu open");
+    assert_eq!(menu.items[0].label, "Open MR");
+    assert_eq!(menu.items[1].action, MenuAction::ToggleAutofix);
+    assert_eq!(menu.items[1].label, "Auto-fix: off");
+    assert_eq!(menu.items[1].accel, Some('x'));
+
+    app.handle_key_event(key(KeyCode::Char('x'))).await;
+    assert!(app.sidebar.menu.is_none());
+    assert!(
+        app.storage
+            .session_autofix(&a)
+            .expect("read")
+            .expect("bound")
+            .enabled
+    );
+    assert!(
+        app.status.contains("Auto-fix on for MR !4"),
+        "{}",
+        app.status
+    );
+
+    put_cursor_on(&mut app, &a);
+    app.handle_key_event(key(KeyCode::Char('m'))).await;
+    assert_eq!(
+        app.sidebar.menu.as_ref().expect("menu").items[1].label,
+        "Auto-fix: on"
+    );
+    app.handle_key_event(key(KeyCode::Esc)).await;
+
+    // Paused waiting on the user.
+    app.storage.set_autofix_paused(&a, true).expect("pause");
+    app.sidebar.dirty = true;
+    let text: String = draw(&mut app)[row].chars().take(width).collect();
+    assert!(text.contains(" #! "), "paused glyph: {text}");
+}

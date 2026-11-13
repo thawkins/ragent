@@ -227,6 +227,9 @@ mod test_event_swarm_research_deep;
 mod test_force_cleanup_modal;
 #[path = "test_open_in.rs"]
 mod test_open_in;
+
+#[path = "test_autofix.rs"]
+mod test_autofix;
 #[path = "test_subagent_lifecycle_review.rs"]
 mod test_subagent_lifecycle_review;
 

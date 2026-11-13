@@ -37,7 +37,11 @@ pub fn bind_created(ctx: &ToolContext, mut request: SessionRequest) {
     };
     request.session_id.clone_from(&ctx.session_id);
     request.host = host;
-    if let Err(e) = storage.bind_session_request(&request) {
+    let autofix_default = ctx
+        .config
+        .as_ref()
+        .is_some_and(|c| c.vcs.autofix.default_on());
+    if let Err(e) = storage.bind_session_request(&request, autofix_default) {
         tracing::debug!(error = %e, number = request.number, "request not bound to session");
     }
 }

@@ -46,7 +46,13 @@ pub mod storage {
         /// Bind a pull/merge request to the top-level session of
         /// `request.session_id` (spec SESSIONMENU FR-14). A backend that
         /// holds no sessions refuses with an error, which callers log.
-        fn bind_session_request(&self, request: &ragent_storage::SessionRequest) -> Result<()> {
+        /// `autofix_default` turns Auto-fix on for a session bound for the
+        /// first time.
+        fn bind_session_request(
+            &self,
+            request: &ragent_storage::SessionRequest,
+            _autofix_default: bool,
+        ) -> Result<()> {
             anyhow::bail!(
                 "storage backend holds no sessions; request {} not bound",
                 request.number
@@ -87,8 +93,13 @@ pub mod storage {
             self.delete_setting(key)
         }
 
-        fn bind_session_request(&self, request: &ragent_storage::SessionRequest) -> Result<()> {
-            self.bind_session_request(request).map(|_| ())
+        fn bind_session_request(
+            &self,
+            request: &ragent_storage::SessionRequest,
+            autofix_default: bool,
+        ) -> Result<()> {
+            self.bind_session_request(request, autofix_default)
+                .map(|_| ())
         }
     }
 }

@@ -3256,6 +3256,16 @@ impl Config {
         if !overlay.vcs.github.hosts.is_empty() {
             base.vcs.github.hosts = overlay.vcs.github.hosts;
         }
+        let autofix = overlay.vcs.autofix;
+        if autofix.poll_secs.is_some() {
+            base.vcs.autofix.poll_secs = autofix.poll_secs;
+        }
+        if autofix.max_attempts.is_some() {
+            base.vcs.autofix.max_attempts = autofix.max_attempts;
+        }
+        if autofix.default_on.is_some() {
+            base.vcs.autofix.default_on = autofix.default_on;
+        }
 
         // tavily_api_key: overlay overrides base
         if overlay.tavily_api_key.is_some() {
@@ -3947,7 +3957,8 @@ redacted_debug_impl!(GitLabIntegrationConfig);
 ///       "hosts": [
 ///         { "host": "github.example.com", "api_url": "https://github.example.com/api/v3" }
 ///       ]
-///     }
+///     },
+///     "autofix": { "poll_secs": 60, "max_attempts": 3, "default_on": false }
 ///   }
 /// }
 /// ```
@@ -3956,6 +3967,46 @@ pub struct VcsConfig {
     /// GitHub settings.
     #[serde(default)]
     pub github: VcsGitHubConfig,
+    /// Auto-fix watcher settings (spec SESSIONMENU FR-21).
+    #[serde(default)]
+    pub autofix: VcsAutofixConfig,
+}
+
+/// Auto-fix settings under `vcs.autofix`. Unset fields take the defaults
+/// given by the accessor methods.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VcsAutofixConfig {
+    /// Seconds between polls; default 60, at least 30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll_secs: Option<u64>,
+    /// Wake-ups per trigger kind per head commit before Auto-fix pauses;
+    /// default 3, at least 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
+    /// Whether a new binding starts with Auto-fix on; default `false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_on: Option<bool>,
+}
+
+impl VcsAutofixConfig {
+    /// Seconds between polls: `poll_secs`, default 60, never below 30.
+    #[must_use]
+    pub fn poll_secs(&self) -> u64 {
+        self.poll_secs.unwrap_or(60).max(30)
+    }
+
+    /// Wake-ups allowed per trigger kind per head commit: default 3, at
+    /// least 1.
+    #[must_use]
+    pub fn max_attempts(&self) -> u32 {
+        self.max_attempts.unwrap_or(3).max(1)
+    }
+
+    /// Whether new bindings start with Auto-fix on.
+    #[must_use]
+    pub fn default_on(&self) -> bool {
+        self.default_on.unwrap_or(false)
+    }
 }
 
 impl VcsConfig {

@@ -24,6 +24,12 @@ use crate::open_in::{LaunchEnv, OpenTarget};
 /// What a menu item does to its session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuAction {
+    /// Open the bound pull/merge request in the browser (`Open PR` /
+    /// `Open MR`, shown only when the session is bound).
+    OpenRequest,
+    /// Turn Auto-fix on or off for the bound request (`Auto-fix: on/off`,
+    /// shown only when the session is bound).
+    ToggleAutofix,
     /// Open the `Open in` submenu.
     OpenIn,
     /// Pin or unpin the session (same as `p`).
@@ -193,6 +199,29 @@ fn build_items(app: &App, session_id: &str) -> Vec<MenuItem> {
         "Mark as unread"
     };
     let mut items = Vec::new();
+    if let Some(request) = app.session_request_of(session_id) {
+        let short = ragent_agent::project::RemoteKind::parse(&request.forge)
+            .map_or("request", |kind| kind.noun().short);
+        items.push(item(
+            &format!("Open {short}"),
+            Some('g'),
+            MenuAction::OpenRequest,
+            0,
+        ));
+        let on = match app.storage.session_autofix(&request.session_id) {
+            Ok(state) => state.is_some_and(|state| state.enabled),
+            Err(e) => {
+                tracing::warn!(error = %e, "could not read Auto-fix state");
+                false
+            }
+        };
+        items.push(item(
+            if on { "Auto-fix: on" } else { "Auto-fix: off" },
+            Some('x'),
+            MenuAction::ToggleAutofix,
+            0,
+        ));
+    }
     if !open_in_items(app, session_id).is_empty() {
         items.push(item("Open in", None, MenuAction::OpenIn, 0));
     }
@@ -381,6 +410,10 @@ fn dispatch(app: &mut App, session_id: &str, action: MenuAction) {
     app.sidebar.menu = None;
     let result = match action {
         MenuAction::OpenIn | MenuAction::MoveTo => Ok(()),
+        MenuAction::OpenRequest => app.open_session_request(session_id),
+        MenuAction::ToggleAutofix => app
+            .toggle_session_autofix(session_id)
+            .map(|message| app.status = format!("autofix: {message}")),
         MenuAction::TogglePin => app.toggle_session_pin(session_id),
         MenuAction::ToggleUnread => app.toggle_session_unread(session_id),
         MenuAction::Rename => {

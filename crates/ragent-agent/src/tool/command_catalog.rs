@@ -87,6 +87,9 @@ const SESSION_SUBS: &[&str] = &[
     "unarchive",
     "help",
 ];
+/// `/autofix` subcommands (SESSIONMENU M4).
+const AUTOFIX_SUBS: &[&str] = &["status", "bind", "unbind", "on", "off", "help"];
+
 const PROJECT_SUBS: &[&str] = &[
     "show", "list", "add", "rename", "model", "refresh", "prune", "remove", "help",
 ];
@@ -561,6 +564,12 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
         trigger: "session",
         description: "Sessions: /session [list] | new | switch | close | rename | pin | archive",
         subcommands: SESSION_SUBS,
+        flags: EMPTY,
+    },
+    CommandCatalogEntry {
+        trigger: "autofix",
+        description: "PR/MR Auto-fix: /autofix [status] | bind [number|url] | unbind | on | off",
+        subcommands: AUTOFIX_SUBS,
         flags: EMPTY,
     },
     CommandCatalogEntry {

@@ -213,7 +213,7 @@ pub struct RequestInfo {
 
 impl RequestInfo {
     /// Reads a GitHub pull request object.
-    fn from_github(item: &Value) -> Option<Self> {
+    pub(crate) fn from_github(item: &Value) -> Option<Self> {
         let state = if item["merged_at"].is_string() || item["merged"] == Value::Bool(true) {
             RequestState::Merged
         } else if item["state"] == "open" {
@@ -231,7 +231,7 @@ impl RequestInfo {
     }
 
     /// Reads a GitLab merge request object.
-    fn from_gitlab(item: &Value) -> Option<Self> {
+    pub(crate) fn from_gitlab(item: &Value) -> Option<Self> {
         let state = match item["state"].as_str() {
             Some("merged") => RequestState::Merged,
             Some("closed") => RequestState::Closed,
@@ -402,6 +402,7 @@ pub enum BindOutcome {
 
 /// Looks up the request `target` names on `remote` and binds it to the
 /// top-level session of `session_id` (spec SESSIONMENU FR-14).
+/// `autofix_default` turns Auto-fix on when the session had no binding.
 ///
 /// # Errors
 ///
@@ -413,6 +414,7 @@ pub async fn bind_session(
     source: &RequestSource,
     remote: &ProjectRemote,
     target: BindTarget,
+    autofix_default: bool,
 ) -> std::result::Result<BindOutcome, FetchError> {
     let info = match target {
         BindTarget::Number(number) => get_request(source, remote, number).await?,
@@ -426,7 +428,10 @@ pub async fn bind_session(
         }
     };
     storage
-        .bind_session_request(&info.to_session_request(session_id, remote))
+        .bind_session_request(
+            &info.to_session_request(session_id, remote),
+            autofix_default,
+        )
         .map_err(|e| FetchError::Other(format!("could not store the binding: {e}")))?;
     Ok(BindOutcome::Bound(info))
 }

@@ -212,6 +212,31 @@ pub fn launch_spec(target: OpenTarget, dir: &Path, env: &LaunchEnv) -> Option<La
     }
 }
 
+/// The program that opens `url` in the default browser on `env.os`
+/// (SESSIONMENU T4.4, `Open PR` / `Open MR`).
+///
+/// # Returns
+///
+/// `None` unless `url` is an `http://` or `https://` URL, so a stored value
+/// can never start anything but a browser.
+#[must_use]
+pub fn url_spec(url: &str, env: &LaunchEnv) -> Option<LaunchSpec> {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("https://") || lower.starts_with("http://")) {
+        return None;
+    }
+    let program = match env.os.as_str() {
+        "macos" => "open",
+        "windows" => "explorer",
+        _ => "xdg-open",
+    };
+    Some(LaunchSpec {
+        program: program.to_string(),
+        args: vec![url.to_string()],
+        cwd: std::env::temp_dir(),
+    })
+}
+
 /// Starts `spec` detached: no stdin/stdout/stderr, never waited on by the
 /// caller (a background thread reaps it).
 ///

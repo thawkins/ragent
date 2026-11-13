@@ -20,11 +20,12 @@ pub use project::{
 };
 pub use snapshot::{IncrementalSnapshot, Snapshot};
 pub use storage::{
-    BackgroundTaskRow, ConversationStats, CronEventRow, CycleError, InitiativeMilestone,
-    InitiativeRow, KgEntityRow, KgRelationshipRow, MemoryRow, MessageSearchResult, ProjectSessions,
-    RunCostSummaryRow, SCHEMA_VERSION, SessionKind, SessionRequest, SessionRow,
-    SessionSearchParams, SidebarSection, Storage, TaskDerived, TaskRow, TaskUpdateParams, TaskView,
-    compute_task_dag, decrypt_key, deobfuscate_key, detect_cycle, encrypt_key, obfuscate_key,
+    AutofixState, BackgroundTaskRow, ConversationStats, CronEventRow, CycleError,
+    InitiativeMilestone, InitiativeRow, KgEntityRow, KgRelationshipRow, MemoryRow,
+    MessageSearchResult, ProjectSessions, RunCostSummaryRow, SCHEMA_VERSION, SessionKind,
+    SessionRequest, SessionRow, SessionSearchParams, SidebarSection, Storage, TaskDerived, TaskRow,
+    TaskUpdateParams, TaskView, compute_task_dag, decrypt_key, deobfuscate_key, detect_cycle,
+    encrypt_key, obfuscate_key,
 };
 
 // Backward-compatible aliases for code that has not yet migrated (e.g.

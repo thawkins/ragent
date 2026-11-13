@@ -46,8 +46,8 @@ pub use config::{
     DEFAULT_INPUT_QUEUE_CAPACITY, DEFAULT_LOOP_MAX_STEPS, ExecutionBackend, ExecutionBackendKind,
     GitHubHost, GitLabIntegrationConfig, LoopConfig, McpServerConfig, McpTransport, MemoryConfig,
     ModelConfig, PieGapConfig, PriceEntry, ProviderConfig, ResearchConfig, ResearchEvaluateConfig,
-    ResearchModelsConfig, ResearchSupervisorConfig, SddConfig, StreamConfig, VcsConfig,
-    VcsGitHubConfig, default_acp_turn_timeout_secs,
+    ResearchModelsConfig, ResearchSupervisorConfig, SddConfig, StreamConfig, VcsAutofixConfig,
+    VcsConfig, VcsGitHubConfig, default_acp_turn_timeout_secs,
 };
 pub use connectors::{
     ConnectorCredentialsConfig, ConnectorMarketplaceEntry, ConnectorStoreEndpoint,
