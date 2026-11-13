@@ -84,12 +84,16 @@ mod test_reader_concurrency;
 mod test_run_cost_summaries;
 #[path = "test_schema_version_fast_path.rs"]
 mod test_schema_version_fast_path;
+#[path = "test_session_delete_fork.rs"]
+mod test_session_delete_fork;
 #[path = "test_session_grouping.rs"]
 mod test_session_grouping;
 #[path = "test_sessions_list_plan.rs"]
 mod test_sessions_list_plan;
 #[path = "test_settings_and_file_storage.rs"]
 mod test_settings_and_file_storage;
+#[path = "test_sidebar_sections.rs"]
+mod test_sidebar_sections;
 #[path = "test_snapshot_expand.rs"]
 mod test_snapshot_expand;
 #[path = "test_storage_transactions.rs"]

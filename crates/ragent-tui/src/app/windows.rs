@@ -308,6 +308,10 @@ impl App {
                     self.dispatch_resume_teammate(&agent_id);
                 }
             }
+            RowAction::DeleteSession { session_id, .. } => {
+                let result = self.delete_session_by_id(&session_id);
+                crate::sessions_sidebar::report(self, result);
+            }
         }
     }
 

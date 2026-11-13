@@ -126,6 +126,14 @@ struct SessionNotice<'a> {
 }
 
 #[derive(Serialize)]
+struct AutofixTriggerData<'a> {
+    session_id: &'a str,
+    kind: &'a str,
+    summary: &'a str,
+    prompt: &'a str,
+}
+
+#[derive(Serialize)]
 struct ServerStatus<'a> {
     server_id: &'a str,
     status: &'a str,
@@ -381,6 +389,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::AgentSwitchRequested { .. } => "agent_switch_requested",
         Event::AgentRestoreRequested { .. } => "agent_restore_requested",
         Event::AgentNotice { .. } => "agent_notice",
+        Event::AutofixTrigger { .. } => "autofix_trigger",
         Event::AgentError { .. } => "agent_error",
         Event::McpStatusChanged { .. } => "mcp_status_changed",
         Event::McpServerEnabledChanged { .. } => "mcp_server_enabled_changed",
@@ -611,6 +620,18 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
         } => to_data(&SessionNotice {
             session_id,
             message,
+        }),
+
+        Event::AutofixTrigger {
+            session_id,
+            kind,
+            summary,
+            prompt,
+        } => to_data(&AutofixTriggerData {
+            session_id,
+            kind,
+            summary,
+            prompt,
         }),
 
         Event::AgentError { session_id, error } => to_data(&SessionError { session_id, error }),

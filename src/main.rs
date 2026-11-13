@@ -1468,7 +1468,9 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Project { command }) => {
             use ragent_agent::project::{ProjectManager, report};
-            let manager = ProjectManager::new(Arc::clone(&storage), Arc::clone(&event_bus));
+            let github_hosts = config.read().await.vcs.github.hosts.clone();
+            let manager = ProjectManager::new(Arc::clone(&storage), Arc::clone(&event_bus))
+                .with_github_hosts(github_hosts);
             let find = |name: &str| {
                 manager
                     .find(name)?

@@ -268,7 +268,7 @@ fn test_session_worktree_prune_removes_clean_and_keeps_dirty() {
 
     // A second run has nothing new to remove and still reports the dirty one.
     let second = prune_worktrees(&m.storage, &project).expect("prune again");
-    assert!(second.removed.is_empty());
+    assert_eq!(second.removed, Vec::<std::path::PathBuf>::new());
     assert_eq!(second.skipped.len(), 1);
 }
 
@@ -308,7 +308,7 @@ fn test_session_worktree_prune_keeps_a_worktree_a_live_session_works_in() {
         .archive_session(&guest.id)
         .expect("archive guest");
     let report = prune_worktrees(&m.storage, &project).expect("prune");
-    assert!(report.removed.is_empty());
+    assert_eq!(report.removed, Vec::<std::path::PathBuf>::new());
     assert!(worktree.is_dir());
 
     // Once no live session works in it, it goes.

@@ -948,6 +948,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Sessions: /session [list] | new | switch | close | rename | pin | archive",
     },
     SlashCommandDef {
+        trigger: "autofix",
+        description: "PR/MR Auto-fix: /autofix [status] | bind [number|url] | unbind | on | off",
+    },
+    SlashCommandDef {
         trigger: "project",
         description: "Projects: /project [show] | list | add | rename | model | refresh | prune | remove",
     },
@@ -1252,6 +1256,16 @@ pub enum RowAction {
         /// The member name shown by the row, for the dialog body.
         name: String,
     },
+    /// Permanently delete a session and its sub-agent sessions (spec
+    /// SESSIONMENU FR-13).
+    DeleteSession {
+        /// The session the answer deletes.
+        session_id: String,
+        /// The session title (or `untitled <id>`), for the dialog body.
+        title: String,
+        /// How many sub-agent, teammate and skill sessions go with it.
+        children: usize,
+    },
 }
 
 /// The footer hints for the modal row-action dialog (spec `teamssetup` FR-028,
@@ -1286,6 +1300,7 @@ impl RowAction {
             Self::SuspendTeammate { .. } => " Suspend teammate? ".to_string(),
             Self::ShutdownTeammate { .. } => " Shut down teammate? ".to_string(),
             Self::ResumeTeammate { name, .. } => format!(" Resume {name}? "),
+            Self::DeleteSession { .. } => " Delete session? ".to_string(),
         }
     }
 
@@ -1316,6 +1331,16 @@ impl RowAction {
             // (spec `teamssetup` FR-029, FR-032).
             Self::ResumeTeammate { agent_id, name } => {
                 format!("{name} ({agent_id}) blocked -> resume")
+            }
+            Self::DeleteSession {
+                title, children, ..
+            } => {
+                let with = match children {
+                    0 => String::new(),
+                    1 => " and 1 sub-session".to_string(),
+                    n => format!(" and {n} sub-sessions"),
+                };
+                format!("{}{with}; cannot be undone", short_suffix(title, 40))
             }
         }
     }
@@ -3062,6 +3087,12 @@ pub struct App {
         Arc<std::sync::Mutex<Vec<crate::app::projects::PendingProjectSession>>>,
     /// When the poll loop last looked for projects with due request counts.
     pub last_request_sweep: Option<std::time::Instant>,
+    /// Wakes the running Auto-fix watcher; `None` until
+    /// [`App::start_autofix_watcher`] runs (spec SESSIONMENU D5).
+    pub autofix_wake: Option<Arc<tokio::sync::Notify>>,
+    /// Latest Auto-fix status line per bound session, e.g.
+    /// `PR #67 auto-fix: CI failed (attempt 2/3)` (FR-22).
+    pub autofix_status: HashMap<String, String>,
     /// Where session worktrees are created; `None` uses the ragent data
     /// directory. Tests point this at `target/temp/`.
     pub worktree_root: Option<std::path::PathBuf>,

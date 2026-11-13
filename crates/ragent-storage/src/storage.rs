@@ -46,7 +46,7 @@ use ragent_types::message::{Message, MessagePart, Role};
 ///
 /// Public so tests can assert the persisted `schema_version` setting against
 /// the compiler-enforced value instead of a hard-coded literal.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 11;
 
 // PERF-071: static SQL bodies hoisted to `const &str` so the session read
 // paths build no `String` and the prepared-statement cache sees a stable
@@ -1266,6 +1266,86 @@ impl Storage {
             "CREATE INDEX IF NOT EXISTS idx_sessions_parent
              ON sessions(parent_id) WHERE parent_id IS NOT NULL;",
         )?;
+        // SESSIONMENU M2: a user-settable "unread" mark that survives a
+        // restart. Rows from before this column read as read.
+        let has_unread: bool = tx
+            .prepare_cached(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='unread'",
+            )?
+            .query_row([], |r| r.get::<_, i64>(0))
+            .unwrap_or(0)
+            > 0;
+        if !has_unread {
+            tx.execute_batch("ALTER TABLE sessions ADD COLUMN unread INTEGER NOT NULL DEFAULT 0;")?;
+        }
+        // SESSIONMENU M3: user-defined sidebar sections. A session with no
+        // `section_id` (or one naming a deleted section) shows under its
+        // project.
+        let has_section: bool = tx
+            .prepare_cached(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='section_id'",
+            )?
+            .query_row([], |r| r.get::<_, i64>(0))
+            .unwrap_or(0)
+            > 0;
+        if !has_section {
+            tx.execute_batch("ALTER TABLE sessions ADD COLUMN section_id TEXT;")?;
+        }
+        // SESSIONMENU M4: the pull/merge request a session is bound to.
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS session_requests (
+                 session_id TEXT PRIMARY KEY,
+                 forge TEXT NOT NULL,
+                 host TEXT NOT NULL,
+                 repo TEXT NOT NULL,
+                 number INTEGER NOT NULL,
+                 title TEXT NOT NULL DEFAULT '',
+                 web_url TEXT NOT NULL,
+                 head_branch TEXT NOT NULL,
+                 state TEXT NOT NULL,
+                 updated_at TEXT NOT NULL
+             );",
+        )?;
+        // SESSIONMENU M5: Auto-fix state on the binding, and the triggers
+        // already acted on (dedup and attempt count, FR-17, FR-19).
+        for (col, ty) in &[
+            ("autofix", "INTEGER NOT NULL DEFAULT 0"),
+            ("autofix_paused", "INTEGER NOT NULL DEFAULT 0"),
+            ("head_sha", "TEXT"),
+            ("last_polled_at", "TEXT"),
+            ("last_trigger", "TEXT"),
+            ("autofix_resumed_at", "TEXT"),
+        ] {
+            let has_col: bool = tx
+                .prepare_cached(&format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('session_requests') WHERE name='{col}'"
+                ))?
+                .query_row([], |r| r.get::<_, i64>(0))
+                .unwrap_or(0)
+                > 0;
+            if !has_col {
+                tx.execute_batch(&format!(
+                    "ALTER TABLE session_requests ADD COLUMN {col} {ty};"
+                ))?;
+            }
+        }
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS autofix_events (
+                 session_id TEXT NOT NULL,
+                 head_sha TEXT NOT NULL,
+                 kind TEXT NOT NULL,
+                 item_id TEXT NOT NULL,
+                 fired_at TEXT NOT NULL,
+                 PRIMARY KEY (session_id, head_sha, kind, item_id)
+             );",
+        )?;
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS sidebar_sections (
+                 id TEXT PRIMARY KEY,
+                 name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                 created_at TEXT NOT NULL
+             );",
+        )?;
         // Sessions created before project ids were recorded carry ''. Derive
         // the project from the stored directory once, here, so listing never
         // touches the filesystem.
@@ -1834,6 +1914,845 @@ impl Storage {
             .query_map([], |row| row.get(0))?
             .collect::<std::result::Result<_, _>>()?;
         Ok(ids)
+    }
+
+    /// Marks a session unread or read (SESSIONMENU FR-08). Like pinning, it
+    /// does not touch `updated_at`, so it never reorders the session list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.set_session_unread("sess-1", true).unwrap();
+    /// assert!(storage.unread_session_ids().unwrap().contains("sess-1"));
+    /// ```
+    pub fn set_session_unread(&self, id: &str, unread: bool) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "UPDATE sessions SET unread = ?1 WHERE id = ?2",
+            params![i64::from(unread), id],
+        )?;
+        Ok(())
+    }
+
+    /// Ids of the unread, non-archived sessions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn unread_session_ids(&self) -> Result<std::collections::HashSet<String>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn
+            .prepare_cached("SELECT id FROM sessions WHERE unread = 1 AND archived_at IS NULL")?;
+        let ids = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    /// Ids of a session and all its descendants (sub-agent, teammate, skill
+    /// sessions), the session itself first. Empty when it does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn session_tree_ids(&self, id: &str) -> Result<Vec<String>> {
+        let conn = lock_conn_read!(self)?;
+        Self::tree_ids(&conn, id)
+    }
+
+    /// [`Storage::session_tree_ids`] on an open connection.
+    fn tree_ids(conn: &rusqlite::Connection, id: &str) -> Result<Vec<String>> {
+        let mut stmt = conn.prepare_cached(
+            "WITH RECURSIVE tree(id, depth) AS ( \
+                 SELECT id, 0 FROM sessions WHERE id = ?1 \
+                 UNION SELECT s.id, t.depth + 1 FROM sessions s JOIN tree t ON s.parent_id = t.id) \
+             SELECT id FROM tree ORDER BY depth",
+        )?;
+        let ids = stmt
+            .query_map(params![id], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    /// Permanently deletes a session and all its descendants (SESSIONMENU
+    /// FR-13): their messages and search index entries, run cost summaries,
+    /// background task rows and todos, then the session rows. Memories and
+    /// initiatives are project knowledge and are kept. One transaction, so a
+    /// failure deletes nothing.
+    ///
+    /// # Returns
+    ///
+    /// The ids deleted, the session itself first; empty when it did not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a query fails; nothing is deleted then.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::{SessionKind, Storage};
+    /// use ragent_types::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("lead", "/tmp/project").unwrap();
+    /// storage
+    ///     .create_session_with("child", "/tmp/project", Some("lead"), SessionKind::Subagent)
+    ///     .unwrap();
+    /// storage.create_message(&Message::user_text("lead", "hi")).unwrap();
+    /// assert_eq!(storage.delete_session("lead").unwrap(), ["lead", "child"]);
+    /// assert!(storage.get_session("child").unwrap().is_none());
+    /// assert!(storage.get_messages("lead").unwrap().is_empty());
+    /// ```
+    pub fn delete_session(&self, id: &str) -> Result<Vec<String>> {
+        let mut conn = lock_conn!(self)?;
+        let tx = conn.transaction()?;
+        let ids = Self::tree_ids(&tx, id)?;
+        for sid in &ids {
+            // Same cascade as `delete_messages`: FTS rowids, keys, messages.
+            let rowids: Vec<i64> = {
+                let mut stmt =
+                    tx.prepare_cached("SELECT rowid FROM message_fts_keys WHERE session_id = ?1")?;
+                stmt.query_map(params![sid], |r| r.get(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for rowid in rowids {
+                tx.execute("DELETE FROM messages_fts WHERE rowid = ?1", params![rowid])?;
+            }
+            for table in [
+                "message_fts_keys",
+                "messages",
+                "session_requests",
+                "autofix_events",
+                "run_cost_summaries",
+                "background_tasks",
+                "todos",
+                "sessions",
+            ] {
+                let column = if table == "sessions" {
+                    "id"
+                } else {
+                    "session_id"
+                };
+                tx.execute(
+                    &format!("DELETE FROM {table} WHERE {column} = ?1"),
+                    params![sid],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(ids)
+    }
+
+    /// Copies a session's transcript into a new top-level interactive
+    /// session (SESSIONMENU FR-10).
+    ///
+    /// The fork works in the same directory, is titled `title`, and gets
+    /// every message of `source` with a new id, in order, with the original
+    /// timestamps and its own search index entries. The source is not
+    /// changed and the two are not linked: deleting or archiving one leaves
+    /// the other alone.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - the session to copy.
+    /// * `new_id` - id for the new session.
+    /// * `title` - title for the new session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `source` does not exist or a write fails; then
+    /// nothing is created.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    /// use ragent_types::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("src", "/tmp/project").unwrap();
+    /// storage.create_message(&Message::user_text("src", "hi")).unwrap();
+    /// storage.fork_session("src", "copy", "src (fork)").unwrap();
+    /// assert_eq!(storage.get_messages("copy").unwrap()[0].text_content(), "hi");
+    /// ```
+    pub fn fork_session(&self, source: &str, new_id: &str, title: &str) -> Result<()> {
+        let mut conn = lock_conn!(self)?;
+        let tx = conn.transaction()?;
+        // The fork belongs to the source's project record.
+        let found: Option<(String, String)> = tx
+            .query_row(
+                "SELECT directory, project_id FROM sessions WHERE id = ?1",
+                params![source],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((directory, project_id)) = found else {
+            anyhow::bail!("session not found: {source}");
+        };
+        let now = Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO sessions \
+             (id, title, project_id, directory, parent_id, kind, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?6)",
+            params![
+                new_id,
+                title,
+                project_id,
+                directory,
+                SessionKind::Interactive.as_str(),
+                now
+            ],
+        )?;
+        let rows: Vec<(String, String, String, String)> = {
+            let mut stmt = tx.prepare_cached(
+                "SELECT role, parts, created_at, updated_at FROM messages \
+                 WHERE session_id = ?1 ORDER BY created_at ASC",
+            )?;
+            stmt.query_map(params![source], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (role, parts_json, created, updated) in rows {
+            let message_id = uuid::Uuid::new_v4().to_string();
+            tx.execute(
+                "INSERT INTO messages (id, session_id, role, parts, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![message_id, new_id, role, parts_json, created, updated],
+            )?;
+            let parts: Vec<MessagePart> = serde_json::from_str(&parts_json)?;
+            Self::upsert_fts_row(&tx, &message_id, new_id, &role, &parts)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Binds a session to a pull/merge request, replacing any earlier
+    /// binding (SESSIONMENU FR-14). The session's Auto-fix on/off setting is
+    /// kept; its paused state and last-seen head commit are kept only when
+    /// the same request is bound again.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::{SessionRequest, Storage};
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("s", "/tmp/project").unwrap();
+    /// let request = SessionRequest {
+    ///     session_id: "s".into(),
+    ///     forge: "github".into(),
+    ///     host: "github.com".into(),
+    ///     repo: "o/r".into(),
+    ///     number: 7,
+    ///     title: "Fix".into(),
+    ///     web_url: "https://github.com/o/r/pull/7".into(),
+    ///     head_branch: "fix".into(),
+    ///     state: "open".into(),
+    /// };
+    /// storage.set_session_request(&request).unwrap();
+    /// assert_eq!(storage.session_request("s").unwrap(), Some(request));
+    /// ```
+    pub fn set_session_request(&self, request: &SessionRequest) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "INSERT INTO session_requests \
+             (session_id, forge, host, repo, number, title, web_url, head_branch, state, \
+              updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+             ON CONFLICT(session_id) DO UPDATE SET \
+              autofix_paused = CASE WHEN number = excluded.number AND repo = excluded.repo \
+                  THEN autofix_paused ELSE 0 END, \
+              head_sha = CASE WHEN number = excluded.number AND repo = excluded.repo \
+                  THEN head_sha ELSE NULL END, \
+              forge = excluded.forge, host = excluded.host, repo = excluded.repo, \
+              number = excluded.number, title = excluded.title, web_url = excluded.web_url, \
+              head_branch = excluded.head_branch, state = excluded.state, \
+              updated_at = excluded.updated_at",
+            params![
+                request.session_id,
+                request.forge,
+                request.host,
+                request.repo,
+                i64::try_from(request.number).unwrap_or(i64::MAX),
+                request.title,
+                request.web_url,
+                request.head_branch,
+                request.state,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The request session `session_id` is bound to, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn session_request(&self, session_id: &str) -> Result<Option<SessionRequest>> {
+        let conn = lock_conn_read!(self)?;
+        let row = conn
+            .query_row(
+                "SELECT session_id, forge, host, repo, number, title, web_url, head_branch, \
+                 state FROM session_requests WHERE session_id = ?1",
+                params![session_id],
+                |r| {
+                    Ok(SessionRequest {
+                        session_id: r.get(0)?,
+                        forge: r.get(1)?,
+                        host: r.get(2)?,
+                        repo: r.get(3)?,
+                        number: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
+                        title: r.get(5)?,
+                        web_url: r.get(6)?,
+                        head_branch: r.get(7)?,
+                        state: r.get(8)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Binds `request` to the top-level session of `request.session_id`
+    /// (see [`Storage::root_session_id`]), so a request created by a
+    /// sub-agent belongs to the session the user sees.
+    ///
+    /// A session that had no binding before gets Auto-fix turned on when
+    /// `autofix_default` is set (`vcs.autofix.default_on`, FR-16).
+    ///
+    /// # Returns
+    ///
+    /// The id of the session the request was bound to.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a query or the write fails.
+    pub fn bind_session_request(
+        &self,
+        request: &SessionRequest,
+        autofix_default: bool,
+    ) -> Result<String> {
+        let root = self.root_session_id(&request.session_id)?;
+        let was_bound = self.session_request(&root)?.is_some();
+        let bound = SessionRequest {
+            session_id: root.clone(),
+            ..request.clone()
+        };
+        self.set_session_request(&bound)?;
+        if autofix_default && !was_bound {
+            self.set_session_autofix(&root, true)?;
+        }
+        Ok(root)
+    }
+
+    /// Removes session `session_id`'s binding; a no-op when it has none.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    pub fn clear_session_request(&self, session_id: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "DELETE FROM session_requests WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        Ok(())
+    }
+
+    /// Auto-fix state of session `session_id`'s binding; `None` when the
+    /// session is not bound (SESSIONMENU FR-16, FR-22).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn session_autofix(&self, session_id: &str) -> Result<Option<AutofixState>> {
+        let conn = lock_conn_read!(self)?;
+        let row = conn
+            .query_row(
+                "SELECT autofix, autofix_paused, head_sha, last_polled_at, last_trigger \
+                 FROM session_requests WHERE session_id = ?1",
+                params![session_id],
+                |r| {
+                    Ok(AutofixState {
+                        enabled: r.get::<_, i64>(0)? != 0,
+                        paused: r.get::<_, i64>(1)? != 0,
+                        head_sha: r.get(2)?,
+                        last_polled_at: r.get(3)?,
+                        last_trigger: r.get(4)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Turns Auto-fix on or off for session `session_id`'s binding. Either
+    /// way the paused state is cleared. Turning it on also restarts the
+    /// attempt count (see [`Storage::autofix_attempts`]), so `on` resumes a
+    /// paused watcher on the same commit; the items already acted on stay
+    /// recorded and are not reported again.
+    ///
+    /// # Returns
+    ///
+    /// `false` when the session has no binding (nothing changed).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::{SessionRequest, Storage};
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("s", "/tmp/project").unwrap();
+    /// assert!(!storage.set_session_autofix("s", true).unwrap());
+    /// storage
+    ///     .set_session_request(&SessionRequest {
+    ///         session_id: "s".into(),
+    ///         forge: "github".into(),
+    ///         host: "github.com".into(),
+    ///         repo: "o/r".into(),
+    ///         number: 7,
+    ///         title: "Fix".into(),
+    ///         web_url: "https://github.com/o/r/pull/7".into(),
+    ///         head_branch: "fix".into(),
+    ///         state: "open".into(),
+    ///     })
+    ///     .unwrap();
+    /// assert!(storage.set_session_autofix("s", true).unwrap());
+    /// assert!(storage.session_autofix("s").unwrap().unwrap().enabled);
+    /// ```
+    pub fn set_session_autofix(&self, session_id: &str, enabled: bool) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let changed = conn.execute(
+            "UPDATE session_requests SET autofix = ?2, autofix_paused = 0, \
+             autofix_resumed_at = CASE WHEN ?2 = 1 THEN ?3 ELSE autofix_resumed_at END \
+             WHERE session_id = ?1",
+            params![session_id, i64::from(enabled), Utc::now().to_rfc3339()],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Pauses (or resumes) Auto-fix for session `session_id` without
+    /// changing its on/off setting (FR-19).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn set_autofix_paused(&self, session_id: &str, paused: bool) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "UPDATE session_requests SET autofix_paused = ?2 WHERE session_id = ?1",
+            params![session_id, i64::from(paused)],
+        )?;
+        Ok(())
+    }
+
+    /// Bindings the Auto-fix watcher polls: Auto-fix on, not paused, the
+    /// request open when last seen, and the session not archived.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn autofix_watch_list(&self) -> Result<Vec<SessionRequest>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT r.session_id, r.forge, r.host, r.repo, r.number, r.title, r.web_url, \
+             r.head_branch, r.state FROM session_requests r \
+             JOIN sessions s ON s.id = r.session_id \
+             WHERE r.autofix = 1 AND r.autofix_paused = 0 AND r.state = 'open' \
+               AND s.archived_at IS NULL \
+             ORDER BY r.session_id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(SessionRequest {
+                    session_id: r.get(0)?,
+                    forge: r.get(1)?,
+                    host: r.get(2)?,
+                    repo: r.get(3)?,
+                    number: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
+                    title: r.get(5)?,
+                    web_url: r.get(6)?,
+                    head_branch: r.get(7)?,
+                    state: r.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Ids of all bound sessions, each with whether Auto-fix is paused
+    /// waiting on the user (sidebar glyphs, FR-22).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn bound_sessions(&self) -> Result<HashMap<String, bool>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt =
+            conn.prepare_cached("SELECT session_id, autofix_paused FROM session_requests")?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? != 0))
+            })?
+            .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+        Ok(rows)
+    }
+
+    /// Records one Auto-fix poll of `binding`'s request: its state, title
+    /// and head commit as seen now. Nothing is written unless the session is
+    /// still bound to that same request with Auto-fix on and not paused, so a
+    /// poll that was running while the user rebound the session or turned
+    /// Auto-fix off cannot overwrite the new state.
+    ///
+    /// # Returns
+    ///
+    /// `false` when the binding changed and the poll result was dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn record_autofix_poll(
+        &self,
+        binding: &SessionRequest,
+        state: &str,
+        title: &str,
+        head_sha: &str,
+    ) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let changed = conn.execute(
+            "UPDATE session_requests SET state = ?2, title = ?3, head_sha = ?4, \
+             last_polled_at = ?5 WHERE session_id = ?1 AND repo = ?6 AND number = ?7 \
+             AND forge = ?8 AND host = ?9 AND autofix = 1 AND autofix_paused = 0",
+            params![
+                binding.session_id,
+                state,
+                title,
+                head_sha,
+                Utc::now().to_rfc3339(),
+                binding.repo,
+                i64::try_from(binding.number).unwrap_or(i64::MAX),
+                binding.forge,
+                binding.host
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// The items of `kind` at `head_sha` not yet acted on for session
+    /// `session_id`, in the order given (dedup, FR-17).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn new_autofix_items(
+        &self,
+        session_id: &str,
+        head_sha: &str,
+        kind: &str,
+        items: &[String],
+    ) -> Result<Vec<String>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT 1 FROM autofix_events \
+             WHERE session_id = ?1 AND head_sha = ?2 AND kind = ?3 AND item_id = ?4",
+        )?;
+        let mut fresh = Vec::new();
+        for item in items {
+            if !stmt.exists(params![session_id, head_sha, kind, item])? {
+                fresh.push(item.clone());
+            }
+        }
+        Ok(fresh)
+    }
+
+    /// How many wake-ups of `kind` session `session_id` has had at
+    /// `head_sha` since Auto-fix was last turned on (attempt cap, FR-19).
+    /// Items recorded together count once.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn autofix_attempts(&self, session_id: &str, head_sha: &str, kind: &str) -> Result<u32> {
+        let conn = lock_conn_read!(self)?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT e.fired_at) FROM autofix_events e \
+             LEFT JOIN session_requests r ON r.session_id = e.session_id \
+             WHERE e.session_id = ?1 AND e.head_sha = ?2 AND e.kind = ?3 \
+               AND e.fired_at > COALESCE(r.autofix_resumed_at, '')",
+            params![session_id, head_sha, kind],
+            |r| r.get(0),
+        )?;
+        Ok(u32::try_from(count).unwrap_or(u32::MAX))
+    }
+
+    /// Records one wake-up of `kind` at `head_sha` covering `items` for
+    /// `binding`'s session, and remembers `summary` as its last trigger.
+    /// Nothing is recorded unless the session is still bound to that same
+    /// request with Auto-fix on and not paused (checked in the same
+    /// transaction).
+    ///
+    /// # Returns
+    ///
+    /// How many of `items` were newly recorded. `0` means another process
+    /// recorded them first (spec SESSIONMENU R2) or the binding changed, so
+    /// the caller must not wake the session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a write fails; then nothing is recorded.
+    pub fn record_autofix_wakeup(
+        &self,
+        binding: &SessionRequest,
+        head_sha: &str,
+        kind: &str,
+        items: &[String],
+        summary: &str,
+    ) -> Result<usize> {
+        let session_id = binding.session_id.as_str();
+        let mut conn = lock_conn!(self)?;
+        let tx = conn.transaction()?;
+        let current: bool = tx
+            .prepare_cached(
+                "SELECT 1 FROM session_requests WHERE session_id = ?1 AND repo = ?2 \
+                 AND number = ?3 AND forge = ?4 AND host = ?5 AND autofix = 1 \
+                 AND autofix_paused = 0",
+            )?
+            .exists(params![
+                session_id,
+                binding.repo,
+                i64::try_from(binding.number).unwrap_or(i64::MAX),
+                binding.forge,
+                binding.host
+            ])?;
+        if !current {
+            return Ok(0);
+        }
+        let fired_at = Utc::now().to_rfc3339();
+        let mut inserted = 0;
+        for item in items {
+            inserted += tx.execute(
+                "INSERT OR IGNORE INTO autofix_events \
+                 (session_id, head_sha, kind, item_id, fired_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![session_id, head_sha, kind, item, fired_at],
+            )?;
+        }
+        tx.execute(
+            "UPDATE session_requests SET last_trigger = ?2 WHERE session_id = ?1",
+            params![session_id, summary],
+        )?;
+        tx.commit()?;
+        Ok(inserted)
+    }
+
+    /// The top-level session of `session_id`: follows `parent_id` up from a
+    /// sub-agent, teammate or skill session. Returns `session_id` itself
+    /// when it has no parent or is not stored.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn root_session_id(&self, session_id: &str) -> Result<String> {
+        let conn = lock_conn_read!(self)?;
+        let root: Option<String> = conn
+            .query_row(
+                "WITH RECURSIVE up(id, parent_id, depth) AS ( \
+                     SELECT id, parent_id, 0 FROM sessions WHERE id = ?1 \
+                     UNION SELECT s.id, s.parent_id, u.depth + 1 FROM sessions s \
+                     JOIN up u ON s.id = u.parent_id WHERE u.depth < 64) \
+                 SELECT id FROM up ORDER BY depth DESC LIMIT 1",
+                params![session_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(root.unwrap_or_else(|| session_id.to_string()))
+    }
+
+    /// Creates a sidebar section (SESSIONMENU FR-11).
+    ///
+    /// # Returns
+    ///
+    /// The new section.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the name is empty or already used (ignoring
+    /// case), or the insert fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// let section = storage.create_section("Reviews").unwrap();
+    /// assert_eq!(storage.list_sections().unwrap(), [section]);
+    /// assert!(storage.create_section("reviews").is_err());
+    /// ```
+    pub fn create_section(&self, name: &str) -> Result<SidebarSection> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("a section needs a name");
+        }
+        let conn = lock_conn!(self)?;
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sidebar_sections WHERE name = ?1)",
+            params![name],
+            |r| r.get(0),
+        )?;
+        if exists {
+            anyhow::bail!("a section named `{name}` already exists");
+        }
+        let section = SidebarSection {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.to_string(),
+        };
+        conn.execute(
+            "INSERT INTO sidebar_sections (id, name, created_at) VALUES (?1, ?2, ?3)",
+            params![section.id, section.name, Utc::now().to_rfc3339()],
+        )?;
+        Ok(section)
+    }
+
+    /// Renames a sidebar section.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the name is empty, used by another section, or
+    /// the section does not exist.
+    pub fn rename_section(&self, id: &str, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("a section needs a name");
+        }
+        let conn = lock_conn!(self)?;
+        let taken: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sidebar_sections WHERE name = ?1 AND id <> ?2)",
+            params![name, id],
+            |r| r.get(0),
+        )?;
+        if taken {
+            anyhow::bail!("a section named `{name}` already exists");
+        }
+        let changed = conn.execute(
+            "UPDATE sidebar_sections SET name = ?1 WHERE id = ?2",
+            params![name, id],
+        )?;
+        if changed == 0 {
+            anyhow::bail!("section not found: {id}");
+        }
+        Ok(())
+    }
+
+    /// Deletes a sidebar section; its sessions go back to their projects.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a write fails; then nothing changes.
+    pub fn delete_section(&self, id: &str) -> Result<()> {
+        let mut conn = lock_conn!(self)?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE sessions SET section_id = NULL WHERE section_id = ?1",
+            params![id],
+        )?;
+        tx.execute("DELETE FROM sidebar_sections WHERE id = ?1", params![id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Every sidebar section, ordered by name (ignoring case).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_sections(&self) -> Result<Vec<SidebarSection>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, name FROM sidebar_sections ORDER BY name COLLATE NOCASE, id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(SidebarSection {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                })
+            })?
+            .collect::<std::result::Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Moves a session into a sidebar section, or back to its project with
+    /// `None`. Does not touch `updated_at`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the section does not exist or the update fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("s", "/tmp/project").unwrap();
+    /// let section = storage.create_section("Reviews").unwrap();
+    /// storage.set_session_section("s", Some(&section.id)).unwrap();
+    /// assert_eq!(storage.session_sections().unwrap()["s"], section.id);
+    /// ```
+    pub fn set_session_section(&self, session_id: &str, section_id: Option<&str>) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        if let Some(section) = section_id {
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sidebar_sections WHERE id = ?1)",
+                params![section],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                anyhow::bail!("section not found: {section}");
+            }
+        }
+        conn.execute(
+            "UPDATE sessions SET section_id = ?1 WHERE id = ?2",
+            params![section_id, session_id],
+        )?;
+        Ok(())
+    }
+
+    /// Section of every non-archived session placed in an existing section,
+    /// keyed by session id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn session_sections(&self) -> Result<HashMap<String, String>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT s.id, s.section_id FROM sessions s \
+             JOIN sidebar_sections x ON x.id = s.section_id \
+             WHERE s.archived_at IS NULL",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        Ok(rows)
     }
 
     /// Lists non-archived top-level sessions grouped by project
@@ -5309,6 +6228,54 @@ fn rekey_sidebar_sections(
         params![layout.to_string()],
     )?;
     Ok(())
+}
+
+/// The pull request (GitHub) or merge request (GitLab) a session is bound
+/// to (spec SESSIONMENU FR-14).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRequest {
+    /// The bound session.
+    pub session_id: String,
+    /// `github` or `gitlab`.
+    pub forge: String,
+    /// Host name from the git remote, e.g. `github.com`.
+    pub host: String,
+    /// Repository path: `owner/name`, or `group/sub/project`.
+    pub repo: String,
+    /// PR number or MR iid.
+    pub number: u64,
+    /// Title when last seen.
+    pub title: String,
+    /// Browser URL.
+    pub web_url: String,
+    /// Source branch.
+    pub head_branch: String,
+    /// `open`, `merged` or `closed`, when last seen.
+    pub state: String,
+}
+
+/// Auto-fix state of a bound session (spec SESSIONMENU FR-16, FR-19).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AutofixState {
+    /// Auto-fix is on for this session.
+    pub enabled: bool,
+    /// Paused after too many attempts; waiting on the user.
+    pub paused: bool,
+    /// Head commit when last polled.
+    pub head_sha: Option<String>,
+    /// RFC 3339 time of the last poll.
+    pub last_polled_at: Option<String>,
+    /// Summary of the last wake-up.
+    pub last_trigger: Option<String>,
+}
+
+/// A user-defined sidebar section (spec SESSIONMENU FR-11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SidebarSection {
+    /// Stable id.
+    pub id: String,
+    /// Display name, unique ignoring case.
+    pub name: String,
 }
 
 // -- Initiatives (jcodeport spec M8) --------------------------------------

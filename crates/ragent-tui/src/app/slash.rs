@@ -5977,6 +5977,17 @@ Tools: `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`.\n";
                 }
                 self.handle_project_command(args);
             }
+            "autofix" => {
+                if is_help_args(args) {
+                    self.append_assistant_text(&crate::app::helpers::from_cmd(
+                        "autofix help",
+                        crate::app::autofix::AUTOFIX_HELP,
+                    ));
+                    self.status = "autofix: help".to_string();
+                    return;
+                }
+                self.handle_autofix_command(args);
+            }
             "session" => {
                 if is_help_args(args) {
                     self.append_assistant_text(&crate::app::helpers::from_cmd(

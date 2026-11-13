@@ -5,6 +5,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod binding;
 pub mod git;
 pub mod github;
 pub mod gitlab;
@@ -42,6 +43,21 @@ pub mod storage {
         fn set_setting(&self, key: &str, value: &str) -> Result<()>;
         /// Remove a stored setting by key.
         fn delete_setting(&self, key: &str) -> Result<()>;
+        /// Bind a pull/merge request to the top-level session of
+        /// `request.session_id` (spec SESSIONMENU FR-14). A backend that
+        /// holds no sessions refuses with an error, which callers log.
+        /// `autofix_default` turns Auto-fix on for a session bound for the
+        /// first time.
+        fn bind_session_request(
+            &self,
+            request: &ragent_storage::SessionRequest,
+            _autofix_default: bool,
+        ) -> Result<()> {
+            anyhow::bail!(
+                "storage backend holds no sessions; request {} not bound",
+                request.number
+            )
+        }
     }
 
     /// Compatibility alias for migrated code that still references `crate::storage::Storage`.
@@ -75,6 +91,15 @@ pub mod storage {
 
         fn delete_setting(&self, key: &str) -> Result<()> {
             self.delete_setting(key)
+        }
+
+        fn bind_session_request(
+            &self,
+            request: &ragent_storage::SessionRequest,
+            autofix_default: bool,
+        ) -> Result<()> {
+            self.bind_session_request(request, autofix_default)
+                .map(|_| ())
         }
     }
 }

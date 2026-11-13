@@ -111,6 +111,35 @@ impl GitLabClient {
         }
     }
 
+    /// GET request for a plain-text API resource, such as a job log
+    /// (`/projects/{id}/jobs/{job}/trace`), keeping only its last `limit`
+    /// bytes. The body is streamed, so a huge log never sits in memory
+    /// whole.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on a non-2xx response or a body-read failure.
+    pub async fn get_text_tail(&self, path: &str, limit: usize) -> Result<String> {
+        let url = format!("{}/api/v4{path}", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .header("User-Agent", "ragent/0.1")
+            .send()
+            .await
+            .with_context(|| format!("GitLab GET {path} failed"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GitLab API error {status} for {path}: {body}");
+        }
+        let tail = crate::http_client::read_tail(resp, limit)
+            .await
+            .with_context(|| format!("Failed to read GitLab text for {path}"))?;
+        Ok(String::from_utf8_lossy(&tail).into_owned())
+    }
+
     /// POST request to the GitLab API.
     pub async fn post(&self, path: &str, body: &Value) -> Result<Value> {
         let url = format!("{}/api/v4{path}", self.base_url);

@@ -575,6 +575,21 @@ pub fn build_line1_right(
         ));
     }
 
+    // The focused session's latest Auto-fix state (SESSIONMENU FR-22),
+    // unless the status line already says it.
+    if let Some(summary) = app
+        .session
+        .session_id
+        .as_ref()
+        .and_then(|id| app.autofix_status.get(id))
+        .filter(|summary| **summary != app.status)
+    {
+        spans.push(Span::styled(
+            format!("{summary} "),
+            Style::default().fg(colors::HINT),
+        ));
+    }
+
     // Live web-phase deadline countdown (FR-010, FR-011, FR-013). If a
     // `/research create` web phase has a stored deadline, show the remaining
     // wall-clock time formatted as M:SS in the top-right wait segment. The

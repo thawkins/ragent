@@ -588,6 +588,11 @@ async fn test_project_command_session_new_refuses_a_project_outside_permitted_ro
     git(&repo, &["commit", "--quiet", "-m", "initial"]);
     let mut app = support::make_app();
     app.worktree_root = Some(base.join("trees"));
+    // Pin the permitted roots: the user-global config may allow this
+    // checkout's own tree, which holds the fixture.
+    let elsewhere = base.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).expect("elsewhere");
+    support::allow_session_root(&app, &elsewhere);
     app.execute_slash_command("/session list").await;
     let before = app.session.session_id.clone();
     let sessions_before = app.storage.list_sessions().expect("list").len();

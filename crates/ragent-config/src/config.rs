@@ -191,6 +191,11 @@ pub struct Config {
     /// GitLab integration configuration.
     #[serde(default)]
     pub gitlab: GitLabIntegrationConfig,
+    /// Pull/merge request integration: GitHub Enterprise hosts (spec
+    /// SESSIONMENU FR-21). User-global only; a project-local file cannot
+    /// set it.
+    #[serde(default, skip_serializing_if = "VcsConfig::is_default")]
+    pub vcs: VcsConfig,
     /// Agent-loop performance configuration (AgentPerf FR-027).
     ///
     /// Controls the per-step wall-clock budget, the per-stream stall
@@ -394,6 +399,7 @@ impl Default for Config {
             gcf: GcfConfig::default(),
             storage: StorageConfig::default(),
             gitlab: GitLabIntegrationConfig::default(),
+            vcs: VcsConfig::default(),
             agent_perf: AgentPerfConfig::default(),
             telemetry: crate::telemetry::TelemetryConfig::default(),
             yolo: false,
@@ -3126,6 +3132,13 @@ impl Config {
             overlay.acp = None;
             rejected.push("acp");
         }
+        // A GitHub Enterprise host entry names the API URL that receives the
+        // GitHub token. A project must not be able to point it elsewhere, so
+        // the section is dropped from the untrusted overlay (SESSIONMENU FR-21).
+        if !overlay.vcs.is_default() {
+            overlay.vcs = VcsConfig::default();
+            rejected.push("vcs");
+        }
         // A provider `api` block redirects the endpoint that receives the
         // provider credential. A project-local file must not be able to point
         // the credential or the prompt stream at an attacker host, so the `api`
@@ -3237,6 +3250,21 @@ impl Config {
         }
         if overlay.gitlab.username.is_some() {
             base.gitlab.username = overlay.gitlab.username;
+        }
+
+        // VCS hosts: an overlay that names hosts replaces the base list.
+        if !overlay.vcs.github.hosts.is_empty() {
+            base.vcs.github.hosts = overlay.vcs.github.hosts;
+        }
+        let autofix = overlay.vcs.autofix;
+        if autofix.poll_secs.is_some() {
+            base.vcs.autofix.poll_secs = autofix.poll_secs;
+        }
+        if autofix.max_attempts.is_some() {
+            base.vcs.autofix.max_attempts = autofix.max_attempts;
+        }
+        if autofix.default_on.is_some() {
+            base.vcs.autofix.default_on = autofix.default_on;
         }
 
         // tavily_api_key: overlay overrides base
@@ -3917,6 +3945,94 @@ pub struct GitLabIntegrationConfig {
 }
 
 redacted_debug_impl!(GitLabIntegrationConfig);
+
+/// Pull/merge request integration settings (spec SESSIONMENU FR-21).
+///
+/// Configured under the `vcs` key of the user-global `ragent.json`:
+///
+/// ```json
+/// {
+///   "vcs": {
+///     "github": {
+///       "hosts": [
+///         { "host": "github.example.com", "api_url": "https://github.example.com/api/v3" }
+///       ]
+///     },
+///     "autofix": { "poll_secs": 60, "max_attempts": 3, "default_on": false }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VcsConfig {
+    /// GitHub settings.
+    #[serde(default)]
+    pub github: VcsGitHubConfig,
+    /// Auto-fix watcher settings (spec SESSIONMENU FR-21).
+    #[serde(default)]
+    pub autofix: VcsAutofixConfig,
+}
+
+/// Auto-fix settings under `vcs.autofix`. Unset fields take the defaults
+/// given by the accessor methods.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VcsAutofixConfig {
+    /// Seconds between polls; default 60, at least 30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll_secs: Option<u64>,
+    /// Wake-ups per trigger kind per head commit before Auto-fix pauses;
+    /// default 3, at least 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
+    /// Whether a new binding starts with Auto-fix on; default `false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_on: Option<bool>,
+}
+
+impl VcsAutofixConfig {
+    /// Seconds between polls: `poll_secs`, default 60, never below 30.
+    #[must_use]
+    pub fn poll_secs(&self) -> u64 {
+        self.poll_secs.unwrap_or(60).max(30)
+    }
+
+    /// Wake-ups allowed per trigger kind per head commit: default 3, at
+    /// least 1.
+    #[must_use]
+    pub fn max_attempts(&self) -> u32 {
+        self.max_attempts.unwrap_or(3).max(1)
+    }
+
+    /// Whether new bindings start with Auto-fix on.
+    #[must_use]
+    pub fn default_on(&self) -> bool {
+        self.default_on.unwrap_or(false)
+    }
+}
+
+impl VcsConfig {
+    /// Whether nothing is configured (used to skip serialising the section).
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// GitHub settings under `vcs.github`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VcsGitHubConfig {
+    /// GitHub Enterprise Server hosts, besides `github.com`.
+    #[serde(default)]
+    pub hosts: Vec<GitHubHost>,
+}
+
+/// One GitHub Enterprise Server host.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GitHubHost {
+    /// Host name as it appears in git remotes, e.g. `github.example.com`.
+    pub host: String,
+    /// REST API base URL, e.g. `https://github.example.com/api/v3`.
+    pub api_url: String,
+}
 
 /// Spec-Driven Development (SDD) capability toggles (FR-019).
 ///

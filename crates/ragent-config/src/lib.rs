@@ -44,10 +44,10 @@ pub use config::{
     BackendConfig, Capabilities, Config, Cost, CrossProjectConfig,
     DEFAULT_AGENTS_COMPLETED_HISTORY, DEFAULT_AGENTS_MAX_LAUNCHING, DEFAULT_ERROR_RETRY_ALLOWANCE,
     DEFAULT_INPUT_QUEUE_CAPACITY, DEFAULT_LOOP_MAX_STEPS, ExecutionBackend, ExecutionBackendKind,
-    GitLabIntegrationConfig, LoopConfig, McpServerConfig, McpTransport, MemoryConfig, ModelConfig,
-    PieGapConfig, PriceEntry, ProviderConfig, ResearchConfig, ResearchEvaluateConfig,
-    ResearchModelsConfig, ResearchSupervisorConfig, SddConfig, StreamConfig,
-    default_acp_turn_timeout_secs,
+    GitHubHost, GitLabIntegrationConfig, LoopConfig, McpServerConfig, McpTransport, MemoryConfig,
+    ModelConfig, PieGapConfig, PriceEntry, ProviderConfig, ResearchConfig, ResearchEvaluateConfig,
+    ResearchModelsConfig, ResearchSupervisorConfig, SddConfig, StreamConfig, VcsAutofixConfig,
+    VcsConfig, VcsGitHubConfig, default_acp_turn_timeout_secs,
 };
 pub use connectors::{
     ConnectorCredentialsConfig, ConnectorMarketplaceEntry, ConnectorStoreEndpoint,

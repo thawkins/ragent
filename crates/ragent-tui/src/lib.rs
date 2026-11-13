@@ -17,9 +17,11 @@ pub mod layout_statusbar;
 pub mod layout_table_rows;
 pub mod layout_teams;
 pub mod logo;
+pub mod open_in;
 pub mod panels;
 pub mod research_adapter;
 pub mod research_progress;
+pub mod session_menu;
 pub mod sessions_sidebar;
 pub mod teammate_strip;
 pub mod theme;
@@ -473,6 +475,7 @@ pub async fn run_tui(
     };
     let restored =
         matches!(startup_session, StartupSession::Restore) && app.restore_open_sessions() > 0;
+    app.start_autofix_watcher();
     // -- Auto-initialize a session at startup if not resuming or restoring --
     if resume_session_id.is_none() && !restored {
         let dir = std::env::current_dir().unwrap_or_default();

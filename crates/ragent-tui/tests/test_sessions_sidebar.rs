@@ -646,10 +646,16 @@ async fn test_sessions_sidebar_project_update_reloads_the_rows() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // current-thread runtime; the lock pins the roots
 async fn test_sessions_sidebar_n_on_a_heading_outside_permitted_roots_is_refused() {
+    let _env = crate::global_env_lock();
     let (mut app, _a, b) = app_with_sidebar().await;
     let dir = fixture_dir("n_outside_roots").join("other");
     std::fs::create_dir_all(&dir).expect("dir");
+    // Pin the permitted roots: the user-global config may allow this
+    // checkout's own tree, which holds the fixture.
+    let elsewhere = fixture_dir("n_outside_roots_allowed");
+    support::allow_session_root(&app, &elsewhere);
     let project = app
         .storage
         .ensure_project(&dir.display().to_string())

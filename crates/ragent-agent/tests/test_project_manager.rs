@@ -116,7 +116,7 @@ fn test_project_manager_edits_publish_project_updated() {
         None
     );
     m.projects.remove(&project.id).expect("remove");
-    assert!(m.projects.list().expect("list").is_empty());
+    assert_eq!(m.projects.list().expect("list"), Vec::new());
 }
 
 #[test]

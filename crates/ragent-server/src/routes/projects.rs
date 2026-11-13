@@ -19,15 +19,17 @@ use super::{
     permitted_directory, serialize_response,
 };
 
-fn manager(state: &AppState) -> ProjectManager {
+async fn manager(state: &AppState) -> ProjectManager {
+    let github_hosts = state.config.read().await.vcs.github.hosts.clone();
     ProjectManager::new(Arc::clone(&state.storage), Arc::clone(&state.event_bus))
+        .with_github_hosts(github_hosts)
 }
 
 /// `GET /projects` - the listed projects, most recently updated first.
 pub(super) async fn list_projects(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let manager = manager(&state);
+    let manager = manager(&state).await;
     match tokio::task::spawn_blocking(move || manager.list()).await {
         Ok(Ok(projects)) => serialize_response(projects, "list_projects"),
         Ok(Err(e)) => internal_error_response("list_projects", e),
@@ -54,7 +56,7 @@ pub(super) async fn create_project(
     let Some(directory) = permitted_directory(&state, &body.directory).await else {
         return error_response(StatusCode::BAD_REQUEST, "invalid directory").into_response();
     };
-    let manager = manager(&state);
+    let manager = manager(&state).await;
     let resolved = tokio::task::spawn_blocking(move || {
         manager.resolve_for_dir(std::path::Path::new(&directory))
     })
@@ -74,7 +76,7 @@ pub(super) async fn get_project(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let manager = manager(&state);
+    let manager = manager(&state).await;
     match tokio::task::spawn_blocking(move || manager.get(&id)).await {
         Ok(Ok(Some(project))) => serialize_response(project, "get_project"),
         Ok(Ok(None)) => error_response(StatusCode::NOT_FOUND, "project not found"),
@@ -90,7 +92,7 @@ pub(super) async fn remove_project(
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let storage = Arc::clone(&state.storage);
-    let manager = manager(&state);
+    let manager = manager(&state).await;
     // `Some(true)` removed, `Some(false)` refused (live sessions), `None`
     // no such project.
     let removed = tokio::task::spawn_blocking(move || {
@@ -154,7 +156,7 @@ pub(super) async fn create_session_in_project(
     project_id: String,
     branch: Option<String>,
 ) -> Response {
-    let manager = manager(state);
+    let manager = manager(state).await;
     let lookup = {
         let manager = manager.clone();
         let project_id = project_id.clone();

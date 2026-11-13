@@ -124,3 +124,6 @@ mod test_vcs_error_classifier;
 
 #[path = "test_vcs_registry_coverage.rs"]
 mod test_vcs_registry_coverage;
+
+#[path = "test_request_binding.rs"]
+mod test_request_binding;

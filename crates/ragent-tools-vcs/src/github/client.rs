@@ -356,6 +356,41 @@ impl GitHubClient {
         Ok(out)
     }
 
+    /// GET request returning only the last `limit` bytes of the body
+    /// (follows redirects), for logs whose tail is all that is needed. The
+    /// body is streamed, so a huge log never sits in memory whole. Refuses
+    /// a cross-origin URL like [`Self::get_bytes`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a cross-origin URL, a non-success status, or a
+    /// body-read failure.
+    pub async fn get_bytes_tail(&self, path: &str, limit: usize) -> Result<Vec<u8>> {
+        let url = self.resolve_url(path);
+        if !same_origin_as(&url, &self.base_url) {
+            bail!(
+                "GitHub: refusing to fetch a cross-origin URL {url} (not under {})",
+                self.base_url
+            );
+        }
+        let resp = self
+            .request(reqwest::Method::GET, &url)
+            .header("Accept", "application/vnd.github.v3+json")
+            .header("User-Agent", "ragent/0.1")
+            .send()
+            .await
+            .with_context(|| format!("GitHub GET (tail) {path} failed"))?;
+        let status = resp.status();
+        self.check_status(status, resp.headers(), path)?;
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            bail!("GitHub API error {status} for {path}: {body}");
+        }
+        crate::http_client::read_tail(resp, limit)
+            .await
+            .with_context(|| format!("Failed to read GitHub bytes for {path}"))
+    }
+
     /// Get the authenticated user's profile.
     pub async fn current_user(&self) -> Result<Value> {
         self.get("/user").await

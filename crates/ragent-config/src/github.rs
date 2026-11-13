@@ -49,6 +49,20 @@ pub fn env_token() -> Option<String> {
     crate::config::read_env("GITHUB_TOKEN").map(|token| token.trim().to_owned())
 }
 
+/// Token for GitHub Enterprise Server hosts, from `GH_ENTERPRISE_TOKEN` or
+/// else `GITHUB_ENTERPRISE_TOKEN` (the variables the `gh` CLI reads).
+///
+/// The github.com token ([`env_token`], the stored file) is never used for
+/// an enterprise host, so it is never sent to a server the user did not
+/// sign in to.
+#[must_use]
+pub fn enterprise_env_token() -> Option<String> {
+    ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]
+        .iter()
+        .find_map(|name| crate::config::read_env(name))
+        .map(|token| token.trim().to_owned())
+}
+
 /// True when `token` is a GitHub App token: `ghu_` (user-to-server) or `ghs_`
 /// (server-to-server).
 ///

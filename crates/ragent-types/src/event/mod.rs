@@ -300,6 +300,19 @@ pub enum Event {
         /// Human-readable notice description.
         message: String,
     },
+    /// The Auto-fix watcher found something for the session's bound pull
+    /// or merge request to act on (spec SESSIONMENU FR-17, FR-18).
+    AutofixTrigger {
+        /// The bound (top-level) session.
+        session_id: String,
+        /// `ci`, `conflict`, `review`, `paused` or `closed`.
+        kind: String,
+        /// One-line status text, e.g. `PR #67: CI failed (attempt 1/3)`.
+        summary: String,
+        /// The user-role message to send to the session; empty for `paused`
+        /// and `closed`, which only inform the user.
+        prompt: String,
+    },
     /// An unrecoverable error occurred in the agentic loop.
     AgentError {
         /// Session in which the error occurred.
@@ -1311,6 +1324,7 @@ impl Event {
             Self::AgentRestoreRequested { .. } => "AgentRestoreRequested",
             Self::TaskCompleted { .. } => "TaskCompleted",
             Self::AgentNotice { .. } => "AgentNotice",
+            Self::AutofixTrigger { .. } => "AutofixTrigger",
             Self::AgentError { .. } => "AgentError",
             Self::ServiceStartError { .. } => "ServiceStartError",
             Self::McpStatusChanged { .. } => "McpStatusChanged",
@@ -1403,6 +1417,7 @@ impl Event {
             | Self::AgentRestoreRequested { session_id, .. }
             | Self::TaskCompleted { session_id, .. }
             | Self::AgentNotice { session_id, .. }
+            | Self::AutofixTrigger { session_id, .. }
             | Self::AgentError { session_id, .. }
             | Self::ServiceStartError { session_id, .. }
             | Self::TokenUsage { session_id, .. }
