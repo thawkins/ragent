@@ -2147,7 +2147,7 @@ and milestones: `docs/plans/SESSIONMENU.md`.
 | Fork | `F` | always | Copies the transcript into a new session (`kind = 'fork'`) and focuses it; refused while the session is running; same as `f` |
 | Move to section | | always | Submenu: back to its project, each section, `New section...` (prefills `/session section new`) |
 | Archive | `A` | always | Same as `a`; refused while running |
-| Delete | `D` | always | Asks first (default No), naming the child-session count; deletes the session, its sub-agent sessions, messages, binding and Auto-fix records; forks survive, unlinked. Refused while running |
+| Delete | `D` | always | Asks first (default No), naming the child-session count; deletes the session, its sub-agent sessions, messages, binding and Auto-fix records; forks survive, unlinked. Refused while the session or any of its sub-agent, teammate or skill sessions is running |
 
 Sections are stored in `sidebar_sections`; a session's section is
 `sessions.section_id`. A pinned session shows under `Pinned` even when it
@@ -2158,7 +2158,8 @@ merge request (GitLab), stored on its top-level session in
 `session_requests`. `github_create_pr` and `gitlab_create_mr` bind the
 request they create (a binding failure is logged, never fails the tool);
 `/autofix bind [number|#n|!n|url]` binds an existing one, or with no
-argument the session branch's single open request; `/autofix status`
+argument the session branch's single open request (a URL must be on the
+project remote's host and name its repository); `/autofix status`
 offers the branch's open requests when the session is not bound. A GitHub
 Enterprise host uses its `api_url` and `GH_ENTERPRISE_TOKEN`; a GitHub host
 that is neither github.com nor configured, or a GitLab host other than the
@@ -2171,14 +2172,25 @@ binding), one watcher task started with the TUI polls each bound, open
 request every `vcs.autofix.poll_secs` (default 60, minimum 30) and at once
 after `/autofix on`. A poll reads the request's state and head commit and:
 
-- CI: GitHub check runs that concluded `failure` or `timed_out` and failed
-  commit statuses, with the tail of the Actions job log; GitLab failed jobs
-  of the head pipeline (jobs allowed to fail are skipped), with the tail of
-  the job log.
+- CI: GitHub check runs that concluded `failure` or `timed_out` and the
+  latest failed commit status per context, with the tail of the Actions job
+  log (the workflow job id is read from the check run's `details_url`);
+  GitLab failed jobs of the head pipeline (jobs allowed to fail are
+  skipped), with the tail of the job log. A log is downloaded only for a
+  job that is about to wake the session, only its last 4 MiB are kept, and
+  credentials are redacted (`redact_secrets`) before it reaches the prompt.
 - Conflicts: GitHub `mergeable == false` or `mergeable_state == dirty`;
   GitLab `detailed_merge_status == conflict` or `has_conflicts`.
 - Review: GitHub inline review comments and review bodies, GitLab
-  unresolved resolvable notes, by anyone other than the token's user.
+  unresolved resolvable notes, by anyone other than the token's user. When
+  the token's user cannot be read (a GitHub App installation token cannot
+  call `/user`), review comments are skipped and CI and conflicts still
+  fire.
+
+Every list endpoint is read page by page (up to 10 pages of 100). A poll's
+result and its wake-ups are stored only while the session is still bound
+to the same request with Auto-fix on, checked in the same write, so
+rebinding or `/autofix off` during a poll wins.
 
 Each new item (job, conflict, comment) fires once per head commit; the
 items already acted on are stored in `autofix_events`, so a restart neither
@@ -2195,7 +2207,8 @@ through the session's permission mode.
 
 After `vcs.autofix.max_attempts` (default 3) wake-ups of one kind at one
 head commit, the next one pauses Auto-fix instead (sidebar `#!`) until
-`/autofix on`. A merged or closed request is reported once and no longer
+`/autofix on`, which restarts the attempt count; items already acted on
+are still not reported again. A merged or closed request is reported once and no longer
 polled; the binding stays so `Open PR/MR` still works. The status bar shows
 the focused session's latest Auto-fix summary, e.g. `PR #67 auto-fix: CI
 failed (attempt 2/3)`; `/autofix status` shows the binding, on/off/paused,

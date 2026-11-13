@@ -35,7 +35,7 @@
 
 ### Changed - storage
 
-- Storage schema 10 (additive): unread mark and section on sessions,
+- Storage schema 11 (additive): unread mark and section on sessions,
   `sidebar_sections`, `session_requests` with Auto-fix state, and
   `autofix_events`. Deleting a session also deletes its binding and Auto-fix
   records.

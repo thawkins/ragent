@@ -1114,13 +1114,11 @@ impl App {
     ///
     /// Returns a message when the session is running or does not exist.
     pub(crate) fn request_delete_session(&mut self, id: &str) -> Result<(), String> {
-        if self.session_is_running(id) {
-            return Err("that session is running; stop it first".to_string());
-        }
         let tree = self
             .storage
             .session_tree_ids(id)
             .map_err(|e| e.to_string())?;
+        self.check_tree_idle(id, &tree)?;
         if tree.is_empty() {
             return Err(format!("session not found: {id}"));
         }
@@ -1136,6 +1134,33 @@ impl App {
         Ok(())
     }
 
+    /// Refuses deleting session `id` while it, or any session in its `tree`
+    /// (sub-agent, teammate, skill sessions), is running: deleting removes
+    /// the whole tree, and a running child would keep writing into it.
+    fn check_tree_idle(&self, id: &str, tree: &[String]) -> Result<(), String> {
+        if self.session_is_running(id) {
+            return Err("that session is running; stop it first".to_string());
+        }
+        let running_task = |sid: &str| {
+            self.active_tasks.iter().any(|task| {
+                !task.status.is_terminal()
+                    && (task.child_session_id == sid || task.parent_session_id == sid)
+            })
+        };
+        let busy = running_task(id)
+            || tree
+                .iter()
+                .skip(1)
+                .any(|child| self.session_is_running(child) || running_task(child));
+        if busy {
+            return Err(
+                "a sub-agent or teammate of that session is still running; stop it first"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     /// Permanently deletes session `id` and its sub-agent sessions
     /// (SESSIONMENU FR-13). An open session is closed first; a running one
     /// is refused. Callers ask the user before calling this.
@@ -1145,9 +1170,11 @@ impl App {
     /// Returns a message when the session is running, cannot be closed, or
     /// storage fails.
     pub(crate) fn delete_session_by_id(&mut self, id: &str) -> Result<(), String> {
-        if self.session_is_running(id) {
-            return Err("that session is running; stop it first".to_string());
-        }
+        let tree = self
+            .storage
+            .session_tree_ids(id)
+            .map_err(|e| e.to_string())?;
+        self.check_tree_idle(id, &tree)?;
         if self.session.session_id.as_deref() == Some(id) {
             self.close_focused_session()?;
         } else if let Some(index) = self.background.position(id) {

@@ -45,3 +45,28 @@ pub fn shared_client() -> Client {
         })
         .clone()
 }
+
+/// Reads `resp`'s body, keeping only its last `limit` bytes. The body is
+/// streamed and the buffer never holds much more than `limit` bytes, so a
+/// huge response (a CI log) costs bandwidth but not memory.
+///
+/// # Errors
+///
+/// Returns an error when a body chunk cannot be read.
+pub async fn read_tail(resp: reqwest::Response, limit: usize) -> reqwest::Result<Vec<u8>> {
+    use futures::StreamExt as _;
+    let mut stream = resp.bytes_stream();
+    let mut tail: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        tail.extend_from_slice(&chunk?);
+        // Trim only once the buffer is twice the limit, so each byte is
+        // moved at most a few times.
+        if tail.len() > limit.saturating_mul(2) {
+            tail.drain(..tail.len() - limit);
+        }
+    }
+    if tail.len() > limit {
+        tail.drain(..tail.len() - limit);
+    }
+    Ok(tail)
+}

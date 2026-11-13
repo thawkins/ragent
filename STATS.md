@@ -23,7 +23,7 @@
 > `open_in.rs`, `app/autofix.rs`, the sidebar), `crates/ragent-agent` +1,873
 > (the new `autofix` watcher module and request binding),
 > `crates/ragent-storage` +1,312 (sections, fork, delete, bindings,
-> `autofix_events`; schema 10), `crates/ragent-tools-vcs` +215
+> `autofix_events`; schema 11), `crates/ragent-tools-vcs` +215
 > (`binding.rs`), `crates/ragent-config` +134 (`vcs` block),
 > `crates/ragent-server` +29 and `crates/ragent-types` +15. No crate or
 > binary is added; 8 test files are added.

@@ -42,8 +42,8 @@ Auto-fix never merges, never force-pushes and never resolves review threads; aft
 /// # Arguments
 ///
 /// * `arg` - the reference as typed.
-/// * `remote` - the session's project remote; a URL must name its
-///   repository.
+/// * `remote` - the session's project remote; a URL must name its host
+///   and repository.
 ///
 /// # Errors
 ///
@@ -58,6 +58,17 @@ pub fn parse_request_ref(arg: &str, remote: &ProjectRemote) -> Result<u64, Strin
             RemoteKind::GitLab => "/-/merge_requests/",
         };
         let lower = arg.to_ascii_lowercase();
+        let url_host = lower
+            .split_once("://")
+            .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or_default())
+            .map(host_name)
+            .unwrap_or_default();
+        if url_host != host_name(&remote.host.to_ascii_lowercase()) {
+            return Err(format!(
+                "`{arg}` is not on {}, this project's host",
+                remote.host
+            ));
+        }
         let (before, after) = lower
             .split_once(marker)
             .ok_or_else(|| format!("`{arg}` is not a {} URL", noun.long))?;
@@ -75,6 +86,13 @@ pub fn parse_request_ref(arg: &str, remote: &ProjectRemote) -> Result<u64, Strin
         .ok()
         .filter(|n| *n > 0)
         .ok_or_else(|| format!("`{arg}` is not a {} number", noun.short))
+}
+
+/// A URL or remote host without user info, port or a leading `www.`.
+fn host_name(host: &str) -> &str {
+    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
+    let host = host.split(':').next().unwrap_or(host);
+    host.strip_prefix("www.").unwrap_or(host)
 }
 
 /// `PR #12` / `MR !5` for a stored binding.
@@ -493,6 +511,11 @@ impl App {
                 app.append_assistant_text(&format!("Auto-fix: {summary}"));
                 app.session.force_new_message = true;
             } else if app.session.is_processing
+                // A dispatched turn sets `cancel_flag` at once but
+                // `is_processing` only on `MessageStart`; checking both makes
+                // a second trigger in the same tick queue instead of starting
+                // a concurrent turn. `MessageEnd` / `AgentError` clear both.
+                || app.session.cancel_flag.is_some()
                 || app.session.compact_in_progress
                 || app.session.auto_compact_in_progress
                 || app.session.pending_send_after_compact.is_some()

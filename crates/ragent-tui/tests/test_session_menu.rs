@@ -781,3 +781,88 @@ async fn test_session_menu_autofix_toggle_and_sidebar_glyphs() {
     let text: String = draw(&mut app)[row].chars().take(width).collect();
     assert!(text.contains(" #! "), "paused glyph: {text}");
 }
+
+#[tokio::test]
+async fn test_session_menu_delete_refuses_while_a_sub_agent_runs() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    let child = format!("{a}-child");
+    app.storage
+        .create_session_with(
+            &child,
+            "/nonexistent/menu",
+            Some(&a),
+            ragent_storage::SessionKind::Subagent,
+        )
+        .expect("child");
+    app.active_tasks.push(ragent_agent::task::TaskEntry {
+        id: "t1".to_string(),
+        parent_session_id: a.clone(),
+        child_session_id: child,
+        agent_name: "explore".to_string(),
+        task_prompt: "x".to_string(),
+        background: true,
+        detached: false,
+        status: ragent_agent::task::TaskStatus::Running,
+        result: None,
+        error: None,
+        created_at: chrono::Utc::now(),
+        completed_at: None,
+        reported: false,
+        waiter_count: 0,
+        output_file: None,
+        report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
+    });
+
+    app.execute_slash_command(&format!("/session delete {a}"))
+        .await;
+
+    assert!(!app.row_action_confirm_open(), "no dialog");
+    assert!(app.status.contains("still running"), "{}", app.status);
+    assert!(app.storage.get_session(&a).expect("get").is_some());
+}
+
+#[tokio::test]
+async fn test_session_menu_scrolls_to_keep_cursor_visible() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    // More sections than the screen has rows.
+    for n in 0..40 {
+        app.storage
+            .create_section(&format!("Section {n:02}"))
+            .expect("section");
+    }
+    menu_on(&mut app, &a, &MenuAction::MoveTo).await;
+    app.handle_key_event(key(KeyCode::Enter)).await;
+    draw(&mut app);
+    app.handle_key_event(key(KeyCode::End)).await;
+    let rows = draw(&mut app);
+    assert!(
+        rows.iter().any(|r| r.contains("New section...")),
+        "the last item is scrolled into view"
+    );
+    let sub = app
+        .sidebar
+        .menu
+        .as_ref()
+        .and_then(|m| m.submenu.as_ref())
+        .expect("submenu");
+    assert!(sub.scroll > 0, "the submenu scrolled");
+    let last = sub.items.len() - 1;
+    assert_eq!(sub.cursor, last);
+    // A click on the painted last line picks the last item.
+    let row = rows
+        .iter()
+        .position(|r| r.contains("New section..."))
+        .expect("row");
+    let column = sub.area.x + 2;
+    app.handle_mouse_event(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        column,
+        u16::try_from(row).expect("row"),
+    ));
+    assert!(
+        app.session.input.starts_with("/session section new"),
+        "the clicked item ran: {}",
+        app.session.input
+    );
+}

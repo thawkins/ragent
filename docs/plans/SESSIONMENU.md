@@ -471,9 +471,9 @@ M5 - Auto-fix watcher (1 week) - DONE
   test asserts a background session gets the prompt queued and the `!`
   marker without a dialog over the focused session.
 - Done as planned, with these details:
-  - Storage (schema 10): `session_requests` gains `autofix`,
-    `autofix_paused`, `head_sha`, `last_polled_at`, `last_trigger`; new
-    `autofix_events` table. Rebinding keeps the on/off setting; paused state
+  - Storage (schema 10, 11 after review): `session_requests` gains
+    `autofix`, `autofix_paused`, `head_sha`, `last_polled_at`,
+    `last_trigger`, `autofix_resumed_at`; new `autofix_events` table. Rebinding keeps the on/off setting; paused state
     and head commit are kept only when the same request is bound again.
     Deleting a session deletes its `autofix_events` rows.
   - `vcs.autofix { poll_secs, max_attempts, default_on }` (global config
@@ -503,6 +503,14 @@ M5 - Auto-fix watcher (1 week) - DONE
     the status bar shows the focused session's latest summary.
   - Tests: `ragent-agent` `test_autofix_watcher` (7), `ragent-tui`
     `test_autofix` (4 more) and `test_session_menu` (1 more).
+  - PR #69 review: logs redacted, bounded to their tail and read only for
+    jobs that wake the session; Actions job id from `details_url`; all list
+    endpoints paginated; review comments skipped (not the poll) when the
+    token user is unknown; poll results and wake-ups dropped when the
+    binding changed or Auto-fix was turned off meanwhile; `/autofix on`
+    restarts the attempt count; a URL must match the remote's host; a
+    second trigger in one tick queues; Delete refused while a descendant
+    session runs; the menu scrolls to keep the cursor visible.
 
 M6 - Docs and polish (1-2 days) - DONE
 - SPEC.md (sidebar menu, `/autofix`, `vcs` config), QUICKSTART.md and

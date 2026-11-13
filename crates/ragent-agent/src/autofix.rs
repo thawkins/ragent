@@ -17,6 +17,13 @@
 //! - Lifecycle: a merged or closed request is reported once and is no
 //!   longer polled; the binding stays so `Open PR/MR` still works.
 //!
+//! - Stale results: a poll's result is stored and acted on only while the
+//!   session is still bound to the same request with Auto-fix on, checked
+//!   in the same write, so a rebind or `/autofix off` during a poll wins.
+//! - Logs: a failed job's log is read only when it is about to wake the
+//!   session, its download is bounded to its tail, and credentials are
+//!   redacted before it reaches the prompt.
+//!
 //! Review comments come from the REST API, which has no resolved state on
 //! GitHub; dedup on comment id keeps each comment to one wake-up
 //! (spec R1).
@@ -41,6 +48,8 @@ const LOG_TAIL_LINES: usize = 40;
 const LOG_LIMIT_BYTES: usize = 4 * 1024 * 1024;
 /// Items per page; the maximum both APIs allow.
 const PER_PAGE: usize = 100;
+/// Pages read per list endpoint per poll.
+const MAX_PAGES: u32 = 10;
 
 /// What woke a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +83,16 @@ impl TriggerKind {
     }
 }
 
+/// Where a failed job's log can be read. Logs are fetched only for jobs
+/// that are about to wake the session, never for one already acted on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobLog {
+    /// A GitHub Actions workflow job id.
+    GitHubJob(u64),
+    /// A GitLab job id.
+    GitLabJob(u64),
+}
+
 /// One thing a trigger can be about: a failed job, the conflict, or a
 /// comment.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +101,18 @@ pub struct TriggerItem {
     pub id: String,
     /// Prompt text describing it.
     pub text: String,
+    /// The job log to append to `text`, when it is a failed job with one.
+    pub log: Option<JobLog>,
+}
+
+impl TriggerItem {
+    fn new(id: String, text: String) -> Self {
+        Self {
+            id,
+            text,
+            log: None,
+        }
+    }
 }
 
 /// A request as one poll saw it.
@@ -101,13 +132,17 @@ pub struct Snapshot {
 
 /// Reads request `number` of the repository at `remote`: state, head
 /// commit, failed CI jobs, conflict and review comments by anyone but the
-/// token's own user.
+/// token's own user. Every list endpoint is read page by page, up to
+/// [`MAX_PAGES`] pages. When the token's user cannot be determined (for
+/// example a GitHub App installation token, which `/user` refuses), review
+/// comments are left out rather than the whole poll failing. Job logs are
+/// not read here; see [`fetch_job_log`].
 ///
 /// # Errors
 ///
 /// Returns [`FetchError::RateLimited`] when the API's rate limit is
 /// exhausted, and [`FetchError::Other`] for any other failure of a required
-/// call. A job log that cannot be read is left out, not an error.
+/// call.
 pub async fn fetch_snapshot(
     source: &RequestSource,
     remote: &ProjectRemote,
@@ -116,6 +151,49 @@ pub async fn fetch_snapshot(
     match source {
         RequestSource::GitHub(client) => github_snapshot(client, remote, number).await,
         RequestSource::GitLab(client) => gitlab_snapshot(client, remote, number).await,
+    }
+}
+
+/// The last [`LOG_TAIL_LINES`] lines of a failed job's log, with
+/// credentials redacted; `None` when the log cannot be read or is empty.
+pub async fn fetch_job_log(
+    source: &RequestSource,
+    remote: &ProjectRemote,
+    log: &JobLog,
+) -> Option<String> {
+    let fetched = match (source, log) {
+        (RequestSource::GitHub(client), JobLog::GitHubJob(id)) => client
+            .get_bytes_tail(
+                &format!("/repos/{}/actions/jobs/{id}/logs", remote.path),
+                LOG_LIMIT_BYTES,
+            )
+            .await
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
+        (RequestSource::GitLab(client), JobLog::GitLabJob(id)) => {
+            client
+                .get_text_tail(
+                    &format!(
+                        "/projects/{}/jobs/{id}/trace",
+                        ragent_tools_vcs::percent::encode_project_path(&remote.path)
+                    ),
+                    LOG_LIMIT_BYTES,
+                )
+                .await
+        }
+        _ => return None,
+    };
+    match fetched {
+        Ok(text) => {
+            let tail = log_tail(&text);
+            // CI logs are where secrets get echoed (`set -x`, a failed
+            // `curl -H "Authorization: ..."`); this text goes to the model
+            // and the session store.
+            (!tail.trim().is_empty()).then(|| ragent_types::sanitize::redact_secrets(&tail))
+        }
+        Err(e) => {
+            tracing::debug!(error = %e, ?log, "autofix: job log unavailable");
+            None
+        }
     }
 }
 
@@ -135,14 +213,6 @@ fn log_tail(log: &str) -> String {
     lines[lines.len().saturating_sub(LOG_TAIL_LINES)..].join("\n")
 }
 
-/// Prompt text for one failed job.
-fn job_text(name: &str, log: Option<&str>) -> String {
-    match log.map(str::trim).filter(|l| !l.is_empty()) {
-        Some(log) => format!("- job `{name}`, log tail:\n```\n{}\n```", log_tail(log)),
-        None => format!("- job `{name}`"),
-    }
-}
-
 /// Prompt text for one review comment.
 fn comment_text(author: &str, location: Option<String>, body: &str) -> String {
     let place = location.map(|l| format!(" on `{l}`")).unwrap_or_default();
@@ -158,6 +228,82 @@ fn push_kind(
     if !found.is_empty() {
         items.push((kind, found));
     }
+}
+
+/// Every item of a paginated GitHub list, up to [`MAX_PAGES`] pages.
+/// `path` already has a query string; `key` names the array inside an
+/// object response (`check_runs`, `statuses`), `None` for a bare array.
+async fn github_list(
+    client: &ragent_tools_vcs::github::client::GitHubClient,
+    path: &str,
+    key: Option<&str>,
+) -> Result<Vec<Value>, FetchError> {
+    let mut all = Vec::new();
+    for page in 1..=MAX_PAGES {
+        let body = client
+            .get(&format!("{path}&per_page={PER_PAGE}&page={page}"))
+            .await
+            .map_err(|e| api_error(&e))?;
+        let items = match key {
+            Some(key) => body[key].as_array().cloned().unwrap_or_default(),
+            None => body.as_array().cloned().unwrap_or_default(),
+        };
+        let last = items.len() < PER_PAGE;
+        all.extend(items);
+        if last {
+            break;
+        }
+    }
+    Ok(all)
+}
+
+/// Every item of a paginated GitLab list, following `x-next-page`, up to
+/// [`MAX_PAGES`] pages. `path` already has a query string.
+async fn gitlab_list(
+    client: &ragent_tools_vcs::gitlab::GitLabClient,
+    path: &str,
+) -> Result<Vec<Value>, FetchError> {
+    let mut all = Vec::new();
+    let mut page = 1;
+    for _ in 0..MAX_PAGES {
+        let (body, next) = client
+            .get_paged(&format!("{path}&per_page={PER_PAGE}&page={page}"))
+            .await
+            .map_err(|e| api_error(&e))?;
+        all.extend(body.as_array().cloned().unwrap_or_default());
+        match next {
+            Some(next) => page = next,
+            None => break,
+        }
+    }
+    Ok(all)
+}
+
+/// The token user's name from a `/user` response, or `None` when it cannot
+/// be read. A rate limit is still an error.
+fn identity(result: anyhow::Result<Value>, field: &str) -> Result<Option<String>, FetchError> {
+    match result {
+        Ok(user) => Ok(user[field].as_str().map(str::to_string)),
+        Err(e) => match api_error(&e) {
+            FetchError::RateLimited(text) => Err(FetchError::RateLimited(text)),
+            FetchError::Other(text) => {
+                tracing::debug!(error = %text, "autofix: token user unknown; reviews skipped");
+                Ok(None)
+            }
+        },
+    }
+}
+
+/// The workflow job id of a GitHub Actions check run. Its `details_url`
+/// ends in `/actions/runs/{run}/job/{job}`; the check run id is a separate
+/// identifier.
+fn actions_job_id(run: &Value) -> Option<u64> {
+    if run["app"]["slug"] != "github-actions" {
+        return None;
+    }
+    let url = run["details_url"].as_str()?;
+    let (_, rest) = url.rsplit_once("/job/")?;
+    rest.split(['/', '?', '#']).next()?.parse().ok()
 }
 
 async fn github_snapshot(
@@ -180,13 +326,13 @@ async fn github_snapshot(
 
     // CI: failed check runs and failed commit statuses for the head commit.
     let mut failed = Vec::new();
-    let runs = client
-        .get(&format!(
-            "/repos/{repo}/commits/{head_sha}/check-runs?per_page={PER_PAGE}"
-        ))
-        .await
-        .map_err(|e| api_error(&e))?;
-    for run in runs["check_runs"].as_array().map_or(&[][..], Vec::as_slice) {
+    let runs = github_list(
+        client,
+        &format!("/repos/{repo}/commits/{head_sha}/check-runs?filter=latest"),
+        Some("check_runs"),
+    )
+    .await?;
+    for run in &runs {
         let conclusion = run["conclusion"].as_str().unwrap_or_default();
         if run["status"] != "completed" || !matches!(conclusion, "failure" | "timed_out") {
             continue;
@@ -195,44 +341,35 @@ async fn github_snapshot(
             continue;
         };
         let name = run["name"].as_str().unwrap_or("check");
-        // An Actions check run's id is its job id; other apps have no log.
-        let log = if run["app"]["slug"] == "github-actions" {
-            match client
-                .get_bytes_limited(
-                    &format!("/repos/{repo}/actions/jobs/{id}/logs"),
-                    LOG_LIMIT_BYTES,
-                )
-                .await
-            {
-                Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
-                Err(e) => {
-                    tracing::debug!(error = %e, job = id, "autofix: job log unavailable");
-                    None
-                }
-            }
-        } else {
-            None
-        };
         failed.push(TriggerItem {
             id: format!("check:{id}"),
-            text: job_text(name, log.as_deref()),
+            text: format!("- job `{name}`"),
+            log: actions_job_id(run).map(JobLog::GitHubJob),
         });
     }
-    let status = client
-        .get(&format!("/repos/{repo}/commits/{head_sha}/status"))
-        .await
-        .map_err(|e| api_error(&e))?;
-    for entry in status["statuses"].as_array().map_or(&[][..], Vec::as_slice) {
+    let statuses = github_list(
+        client,
+        &format!("/repos/{repo}/commits/{head_sha}/statuses?"),
+        None,
+    )
+    .await?;
+    // The list is newest first and keeps every state change; only the
+    // latest state of each context counts.
+    let mut seen = std::collections::HashSet::new();
+    for entry in &statuses {
+        let context = entry["context"].as_str().unwrap_or("status");
+        if !seen.insert(context.to_string()) {
+            continue;
+        }
         let (Some(id), Some("failure" | "error")) = (entry["id"].as_u64(), entry["state"].as_str())
         else {
             continue;
         };
-        let name = entry["context"].as_str().unwrap_or("status");
         let detail = entry["description"].as_str().unwrap_or_default();
-        failed.push(TriggerItem {
-            id: format!("status:{id}"),
-            text: format!("- status `{name}`: {detail}"),
-        });
+        failed.push(TriggerItem::new(
+            format!("status:{id}"),
+            format!("- status `{context}`: {detail}"),
+        ));
     }
     push_kind(&mut items, TriggerKind::Ci, failed);
 
@@ -240,34 +377,29 @@ async fn github_snapshot(
         push_kind(
             &mut items,
             TriggerKind::Conflict,
-            vec![TriggerItem {
-                id: "conflict".to_string(),
-                text: format!(
+            vec![TriggerItem::new(
+                "conflict".to_string(),
+                format!(
                     "- `{}` conflicts with `{}`",
                     info.source_branch,
                     pull["base"]["ref"].as_str().unwrap_or("the target branch")
                 ),
-            }],
+            )],
         );
     }
 
     // Review comments by anyone but the token's own user.
-    let me = client
-        .current_user()
-        .await
-        .map_err(|e| api_error(&e))?
-        .get("login")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
+    let Some(me) = identity(client.current_user().await, "login")? else {
+        return Ok(snapshot(info, head_sha, items));
+    };
     let mut comments = Vec::new();
-    let inline = client
-        .get(&format!(
-            "/repos/{repo}/pulls/{number}/comments?per_page={PER_PAGE}"
-        ))
-        .await
-        .map_err(|e| api_error(&e))?;
-    for c in inline.as_array().map_or(&[][..], Vec::as_slice) {
+    let inline = github_list(
+        client,
+        &format!("/repos/{repo}/pulls/{number}/comments?sort=created"),
+        None,
+    )
+    .await?;
+    for c in &inline {
         let author = c["user"]["login"].as_str().unwrap_or_default();
         let Some(id) = c["id"].as_u64().filter(|_| author != me) else {
             continue;
@@ -276,18 +408,18 @@ async fn github_snapshot(
             Some(line) => format!("{path}:{line}"),
             None => path.to_string(),
         });
-        comments.push(TriggerItem {
-            id: format!("comment:{id}"),
-            text: comment_text(author, location, c["body"].as_str().unwrap_or_default()),
-        });
+        comments.push(TriggerItem::new(
+            format!("comment:{id}"),
+            comment_text(author, location, c["body"].as_str().unwrap_or_default()),
+        ));
     }
-    let reviews = client
-        .get(&format!(
-            "/repos/{repo}/pulls/{number}/reviews?per_page={PER_PAGE}"
-        ))
-        .await
-        .map_err(|e| api_error(&e))?;
-    for r in reviews.as_array().map_or(&[][..], Vec::as_slice) {
+    let reviews = github_list(
+        client,
+        &format!("/repos/{repo}/pulls/{number}/reviews?"),
+        None,
+    )
+    .await?;
+    for r in &reviews {
         let author = r["user"]["login"].as_str().unwrap_or_default();
         let body = r["body"].as_str().unwrap_or_default().trim();
         let Some(id) = r["id"]
@@ -296,10 +428,10 @@ async fn github_snapshot(
         else {
             continue;
         };
-        comments.push(TriggerItem {
-            id: format!("review:{id}"),
-            text: comment_text(author, None, body),
-        });
+        comments.push(TriggerItem::new(
+            format!("review:{id}"),
+            comment_text(author, None, body),
+        ));
     }
     push_kind(&mut items, TriggerKind::Review, comments);
     Ok(snapshot(info, head_sha, items))
@@ -329,13 +461,12 @@ async fn gitlab_snapshot(
     let mut failed = Vec::new();
     if pipeline["status"] == "failed" && pipeline["sha"].as_str().is_none_or(|s| s == head_sha) {
         if let Some(pipeline_id) = pipeline["id"].as_u64() {
-            let jobs = client
-                .get(&format!(
-                    "/projects/{project}/pipelines/{pipeline_id}/jobs?scope[]=failed&per_page={PER_PAGE}"
-                ))
-                .await
-                .map_err(|e| api_error(&e))?;
-            for job in jobs.as_array().map_or(&[][..], Vec::as_slice) {
+            let jobs = gitlab_list(
+                client,
+                &format!("/projects/{project}/pipelines/{pipeline_id}/jobs?scope[]=failed"),
+            )
+            .await?;
+            for job in &jobs {
                 let Some(id) = job["id"].as_u64() else {
                     continue;
                 };
@@ -343,19 +474,10 @@ async fn gitlab_snapshot(
                     continue;
                 }
                 let name = job["name"].as_str().unwrap_or("job");
-                let log = match client
-                    .get_text(&format!("/projects/{project}/jobs/{id}/trace"))
-                    .await
-                {
-                    Ok(log) => Some(log),
-                    Err(e) => {
-                        tracing::debug!(error = %e, job = id, "autofix: job log unavailable");
-                        None
-                    }
-                };
                 failed.push(TriggerItem {
                     id: format!("job:{id}"),
-                    text: job_text(name, log.as_deref()),
+                    text: format!("- job `{name}`"),
+                    log: Some(JobLog::GitLabJob(id)),
                 });
             }
         }
@@ -366,34 +488,28 @@ async fn gitlab_snapshot(
         push_kind(
             &mut items,
             TriggerKind::Conflict,
-            vec![TriggerItem {
-                id: "conflict".to_string(),
-                text: format!(
+            vec![TriggerItem::new(
+                "conflict".to_string(),
+                format!(
                     "- `{}` conflicts with `{}`",
                     info.source_branch,
                     mr["target_branch"].as_str().unwrap_or("the target branch")
                 ),
-            }],
+            )],
         );
     }
 
     // Unresolved, resolvable notes by anyone but the token's own user.
-    let me = client
-        .get("/user")
-        .await
-        .map_err(|e| api_error(&e))?
-        .get("username")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let discussions = client
-        .get(&format!(
-            "/projects/{project}/merge_requests/{number}/discussions?per_page={PER_PAGE}"
-        ))
-        .await
-        .map_err(|e| api_error(&e))?;
+    let Some(me) = identity(client.get("/user").await, "username")? else {
+        return Ok(snapshot(info, head_sha, items));
+    };
+    let discussions = gitlab_list(
+        client,
+        &format!("/projects/{project}/merge_requests/{number}/discussions?"),
+    )
+    .await?;
     let mut comments = Vec::new();
-    for discussion in discussions.as_array().map_or(&[][..], Vec::as_slice) {
+    for discussion in &discussions {
         for note in discussion["notes"]
             .as_array()
             .map_or(&[][..], Vec::as_slice)
@@ -413,10 +529,10 @@ async fn gitlab_snapshot(
                         Some(line) => format!("{path}:{line}"),
                         None => path.to_string(),
                     });
-            comments.push(TriggerItem {
-                id: format!("note:{id}"),
-                text: comment_text(author, location, note["body"].as_str().unwrap_or_default()),
-            });
+            comments.push(TriggerItem::new(
+                format!("note:{id}"),
+                comment_text(author, location, note["body"].as_str().unwrap_or_default()),
+            ));
         }
     }
     push_kind(&mut items, TriggerKind::Review, comments);
@@ -557,14 +673,22 @@ impl AutofixWatcher {
             }
         };
         let session_id = binding.session_id.as_str();
-        if let Err(e) = self.storage.record_autofix_poll(
-            session_id,
+        match self.storage.record_autofix_poll(
+            binding,
             snap.state.as_str(),
             &snap.title,
             &snap.head_sha,
         ) {
-            tracing::warn!(error = %e, "autofix: could not record poll");
-            return Vec::new();
+            Ok(true) => {}
+            Ok(false) => {
+                // Rebound or turned off while this poll ran.
+                tracing::debug!(session_id, "autofix: binding changed; poll dropped");
+                return Vec::new();
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "autofix: could not record poll");
+                return Vec::new();
+            }
         }
         let noun = kind.noun();
         let request = format!("{} {}{}", noun.short, noun.sigil, binding.number);
@@ -578,7 +702,10 @@ impl AutofixWatcher {
         }
         let mut events = Vec::new();
         for (trigger, items) in &snap.items {
-            match self.wake_for(session_id, &request, &snap, *trigger, items) {
+            let woken = self
+                .wake_for(binding, &source, &remote, &request, &snap, *trigger, items)
+                .await;
+            match woken {
                 Ok(Some(event)) => {
                     let paused =
                         matches!(&event, Event::AutofixTrigger { kind, .. } if kind == "paused");
@@ -598,14 +725,18 @@ impl AutofixWatcher {
 
     /// The event for the new `items` of one trigger kind, if any: a wake-up,
     /// or a pause once the attempt cap is reached.
-    fn wake_for(
+    #[allow(clippy::too_many_arguments)] // reason: one call site, all borrowed context
+    async fn wake_for(
         &self,
-        session_id: &str,
+        binding: &SessionRequest,
+        source: &RequestSource,
+        remote: &ProjectRemote,
         request: &str,
         snap: &Snapshot,
         kind: TriggerKind,
         items: &[TriggerItem],
     ) -> anyhow::Result<Option<Event>> {
+        let session_id = binding.session_id.as_str();
         let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
         let fresh =
             self.storage
@@ -634,22 +765,29 @@ impl AutofixWatcher {
             kind.label(),
             self.max_attempts
         );
+        let mut details = Vec::new();
+        for item in items.iter().filter(|i| fresh.contains(&i.id)) {
+            let log = match &item.log {
+                Some(log) => fetch_job_log(source, remote, log).await,
+                None => None,
+            };
+            details.push(match log {
+                Some(log) => format!("{}, log tail:\n```\n{log}\n```", item.text),
+                None => item.text.clone(),
+            });
+        }
         if self.storage.record_autofix_wakeup(
-            session_id,
+            binding,
             &snap.head_sha,
             kind.as_str(),
             &fresh,
             &summary,
         )? == 0
         {
-            // Another process recorded these first and woke the session.
+            // Another process recorded these first, or the binding changed
+            // or Auto-fix was turned off meanwhile.
             return Ok(None);
         }
-        let details: Vec<&str> = items
-            .iter()
-            .filter(|i| fresh.contains(&i.id))
-            .map(|i| i.text.as_str())
-            .collect();
         Ok(Some(Event::AutofixTrigger {
             session_id: session_id.to_string(),
             kind: kind.as_str().to_string(),
@@ -660,7 +798,7 @@ impl AutofixWatcher {
 }
 
 /// The user-role message that wakes the session.
-fn prompt(request: &str, snap: &Snapshot, kind: TriggerKind, details: &[&str]) -> String {
+fn prompt(request: &str, snap: &Snapshot, kind: TriggerKind, details: &[String]) -> String {
     let short_sha: String = snap.head_sha.chars().take(10).collect();
     let (what, ask) = match kind {
         TriggerKind::Ci => ("CI failed", "Find the cause, fix it, then commit and push."),

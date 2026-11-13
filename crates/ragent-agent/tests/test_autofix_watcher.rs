@@ -11,7 +11,7 @@ use ragent_storage::{SessionRequest, Storage};
 use ragent_tools_vcs::github::client::GitHubClient;
 use ragent_tools_vcs::gitlab::GitLabClient;
 use serde_json::{Value, json};
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const SHA_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -123,8 +123,8 @@ async fn github_pull(
     .await;
     get(
         server,
-        &format!("/repos/acme/app/commits/{sha}/status"),
-        json!({ "statuses": [] }),
+        &format!("/repos/acme/app/commits/{sha}/statuses"),
+        json!([]),
     )
     .await;
     get(server, "/user", json!({ "login": "bot" })).await;
@@ -276,14 +276,28 @@ async fn test_autofix_watcher_gitlab_pipeline_conflict_and_notes() {
     .await;
     Mock::given(method("GET"))
         .and(path(format!("{project}/jobs/301/trace")))
-        .respond_with(ResponseTemplate::new(200).set_body_string("compiling\nerror: boom\n"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "compiling\ncurl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz'\nerror: boom\n",
+        ))
+        .expect(1)
         .mount(&server)
         .await;
     get(&server, "/api/v4/user", json!({ "username": "bot" })).await;
-    get(
-        &server,
-        &format!("{project}/merge_requests/7/discussions"),
-        json!([
+    // Page 1 points at page 2 through `x-next-page`.
+    Mock::given(method("GET"))
+        .and(path(format!("{project}/merge_requests/7/discussions")))
+        .and(query_param("page", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-next-page", "2")
+                .set_body_json(json!([{ "notes": [] }])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{project}/merge_requests/7/discussions")))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
             { "notes": [
                 { "id": 1, "resolvable": true, "resolved": false, "system": false,
                   "author": { "username": "carol" }, "body": "Add a test.",
@@ -295,9 +309,9 @@ async fn test_autofix_watcher_gitlab_pipeline_conflict_and_notes() {
                 { "id": 3, "resolvable": false, "resolved": false, "system": false,
                   "author": { "username": "dave" }, "body": "Nice." }
             ]}
-        ]),
-    )
-    .await;
+        ])))
+        .mount(&server)
+        .await;
 
     let fired = triggers(&watcher.tick().await);
     let kinds: Vec<&str> = fired.iter().map(|(k, _, _)| k.as_str()).collect();
@@ -310,9 +324,22 @@ async fn test_autofix_watcher_gitlab_pipeline_conflict_and_notes() {
         ci.2
     );
     assert!(!ci.2.contains("flaky"), "an allowed failure is left out");
+    assert!(
+        !ci.2.contains("abcdefghijklmnopqrstuvwxyz") && ci.2.contains("[REDACTED]"),
+        "credentials in the log are redacted: {}",
+        ci.2
+    );
     let review = &fired[2].2;
-    assert!(review.contains("carol on `src/main.rs:4`"), "{review}");
+    assert!(
+        review.contains("carol on `src/main.rs:4`"),
+        "a note on page 2 is read: {review}"
+    );
     assert!(!review.contains("Already done.") && !review.contains("Nice."));
+    assert_eq!(
+        watcher.tick().await.len(),
+        0,
+        "nothing new; the log of a job already acted on is not read again"
+    );
 }
 
 #[tokio::test]
@@ -397,4 +424,114 @@ fn test_autofix_watcher_rebind_keeps_setting_and_default_on() {
             .expect("bound")
             .enabled
     );
+}
+
+#[tokio::test]
+async fn test_autofix_watcher_actions_log_by_job_id_and_no_user_identity() {
+    let server = MockServer::start().await;
+    let storage = storage_with_binding("github", "acme/app");
+    let watcher = github_watcher(&storage, &server);
+    github_pull(&server, SHA_A, &[], false, json!([])).await;
+    // An Actions check run: its workflow job id comes from `details_url`,
+    // not from the check run id.
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/acme/app/commits/{SHA_A}/check-runs")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "check_runs": [{
+                "id": 9001, "name": "test", "status": "completed", "conclusion": "failure",
+                "app": { "slug": "github-actions" },
+                "details_url": "https://github.com/acme/app/actions/runs/55/job/777"
+            }]})),
+        )
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/app/actions/jobs/777/logs"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("step 1\nassertion failed\n"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // An installation token cannot read `/user`.
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("Resource not accessible"))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+
+    let fired = triggers(&watcher.tick().await);
+    assert_eq!(
+        fired.len(),
+        1,
+        "CI still fires without a token user: {fired:?}"
+    );
+    assert_eq!(fired[0].0, "ci");
+    assert!(fired[0].2.contains("assertion failed"), "{}", fired[0].2);
+}
+
+#[test]
+fn test_autofix_watcher_stale_results_are_dropped() {
+    let storage = storage_with_binding("github", "acme/app");
+    let old = storage.session_request("s").expect("read").expect("bound");
+    let mut rebound = old.clone();
+    rebound.number = 8;
+    rebound.title = "Other".to_string();
+    storage.set_session_request(&rebound).expect("rebind");
+
+    assert!(
+        !storage
+            .record_autofix_poll(&old, "closed", "Fix", SHA_A)
+            .expect("poll"),
+        "a poll of the old request is dropped"
+    );
+    let now = storage.session_request("s").expect("read").expect("bound");
+    assert_eq!((now.number, now.state.as_str()), (8, "open"));
+    assert_eq!(
+        storage
+            .record_autofix_wakeup(&old, SHA_A, "ci", &["check:1".to_string()], "x")
+            .expect("record"),
+        0,
+        "a trigger for the old request is dropped"
+    );
+
+    storage.set_session_autofix("s", false).expect("off");
+    assert!(
+        !storage
+            .record_autofix_poll(&rebound, "open", "Other", SHA_A)
+            .expect("poll")
+    );
+    assert_eq!(
+        storage
+            .record_autofix_wakeup(&rebound, SHA_A, "ci", &["check:1".to_string()], "x")
+            .expect("record"),
+        0,
+        "turning Auto-fix off during a poll prevents the wake-up"
+    );
+}
+
+#[tokio::test]
+async fn test_autofix_watcher_on_resumes_a_paused_binding() {
+    let server = MockServer::start().await;
+    let storage = storage_with_binding("github", "acme/app");
+    let watcher = github_watcher(&storage, &server);
+    for id in [31_u64, 32, 33] {
+        github_pull(&server, SHA_A, &[id], false, json!([])).await;
+        assert_eq!(triggers(&watcher.tick().await).len(), 1);
+    }
+    github_pull(&server, SHA_A, &[34], false, json!([])).await;
+    assert_eq!(triggers(&watcher.tick().await)[0].0, "paused");
+
+    // Small gap so the resume time sorts after the recorded wake-ups.
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    storage.set_session_autofix("s", true).expect("on");
+    let resumed = triggers(&watcher.tick().await);
+    assert_eq!(resumed.len(), 1, "{resumed:?}");
+    assert_eq!(resumed[0].0, "ci");
+    assert!(resumed[0].1.contains("attempt 1/3"), "{:?}", resumed[0]);
+    assert!(
+        resumed[0].2.contains("clippy"),
+        "the item that paused it is sent"
+    );
+    assert_eq!(watcher.tick().await.len(), 0, "and only once");
 }

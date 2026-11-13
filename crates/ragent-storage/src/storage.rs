@@ -46,7 +46,7 @@ use ragent_types::message::{Message, MessagePart, Role};
 ///
 /// Public so tests can assert the persisted `schema_version` setting against
 /// the compiler-enforced value instead of a hard-coded literal.
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 
 // PERF-071: static SQL bodies hoisted to `const &str` so the session read
 // paths build no `String` and the prepared-statement cache sees a stable
@@ -1314,6 +1314,7 @@ impl Storage {
             ("head_sha", "TEXT"),
             ("last_polled_at", "TEXT"),
             ("last_trigger", "TEXT"),
+            ("autofix_resumed_at", "TEXT"),
         ] {
             let has_col: bool = tx
                 .prepare_cached(&format!(
@@ -2300,7 +2301,10 @@ impl Storage {
     }
 
     /// Turns Auto-fix on or off for session `session_id`'s binding. Either
-    /// way the paused state is cleared, so `on` resumes a paused watcher.
+    /// way the paused state is cleared. Turning it on also restarts the
+    /// attempt count (see [`Storage::autofix_attempts`]), so `on` resumes a
+    /// paused watcher on the same commit; the items already acted on stay
+    /// recorded and are not reported again.
     ///
     /// # Returns
     ///
@@ -2337,8 +2341,10 @@ impl Storage {
     pub fn set_session_autofix(&self, session_id: &str, enabled: bool) -> Result<bool> {
         let conn = lock_conn!(self)?;
         let changed = conn.execute(
-            "UPDATE session_requests SET autofix = ?2, autofix_paused = 0 WHERE session_id = ?1",
-            params![session_id, i64::from(enabled)],
+            "UPDATE session_requests SET autofix = ?2, autofix_paused = 0, \
+             autofix_resumed_at = CASE WHEN ?2 = 1 THEN ?3 ELSE autofix_resumed_at END \
+             WHERE session_id = ?1",
+            params![session_id, i64::from(enabled), Utc::now().to_rfc3339()],
         )?;
         Ok(changed > 0)
     }
@@ -2410,26 +2416,44 @@ impl Storage {
         Ok(rows)
     }
 
-    /// Records one Auto-fix poll of session `session_id`'s request: its
-    /// state, title and head commit as seen now.
+    /// Records one Auto-fix poll of `binding`'s request: its state, title
+    /// and head commit as seen now. Nothing is written unless the session is
+    /// still bound to that same request with Auto-fix on and not paused, so a
+    /// poll that was running while the user rebound the session or turned
+    /// Auto-fix off cannot overwrite the new state.
+    ///
+    /// # Returns
+    ///
+    /// `false` when the binding changed and the poll result was dropped.
     ///
     /// # Errors
     ///
     /// Returns an error if the write fails.
     pub fn record_autofix_poll(
         &self,
-        session_id: &str,
+        binding: &SessionRequest,
         state: &str,
         title: &str,
         head_sha: &str,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let conn = lock_conn!(self)?;
-        conn.execute(
+        let changed = conn.execute(
             "UPDATE session_requests SET state = ?2, title = ?3, head_sha = ?4, \
-             last_polled_at = ?5 WHERE session_id = ?1",
-            params![session_id, state, title, head_sha, Utc::now().to_rfc3339()],
+             last_polled_at = ?5 WHERE session_id = ?1 AND repo = ?6 AND number = ?7 \
+             AND forge = ?8 AND host = ?9 AND autofix = 1 AND autofix_paused = 0",
+            params![
+                binding.session_id,
+                state,
+                title,
+                head_sha,
+                Utc::now().to_rfc3339(),
+                binding.repo,
+                i64::try_from(binding.number).unwrap_or(i64::MAX),
+                binding.forge,
+                binding.host
+            ],
         )?;
-        Ok(())
+        Ok(changed > 0)
     }
 
     /// The items of `kind` at `head_sha` not yet acted on for session
@@ -2460,7 +2484,8 @@ impl Storage {
     }
 
     /// How many wake-ups of `kind` session `session_id` has had at
-    /// `head_sha` (attempt cap, FR-19). Items recorded together count once.
+    /// `head_sha` since Auto-fix was last turned on (attempt cap, FR-19).
+    /// Items recorded together count once.
     ///
     /// # Errors
     ///
@@ -2468,36 +2493,58 @@ impl Storage {
     pub fn autofix_attempts(&self, session_id: &str, head_sha: &str, kind: &str) -> Result<u32> {
         let conn = lock_conn_read!(self)?;
         let count: i64 = conn.query_row(
-            "SELECT COUNT(DISTINCT fired_at) FROM autofix_events \
-             WHERE session_id = ?1 AND head_sha = ?2 AND kind = ?3",
+            "SELECT COUNT(DISTINCT e.fired_at) FROM autofix_events e \
+             LEFT JOIN session_requests r ON r.session_id = e.session_id \
+             WHERE e.session_id = ?1 AND e.head_sha = ?2 AND e.kind = ?3 \
+               AND e.fired_at > COALESCE(r.autofix_resumed_at, '')",
             params![session_id, head_sha, kind],
             |r| r.get(0),
         )?;
         Ok(u32::try_from(count).unwrap_or(u32::MAX))
     }
 
-    /// Records one wake-up of `kind` at `head_sha` covering `items`, and
-    /// remembers `summary` as the session's last trigger.
+    /// Records one wake-up of `kind` at `head_sha` covering `items` for
+    /// `binding`'s session, and remembers `summary` as its last trigger.
+    /// Nothing is recorded unless the session is still bound to that same
+    /// request with Auto-fix on and not paused (checked in the same
+    /// transaction).
     ///
     /// # Returns
     ///
     /// How many of `items` were newly recorded. `0` means another process
-    /// recorded them first, so the caller must not wake the session again
-    /// (spec SESSIONMENU R2).
+    /// recorded them first (spec SESSIONMENU R2) or the binding changed, so
+    /// the caller must not wake the session.
     ///
     /// # Errors
     ///
     /// Returns an error if a write fails; then nothing is recorded.
     pub fn record_autofix_wakeup(
         &self,
-        session_id: &str,
+        binding: &SessionRequest,
         head_sha: &str,
         kind: &str,
         items: &[String],
         summary: &str,
     ) -> Result<usize> {
+        let session_id = binding.session_id.as_str();
         let mut conn = lock_conn!(self)?;
         let tx = conn.transaction()?;
+        let current: bool = tx
+            .prepare_cached(
+                "SELECT 1 FROM session_requests WHERE session_id = ?1 AND repo = ?2 \
+                 AND number = ?3 AND forge = ?4 AND host = ?5 AND autofix = 1 \
+                 AND autofix_paused = 0",
+            )?
+            .exists(params![
+                session_id,
+                binding.repo,
+                i64::try_from(binding.number).unwrap_or(i64::MAX),
+                binding.forge,
+                binding.host
+            ])?;
+        if !current {
+            return Ok(0);
+        }
         let fired_at = Utc::now().to_rfc3339();
         let mut inserted = 0;
         for item in items {

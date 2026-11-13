@@ -19,9 +19,13 @@ use ragent_tui::open_in::{LaunchEnv, url_spec};
 mod support;
 
 fn remote(kind: RemoteKind, repo_path: &str) -> ProjectRemote {
+    let host = match kind {
+        RemoteKind::GitHub => "github.com",
+        RemoteKind::GitLab => "gitlab.example.com",
+    };
     ProjectRemote {
         kind,
-        host: "example.invalid".to_string(),
+        host: host.to_string(),
         path: repo_path.to_string(),
         url: String::new(),
         remote_name: "origin".to_string(),
@@ -107,6 +111,19 @@ fn test_autofix_parse_request_ref_numbers_and_urls() {
     assert!(
         parse_request_ref("https://github.com/acme/app/issues/3", &github).is_err(),
         "an issue URL is not a pull request"
+    );
+    let enterprise = ProjectRemote {
+        host: "github.example.com".to_string(),
+        ..remote(RemoteKind::GitHub, "acme/app")
+    };
+    assert_eq!(
+        parse_request_ref("https://github.example.com/acme/app/pull/5", &enterprise),
+        Ok(5)
+    );
+    let other_host = parse_request_ref("https://github.com/acme/app/pull/5", &enterprise);
+    assert!(
+        other_host.is_err_and(|e| e.contains("github.example.com")),
+        "a URL on another host is refused even with the same owner/repo"
     );
 }
 
@@ -324,5 +341,22 @@ async fn test_autofix_trigger_for_focused_busy_session_sets_status() {
     assert_eq!(
         app.status,
         "PR #12 auto-fix: new review comments (attempt 1/3)"
+    );
+}
+
+#[tokio::test]
+async fn test_autofix_triggers_in_one_tick_start_one_turn() {
+    let (mut app, id) = app_with_session().await;
+    // A turn was just dispatched: `cancel_flag` is set synchronously, but
+    // `is_processing` waits for `MessageStart`.
+    app.session.cancel_flag = Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        false,
+    )));
+    app.handle_event(trigger(&id, "review", "PR #12 auto-fix: review", "Second."))
+        .await;
+    assert_eq!(
+        app.session.input_queue.front().map(|q| q.text.as_str()),
+        Some("Second."),
+        "the second trigger is queued, not started alongside the first"
     );
 }

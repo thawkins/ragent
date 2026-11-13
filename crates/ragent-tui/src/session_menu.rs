@@ -92,6 +92,9 @@ pub struct SessionMenu {
     pub cursor: usize,
     /// Area painted last frame; zero-sized before the first paint.
     pub area: Rect,
+    /// First painted line when the items do not all fit on screen; kept so
+    /// the highlighted item is always visible.
+    pub scroll: usize,
     /// The open submenu, if any.
     pub submenu: Option<Box<Self>>,
 }
@@ -117,7 +120,10 @@ impl SessionMenu {
     /// The item painted at screen row `row`, if any.
     fn item_at_row(&self, row: u16) -> Option<usize> {
         let line = row.checked_sub(self.area.y + 1).map(usize::from)?;
-        self.item_at_line(line)
+        if line >= usize::from(self.area.height.saturating_sub(2)) {
+            return None;
+        }
+        self.item_at_line(line + self.scroll)
     }
 
     /// Number of painted lines inside the border.
@@ -126,6 +132,20 @@ impl SessionMenu {
             .len()
             .checked_sub(1)
             .map_or(0, |last| self.line_of(last) + 1)
+    }
+
+    /// Moves `scroll` so the highlighted item's line is among the
+    /// `visible` painted lines.
+    fn keep_cursor_visible(&mut self, visible: usize) {
+        let line = self.line_of(self.cursor);
+        if visible == 0 {
+            self.scroll = 0;
+        } else if line < self.scroll {
+            self.scroll = line;
+        } else if line >= self.scroll + visible {
+            self.scroll = line + 1 - visible;
+        }
+        self.scroll = self.scroll.min(self.line_count().saturating_sub(visible));
     }
 
     /// Whether `(column, row)` is inside the painted area.
@@ -253,6 +273,7 @@ pub fn open(app: &mut App, session_id: &str, row_y: u16) {
         items,
         cursor: 0,
         area: Rect::default(),
+        scroll: 0,
         submenu: None,
     });
 }
@@ -350,6 +371,7 @@ fn paint(frame: &mut Frame, menu: &SessionMenu, area: Rect) {
         };
         lines.push(Line::from(Span::styled(text, style)));
     }
+    let lines: Vec<Line> = lines.into_iter().skip(menu.scroll).collect();
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
@@ -371,10 +393,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
     let area = menu_area(menu, sidebar, full);
     menu.area = area;
+    menu.keep_cursor_visible(usize::from(area.height.saturating_sub(2)));
     paint(frame, menu, area);
     if let Some(sub) = menu.submenu.as_mut() {
         let sub_area = submenu_area(sub, area, full);
         sub.area = sub_area;
+        sub.keep_cursor_visible(usize::from(sub_area.height.saturating_sub(2)));
         paint(frame, sub, sub_area);
     }
 }
@@ -393,7 +417,8 @@ fn open_submenu(app: &mut App, index: usize) {
     let Some(menu) = app.sidebar.menu.as_mut() else {
         return;
     };
-    let row_y = menu.area.y + 1 + u16::try_from(menu.line_of(index)).unwrap_or(0);
+    let line = menu.line_of(index).saturating_sub(menu.scroll);
+    let row_y = menu.area.y + 1 + u16::try_from(line).unwrap_or(0);
     menu.cursor = index;
     menu.submenu = Some(Box::new(SessionMenu {
         session_id,
@@ -401,6 +426,7 @@ fn open_submenu(app: &mut App, index: usize) {
         items,
         cursor: 0,
         area: Rect::default(),
+        scroll: 0,
         submenu: None,
     }));
 }
