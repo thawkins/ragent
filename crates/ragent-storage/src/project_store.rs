@@ -15,7 +15,7 @@ use crate::project::{ProjectRemoteRow, ProjectRow, SessionCheckout, default_proj
 /// Column list matching [`project_row`].
 const PROJECT_COLUMNS: &str = "id, name, worktree, provider_id, model_id, remote_kind, \
      remote_host, remote_path, remote_url, remote_name, default_branch, remote_checked, \
-     created_at, updated_at, archived_at";
+     created_at, updated_at, archived_at, description, execution_backend";
 
 /// Maps a `projects` row selected with [`PROJECT_COLUMNS`].
 fn project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
@@ -39,6 +39,8 @@ fn project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
         worktree: row.get(2)?,
         provider_id: row.get(3)?,
         model_id: row.get(4)?,
+        description: row.get(15)?,
+        execution_backend: row.get(16)?,
         remote,
         remote_checked: row.get::<_, i64>(11)? != 0,
         created_at: row.get(12)?,
@@ -265,6 +267,71 @@ impl Storage {
         Ok(())
     }
 
+    /// Sets or clears (`None`) the description shown after the project's
+    /// name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+    pub fn set_project_description(&self, id: &str, description: Option<&str>) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "UPDATE projects SET description = ?1, updated_at = ?2 WHERE id = ?3",
+            params![description, Utc::now().to_rfc3339(), id],
+        )?;
+        Ok(())
+    }
+
+    /// Sets or clears (`None`: the global one) the execution backend kind
+    /// (`local`, `podman`, `docker`, `remote`) that sessions created in the
+    /// project from now on use. Existing sessions keep theirs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+    pub fn set_project_backend(&self, id: &str, kind: Option<&str>) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "UPDATE projects SET execution_backend = ?1, updated_at = ?2 WHERE id = ?3",
+            params![kind, Utc::now().to_rfc3339(), id],
+        )?;
+        Ok(())
+    }
+
+    /// Sets the execution backend kind session `id` uses (`/backend` on a
+    /// session that has its own); `None` returns it to the global one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+    pub fn set_session_backend(&self, id: &str, kind: Option<&str>) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "UPDATE sessions SET execution_backend = ?1 WHERE id = ?2",
+            params![kind, id],
+        )?;
+        Ok(())
+    }
+
+    /// The execution backend kind session `id` was created with, from its
+    /// project's setting; `None` means the global one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn session_backend(&self, id: &str) -> Result<Option<String>> {
+        let conn = lock_conn_read!(self)?;
+        let kind = conn
+            .query_row(
+                "SELECT execution_backend FROM sessions WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(kind)
+    }
+
     /// Records the result of remote detection: the remote, or `None` when
     /// the worktree has no recognised remote. Either way the project is
     /// marked as checked.
@@ -366,8 +433,10 @@ impl Storage {
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO sessions \
-             (id, project_id, directory, kind, branch, worktree, pr_count, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+             (id, project_id, directory, kind, branch, worktree, pr_count, created_at, updated_at, \
+              execution_backend) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, \
+              (SELECT execution_backend FROM projects WHERE id = ?2))",
             params![
                 id,
                 project_id,

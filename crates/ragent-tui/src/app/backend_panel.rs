@@ -247,6 +247,31 @@ impl App {
             self.status = "backend: unavailable".to_string();
             return;
         }
+        // A session created in a project with its own backend keeps that
+        // backend whatever the global one is, so the switch applies to it
+        // alone and the global setting is left as it is.
+        if let Some(session_id) = self.session.session_id.clone()
+            && matches!(self.storage.session_backend(&session_id), Ok(Some(_)))
+        {
+            match self.storage.set_session_backend(&session_id, Some(kind)) {
+                Ok(()) => {
+                    self.session.active_backend = kind.to_string();
+                    self.append_assistant_text(&format!(
+                        "From: /backend\n[ok] This session now runs tools on **{kind}** \
+                         (`{id}`). Its project sets its backend, so the global backend \
+                         is unchanged. The change applies to the next turn."
+                    ));
+                    self.status = format!("backend: {kind}");
+                }
+                Err(e) => {
+                    self.append_assistant_text(&format!(
+                        "From: /backend\n[warn] Failed to save the backend switch: {e}"
+                    ));
+                    self.status = "backend: error".to_string();
+                }
+            }
+            return;
+        }
         // Another session in this project may have switched the backend
         // since this one last looked: compare against the config as it is
         // now, not the cached value.

@@ -20,6 +20,7 @@ pub mod layout_teams;
 pub mod logo;
 pub mod open_in;
 pub mod panels;
+pub mod project_properties;
 pub mod research_adapter;
 pub mod research_progress;
 pub mod session_menu;

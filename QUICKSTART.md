@@ -1389,7 +1389,7 @@ row (or press `m` on it with the sidebar focused) for its menu: Open PR/MR,
 Auto-fix on/off, Open in (editor, file manager, terminal), Pin, Mark as
 unread, Rename, Fork, Move to section, Archive and Delete. Right-click a
 project heading for the project menu (New session, Open in, Rename project,
-Move up/down, Select all, Collapse/Expand all, Archive all, Delete all
+Properties, Move up/down, Select all, Collapse/Expand all, Archive all, Delete all
 sessions); with several sessions selected (`v` or `Ctrl`+click), the menu
 on one of them acts on all of them.
 
@@ -1446,6 +1446,9 @@ checkout.
 /project rename Storefront
 /project model anthropic/claude-sonnet-4-5   # model new sessions start on
 /project model current                # ...or use this session's model
+/project describe Online store         # shown after the name in the sidebar
+/project backend podman               # new sessions here run tools in podman
+/project backend global               # ...back to the global backend
 /project refresh                      # re-read the remote, refresh request counts
 /project prune                        # remove clean worktrees of archived sessions
 /project remove Storefront            # drop it from the list (files are kept)

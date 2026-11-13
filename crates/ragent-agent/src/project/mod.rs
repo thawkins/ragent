@@ -52,6 +52,9 @@ pub struct Project {
     pub archived_at: Option<String>,
 }
 
+/// Longest project description, in characters.
+pub const MAX_DESCRIPTION_CHARS: usize = 80;
+
 impl From<ProjectRow> for Project {
     fn from(row: ProjectRow) -> Self {
         let base_model = match (row.provider_id, row.model_id) {
@@ -278,6 +281,47 @@ impl ProjectManager {
         self.storage.set_project_base_model(
             project_id,
             model.map(|m| (m.provider_id.as_str(), m.model_id.as_str())),
+        )?;
+        self.changed(project_id);
+        Ok(())
+    }
+
+    /// Sets or clears the description shown after the project's name. The
+    /// text is trimmed; blank clears it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the description is longer than
+    /// [`MAX_DESCRIPTION_CHARS`] characters or storage fails.
+    pub fn set_description(&self, project_id: &str, description: Option<&str>) -> Result<()> {
+        let description = description.map(str::trim).filter(|d| !d.is_empty());
+        if let Some(text) = description {
+            anyhow::ensure!(
+                text.chars().count() <= MAX_DESCRIPTION_CHARS,
+                "a project description is at most {MAX_DESCRIPTION_CHARS} characters"
+            );
+        }
+        self.storage
+            .set_project_description(project_id, description)?;
+        self.changed(project_id);
+        Ok(())
+    }
+
+    /// Sets or clears (`None`: the global one) the execution backend that
+    /// sessions created in the project from now on use. Existing sessions
+    /// keep the backend they were created with.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if storage fails.
+    pub fn set_backend(
+        &self,
+        project_id: &str,
+        kind: Option<ragent_config::ExecutionBackendKind>,
+    ) -> Result<()> {
+        self.storage.set_project_backend(
+            project_id,
+            kind.map(ragent_config::ExecutionBackendKind::as_str),
         )?;
         self.changed(project_id);
         Ok(())

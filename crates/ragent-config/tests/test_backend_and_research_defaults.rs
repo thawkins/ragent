@@ -119,3 +119,29 @@ fn test_research_subconfig_is_default_aliases() {
     assert!(!evaluate.is_default());
     assert!(evaluate.enabled);
 }
+
+#[test]
+fn test_with_backend_kind_switches_kind_and_keeps_an_inline_descriptor() {
+    use ragent_config::ExecutionBackendKind;
+
+    let cfg = parse(r#"{ "backends": [ { "id": "box", "kind": "docker", "image": "img:2" } ] }"#);
+    let switched = cfg.with_backend_kind(ExecutionBackendKind::Docker);
+    assert_eq!(
+        switched.effective_execution_backend(),
+        ExecutionBackendKind::Docker
+    );
+    assert_eq!(
+        switched.effective_backend_config().expect("descriptor").id,
+        "box"
+    );
+    assert_eq!(
+        cfg.effective_execution_backend(),
+        ExecutionBackendKind::Local
+    );
+
+    // Already the effective kind: the inline descriptor is kept.
+    let inline =
+        parse(r#"{ "execution_backend": { "id": "own", "kind": "podman", "image": "img:3" } }"#);
+    let same = inline.with_backend_kind(ExecutionBackendKind::Podman);
+    assert_eq!(same.effective_backend_config().expect("inline").id, "own");
+}

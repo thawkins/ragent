@@ -83,6 +83,8 @@ pub enum MenuAction {
     NewSessionOnBranch,
     /// Prefill `/project rename` for the project.
     RenameProject,
+    /// Open the project's `Properties` dialog.
+    Properties,
     /// Move the project one place up in the sidebar.
     MoveUp,
     /// Move the project one place down in the sidebar.
@@ -422,6 +424,7 @@ fn project_items(app: &App, project_id: &str) -> Vec<MenuItem> {
     }
     items.extend([
         item("Rename project", Some('r'), MenuAction::RenameProject, 1),
+        item("Properties...", Some('p'), MenuAction::Properties, 1),
         item_if(up, "Move up", Some('k'), MenuAction::MoveUp, 1),
         item_if(down, "Move down", Some('j'), MenuAction::MoveDown, 1),
         item_if(
@@ -740,6 +743,7 @@ fn dispatch_project(app: &mut App, project_id: &str, action: MenuAction) -> Resu
             app,
             &format!("/project rename --project {project_id} {}", project.name),
         ),
+        MenuAction::Properties => crate::project_properties::open(app, project_id)?,
         MenuAction::MoveUp | MenuAction::MoveDown => {
             crate::sessions_sidebar::move_project(app, project_id, action == MenuAction::MoveUp);
         }
@@ -830,6 +834,7 @@ fn dispatch_selection(app: &mut App, action: MenuAction) -> Result<(), String> {
         | MenuAction::NewSession
         | MenuAction::NewSessionOnBranch
         | MenuAction::RenameProject
+        | MenuAction::Properties
         | MenuAction::MoveUp
         | MenuAction::MoveDown
         | MenuAction::SelectAll
@@ -868,6 +873,7 @@ fn dispatch_session(app: &mut App, session_id: &str, action: MenuAction) -> Resu
         MenuAction::NewSession
         | MenuAction::NewSessionOnBranch
         | MenuAction::RenameProject
+        | MenuAction::Properties
         | MenuAction::MoveUp
         | MenuAction::MoveDown
         | MenuAction::SelectAll

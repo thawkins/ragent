@@ -229,12 +229,18 @@ async fn dispatch_tool_leaf(
 ) -> anyhow::Result<crate::tool::ToolOutput> {
     let backend = tool_ctx.config.as_ref().map_or_else(
         || crate::backend::resolve_backend(ragent_config::ExecutionBackendKind::Local),
-        |config| {
-            crate::backend::resolve_backend_with_secrets(
+        |config| match session_backend_kind(tool_ctx) {
+            // The session was created in a project with its own backend.
+            Some(kind) => crate::backend::resolve_backend_with_secrets(
+                &config.with_backend_kind(kind),
+                &tool_ctx.working_dir,
+                tool_ctx.storage.clone(),
+            ),
+            None => crate::backend::resolve_backend_with_secrets(
                 config,
                 &tool_ctx.working_dir,
                 tool_ctx.storage.clone(),
-            )
+            ),
         },
     );
     backend
@@ -244,6 +250,22 @@ async fn dispatch_tool_leaf(
             ctx: tool_ctx,
         })
         .await
+}
+
+/// The execution backend kind the tool context's session was created with
+/// (its project's `Properties`), or `None` for the global one. An unknown or
+/// unreadable value reads as `None`.
+fn session_backend_kind(tool_ctx: &ToolContext) -> Option<ragent_config::ExecutionBackendKind> {
+    let storage = tool_ctx.storage.as_ref()?;
+    match storage.session_backend(&tool_ctx.session_id) {
+        Ok(label) => label
+            .as_deref()
+            .and_then(ragent_config::ExecutionBackendKind::from_label),
+        Err(e) => {
+            tracing::warn!(error = %e, "session backend not read; using the global one");
+            None
+        }
+    }
 }
 
 /// B3: dispatches a validated tool call through the permission layer.

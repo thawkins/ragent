@@ -336,6 +336,26 @@ impl App {
 
     /// Resets global UI that describes the previously focused session and
     /// moves the TUI into the focused session's directory.
+    /// Shows the focused session's execution backend on the status bar:
+    /// the one it was created with (its project's `Properties`), else the
+    /// global one.
+    pub(crate) fn refresh_active_backend(&mut self) {
+        let stored = match self.session.session_id.as_deref() {
+            Some(id) => self.storage.session_backend(id).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "session backend not read");
+                None
+            }),
+            None => None,
+        };
+        self.session.active_backend = stored.unwrap_or_else(|| {
+            self.session_processor
+                .load_config_for(&self.cwd_path)
+                .effective_execution_backend()
+                .as_str()
+                .to_string()
+        });
+    }
+
     pub(super) fn after_focus_change(&mut self) {
         self.session.unread = false;
         self.session.errored = false;
@@ -346,6 +366,7 @@ impl App {
         }
         self.sidebar.dirty = true;
         self.apply_session_directory();
+        self.refresh_active_backend();
         self.text_selection = None;
         self.scrollbar_drag = None;
         self.context_menu = None;

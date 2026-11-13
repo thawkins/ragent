@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Added - project Properties
+
+- The project heading menu has `Properties...` (`P`): a dialog that sets
+  the project's description (shown dim after its name in the sidebar,
+  `ragent (AI coding agent)`), the execution backend its new sessions use
+  (`local`, `podman`, `docker`, `remote`; unavailable ones greyed out) and
+  the model they start on. An unset value follows the global
+  configuration.
+- `/project describe [--project <id>] <text|clear>` and `/project backend
+  [--project <id>] <kind|global>`; `/project model` also takes
+  `--project <id>`.
+- Sessions record the backend they were created with
+  (`sessions.execution_backend`, schema 13; sub-agent sessions copy their
+  parent's, forks their source's), so changing a project's backend affects
+  new sessions only. The status bar shows the focused session's backend,
+  and `/backend <kind>` on such a session switches that session only.
+
 ### Fixed - project and selection menu review
 
 - A project whose directory is gone stays listed while it has sessions, so

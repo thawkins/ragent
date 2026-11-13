@@ -2161,11 +2161,34 @@ the project's menu. Greyed items cannot run now and do nothing.
 | New session on branch | `B` | Prefills `/session new --project <name> --branch <adjective>_<surname>`; same as `b`. The project is named by its stored name (quoted when it has spaces), or by its id when another project shares the name. The branch is a random name in Docker's container naming scheme (`crates/ragent-tui/src/branch_names.rs`, e.g. `focused_turing`) that is not already a local or remote branch, editable before `Enter` |
 | Open in | | Submenu: opens the project's worktree in an editor, file manager or terminal |
 | Rename project | `R` | Prefills `/project rename --project <id> <name>` |
+| Properties... | `P` | Opens the project's Properties dialog (below) |
 | Move up / Move down | `K` / `J` | Moves the project one place; the manual order is saved with the sidebar layout (`tui.sessions.sidebar`, `project_order`) and wins over the default launch-first, recency order; projects not in it follow |
 | Select all | `S` | Selects every session listed under the heading |
 | Collapse all / Expand all | `C` / `E` | Collapses or expands every section |
 | Archive all (N) | `A` | Archives the N sessions listed under the heading (pinned and sectioned ones are not listed there); a running one is skipped and reported |
 | Delete all sessions (N) | `D` | One Yes/No question (default No) for all N, then deletes them as `Delete` does |
+
+**Project Properties.** A modal dialog (`crates/ragent-tui/src/project_properties.rs`)
+with three settings; a setting left unset follows the global configuration.
+`Tab`/`Shift+Tab` (or `Up`/`Down`) move between fields, `Left`/`Right` step
+through a choice's enabled entries, `Space` opens its full list, `Enter`
+saves all three and `Esc` discards.
+
+| Field | Stored | Unset |
+|-------|--------|-------|
+| Description | `projects.description` (schema 13), up to 80 characters; shown dim after the name on the heading, `ragent (AI coding agent)`, and shortened first when the sidebar is narrow | No parentheses |
+| Backend | `projects.execution_backend` (schema 13): `local`, `podman`, `docker` or `remote`. `podman`/`docker` are greyed out without the runtime on `PATH`, `remote` without a configured URL and key | The global `execution_backend` |
+| Model | `projects.provider_id` / `model_id`: any model of a configured provider | The global model (`selected_model`) |
+
+A session copies its project's backend into `sessions.execution_backend`
+when it is created (a sub-agent session copies its parent's, a fork its
+source's), so changing the project's backend affects new sessions only.
+Tool dispatch runs a session with a stored kind on that kind, using the
+configured descriptor for it (`Config::with_backend_kind`), and the status
+bar shows it. `/backend <kind>` on such a session switches that session
+only and leaves the global backend as it is. The same settings are
+available as `/project describe`, `/project backend` and `/project model`,
+each with an optional `--project <id>`.
 
 **Selection menu.** With more than one session selected, the menu on a
 selected session acts on the selection: Pin/Unpin (`P`; Unpin only when
