@@ -28,6 +28,15 @@
 > `crates/ragent-server` +29 and `crates/ragent-types` +15. No crate or
 > binary is added; 8 test files are added.
 >
+> The `autofix_status` and `autofix_add` tools and the sidebar layout
+> change (branch `wip/next`, after PR #69 merged) are not re-measured either.
+> Against `main` they add 1,657 and remove 36 lines across 20 files:
+> `crates/ragent-agent` +1,362 (the two tools, the watcher heartbeat and
+> their tests), `crates/ragent-tui` +192 (sidebar spacer rows, permanent
+> `Pinned` heading, drag-to-pin) and `crates/ragent-storage` +60
+> (`autofix_bindings`). The registry grows from 150 to 152 tools; no crate
+> or binary is added; 2 test files are added.
+>
 > The `projects` spec (`specs/projects/PLAN.md`), added on top of the
 > multi-session work, is not re-measured in the tables below. It adds 6,879
 > and removes 198 lines across 54 files, tests included:
