@@ -856,27 +856,50 @@ impl App {
     }
 
     /// Archives every session in `ids` (the project and selection menus).
-    /// Every session is tried; a running one is skipped.
+    /// Every session is tried; a running one, or one with a running
+    /// sub-agent or teammate, is skipped.
     ///
     /// # Errors
     ///
     /// Returns a message naming how many could not be archived, and the
     /// first reason.
     pub(crate) fn archive_sessions_by_id(&mut self, ids: &[String]) -> Result<(), String> {
+        self.for_each_session(ids, "archived", |app, id| {
+            // A running sub-agent or teammate would keep writing into an
+            // archived tree, as it would into a deleted one.
+            let tree = app
+                .storage
+                .session_tree_ids(id)
+                .map_err(|e| e.to_string())?;
+            app.check_tree_idle(id, &tree)?;
+            app.archive_session_by_id(id)
+        })
+    }
+
+    /// Runs `action` on every session in `ids` (the project and selection
+    /// menus), trying each one, and puts `<verb> N session(s)` on the status
+    /// line.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming how many failed, and the first reason.
+    pub(crate) fn for_each_session(
+        &mut self,
+        ids: &[String],
+        verb: &str,
+        mut action: impl FnMut(&mut Self, &str) -> Result<(), String>,
+    ) -> Result<(), String> {
         let mut failed: Vec<String> = Vec::new();
         for id in ids {
-            if let Err(e) = self.archive_session_by_id(id) {
+            if let Err(e) = action(self, id) {
                 failed.push(e);
             }
         }
         let done = ids.len() - failed.len();
-        self.status = format!("archived {done} session(s)");
+        self.status = format!("{verb} {done} session(s)");
         match failed.first() {
             None => Ok(()),
-            Some(first) => Err(format!(
-                "archived {done}, {} not archived: {first}",
-                failed.len()
-            )),
+            Some(first) => Err(format!("{verb} {done}, {} failed: {first}", failed.len())),
         }
     }
 
@@ -1093,23 +1116,35 @@ impl App {
             .any(|v| v.session_id.as_deref() == Some(id) && v.is_processing)
     }
 
-    /// Whether session `id` carries the unread mark: stored, or set on its
-    /// open view. Unlike the sidebar's attention marker this is not masked
-    /// by a waiting, running or failed state.
+    /// Ids of the sessions that carry the unread mark: stored, or set on
+    /// their open view. Unlike the sidebar's attention marker this is not
+    /// masked by a waiting, running or failed state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when storage cannot be read.
+    pub(crate) fn unread_marks(&self) -> Result<std::collections::HashSet<String>, String> {
+        let mut marks = self
+            .storage
+            .unread_session_ids()
+            .map_err(|e| e.to_string())?;
+        marks.extend(
+            std::iter::once(&self.session)
+                .chain(self.background.iter())
+                .filter(|v| v.unread)
+                .filter_map(|v| v.session_id.clone()),
+        );
+        Ok(marks)
+    }
+
+    /// Whether session `id` carries the unread mark (see
+    /// [`App::unread_marks`]).
     ///
     /// # Errors
     ///
     /// Returns a message when storage cannot be read.
     pub(crate) fn session_unread(&self, id: &str) -> Result<bool, String> {
-        let stored = self
-            .storage
-            .unread_session_ids()
-            .map_err(|e| e.to_string())?
-            .contains(id);
-        let open_unread = std::iter::once(&self.session)
-            .chain(self.background.iter())
-            .any(|v| v.session_id.as_deref() == Some(id) && v.unread);
-        Ok(stored || open_unread)
+        Ok(self.unread_marks()?.contains(id))
     }
 
     /// Marks session `id` unread, or read when it is unread (SESSIONMENU
@@ -1120,6 +1155,16 @@ impl App {
     /// Returns a message when storage cannot be read or updated.
     pub(crate) fn toggle_session_unread(&mut self, id: &str) -> Result<(), String> {
         let unread = !self.session_unread(id)?;
+        self.set_session_unread_mark(id, unread)
+    }
+
+    /// Sets session `id`'s unread mark to `unread`: stored, and copied to
+    /// the session's open view.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when storage cannot be updated.
+    pub(crate) fn set_session_unread_mark(&mut self, id: &str, unread: bool) -> Result<(), String> {
         self.storage
             .set_session_unread(id, unread)
             .map_err(|e| e.to_string())?;
@@ -1215,6 +1260,9 @@ impl App {
                 .session_tree_ids(id)
                 .map_err(|e| e.to_string())?;
             self.check_tree_idle(id, &tree)?;
+            if tree.is_empty() {
+                return Err(format!("session not found: {id}"));
+            }
         }
         self.open_row_action(crate::app::RowAction::DeleteSessions {
             session_ids: ids,
@@ -1231,21 +1279,7 @@ impl App {
     /// Returns a message naming how many could not be deleted, and the
     /// first reason.
     pub(crate) fn delete_sessions_by_id(&mut self, ids: &[String]) -> Result<(), String> {
-        let mut failed: Vec<String> = Vec::new();
-        for id in ids {
-            if let Err(e) = self.delete_session_by_id(id) {
-                failed.push(e);
-            }
-        }
-        let done = ids.len() - failed.len();
-        self.status = format!("deleted {done} session(s)");
-        match failed.first() {
-            None => Ok(()),
-            Some(first) => Err(format!(
-                "deleted {done}, {} not deleted: {first}",
-                failed.len()
-            )),
-        }
+        self.for_each_session(ids, "deleted", Self::delete_session_by_id)
     }
 
     /// Refuses deleting session `id` while it, or any session in its `tree`

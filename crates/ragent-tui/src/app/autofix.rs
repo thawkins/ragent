@@ -96,7 +96,7 @@ fn host_name(host: &str) -> &str {
 }
 
 /// `PR #12` / `MR !5` for a stored binding.
-fn label_of(request: &SessionRequest) -> String {
+pub(crate) fn label_of(request: &SessionRequest) -> String {
     let noun = RemoteKind::parse(&request.forge).map_or(
         ragent_agent::project::RequestNoun {
             short: "request",

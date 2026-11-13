@@ -407,6 +407,24 @@ impl App {
         self.last_request_sweep = Some(Instant::now());
         self.spawn_remote_check();
         self.spawn_request_refresh(None);
+        self.spawn_history_refresh();
+    }
+
+    /// Refreshes, off the UI thread, the state of every request still
+    /// recorded as open in a session's PR/MR history, so the `PR/MRs`
+    /// submenu shows `[merged]` / `[closed]` without Auto-fix. The service
+    /// runs it at most once per interval.
+    fn spawn_history_refresh(&self) {
+        if !self.request_counts.is_due_history() {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let service = Arc::clone(&self.request_counts);
+        runtime.spawn(async move {
+            service.refresh_request_history().await;
+        });
     }
 
     /// Detects, off the UI thread, the remote of every project never
@@ -664,15 +682,16 @@ impl App {
             "rename" => {
                 // `--project <id> <name>` renames a listed project (the
                 // sidebar's project menu); otherwise the focused one.
-                let target = match rest.strip_prefix("--project ") {
-                    Some(tail) => tail
+                let target = match rest.strip_prefix("--project") {
+                    // A bare `--project` is a usage error, not a new name.
+                    Some(tail) if tail.is_empty() || tail.starts_with(char::is_whitespace) => tail
                         .trim_start()
                         .split_once(char::is_whitespace)
                         .map(|(id, name)| (Some(id), name.trim()))
                         .ok_or_else(|| {
                             "usage: /project rename [--project <id>] <name>".to_string()
                         }),
-                    None => Ok((None, rest)),
+                    Some(_) | None => Ok((None, rest)),
                 };
                 target.and_then(|(id, name)| {
                     let project = match id {

@@ -268,3 +268,18 @@ pub fn random_branch_name() -> String {
         }
     }
 }
+
+/// A random name (see [`random_branch_name`]) for which `taken` is false,
+/// so a new session never lands on a branch that already exists.
+///
+/// # Arguments
+///
+/// * `taken` - whether a branch of that name already exists.
+pub fn unused_branch_name(taken: impl Fn(&str) -> bool) -> String {
+    loop {
+        let name = random_branch_name();
+        if !taken(&name) {
+            return name;
+        }
+    }
+}

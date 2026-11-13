@@ -2191,8 +2191,10 @@ impl Storage {
     /// assert_eq!(storage.session_request("s").unwrap(), Some(request));
     /// ```
     pub fn set_session_request(&self, request: &SessionRequest) -> Result<()> {
-        let conn = lock_conn!(self)?;
-        conn.execute(
+        let mut conn = lock_conn!(self)?;
+        // The binding and its history row are written together.
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO session_requests \
              (session_id, forge, host, repo, number, title, web_url, head_branch, state, \
               updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
@@ -2218,7 +2220,7 @@ impl Storage {
                 Utc::now().to_rfc3339()
             ],
         )?;
-        conn.execute(
+        tx.execute(
             "INSERT INTO session_request_history \
              (session_id, forge, host, repo, number, title, web_url, head_branch, state, \
               first_seen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
@@ -2238,6 +2240,7 @@ impl Storage {
                 Utc::now().to_rfc3339()
             ],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -2256,21 +2259,66 @@ impl Storage {
              ORDER BY first_seen_at DESC, number DESC",
         )?;
         let rows = stmt
-            .query_map(params![session_id], |r| {
-                Ok(SessionRequest {
-                    session_id: r.get(0)?,
-                    forge: r.get(1)?,
-                    host: r.get(2)?,
-                    repo: r.get(3)?,
-                    number: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
-                    title: r.get(5)?,
-                    web_url: r.get(6)?,
-                    head_branch: r.get(7)?,
-                    state: r.get(8)?,
-                })
-            })?
+            .query_map(params![session_id], session_request_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
+    }
+
+    /// One history row per pull/merge request still recorded as `open` in a
+    /// live (not archived) session, so its state can be refreshed. The
+    /// `session_id` is any one session that had it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn open_request_history(&self) -> Result<Vec<SessionRequest>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT MIN(h.session_id), h.forge, h.host, h.repo, h.number, MAX(h.title), \
+             MAX(h.web_url), MAX(h.head_branch), h.state FROM session_request_history h \
+             JOIN sessions s ON s.id = h.session_id \
+             WHERE h.state = 'open' AND s.archived_at IS NULL \
+             GROUP BY h.forge, h.host, h.repo, h.number \
+             ORDER BY h.host, h.repo, h.number",
+        )?;
+        let rows = stmt
+            .query_map([], session_request_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Records the current `state` and `title` of request `number` of
+    /// `repo` on `host` in every session's history.
+    ///
+    /// # Returns
+    ///
+    /// The number of history rows that changed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn set_request_history_state(
+        &self,
+        host: &str,
+        repo: &str,
+        number: u64,
+        state: &str,
+        title: &str,
+    ) -> Result<usize> {
+        let conn = lock_conn!(self)?;
+        let changed = conn.execute(
+            "UPDATE session_request_history SET state = ?4, title = ?5 \
+             WHERE host = ?1 AND repo = ?2 AND number = ?3 \
+               AND (state <> ?4 OR title <> ?5)",
+            params![
+                host,
+                repo,
+                i64::try_from(number).unwrap_or(i64::MAX),
+                state,
+                title
+            ],
+        )?;
+        Ok(changed)
     }
 
     /// How many pull/merge requests each session has had (see
@@ -2307,19 +2355,7 @@ impl Storage {
                 "SELECT session_id, forge, host, repo, number, title, web_url, head_branch, \
                  state FROM session_requests WHERE session_id = ?1",
                 params![session_id],
-                |r| {
-                    Ok(SessionRequest {
-                        session_id: r.get(0)?,
-                        forge: r.get(1)?,
-                        host: r.get(2)?,
-                        repo: r.get(3)?,
-                        number: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
-                        title: r.get(5)?,
-                        web_url: r.get(6)?,
-                        head_branch: r.get(7)?,
-                        state: r.get(8)?,
-                    })
-                },
+                session_request_from_row,
             )
             .optional()?;
         Ok(row)
@@ -2479,19 +2515,7 @@ impl Storage {
              ORDER BY r.session_id",
         )?;
         let rows = stmt
-            .query_map([], |r| {
-                Ok(SessionRequest {
-                    session_id: r.get(0)?,
-                    forge: r.get(1)?,
-                    host: r.get(2)?,
-                    repo: r.get(3)?,
-                    number: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
-                    title: r.get(5)?,
-                    web_url: r.get(6)?,
-                    head_branch: r.get(7)?,
-                    state: r.get(8)?,
-                })
-            })?
+            .query_map([], session_request_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -2579,20 +2603,9 @@ impl Storage {
         title: &str,
         head_sha: &str,
     ) -> Result<bool> {
-        let conn = lock_conn!(self)?;
-        conn.execute(
-            "UPDATE session_request_history SET state = ?2, title = ?3 \
-             WHERE session_id = ?1 AND repo = ?4 AND number = ?5 AND host = ?6",
-            params![
-                binding.session_id,
-                state,
-                title,
-                binding.repo,
-                i64::try_from(binding.number).unwrap_or(i64::MAX),
-                binding.host
-            ],
-        )?;
-        let changed = conn.execute(
+        let mut conn = lock_conn!(self)?;
+        let tx = conn.transaction()?;
+        let changed = tx.execute(
             "UPDATE session_requests SET state = ?2, title = ?3, head_sha = ?4, \
              last_polled_at = ?5 WHERE session_id = ?1 AND repo = ?6 AND number = ?7 \
              AND forge = ?8 AND host = ?9 AND autofix = 1 AND autofix_paused = 0",
@@ -2608,6 +2621,22 @@ impl Storage {
                 binding.host
             ],
         )?;
+        // The history row follows only a poll that was kept.
+        if changed > 0 {
+            tx.execute(
+                "UPDATE session_request_history SET state = ?2, title = ?3 \
+                 WHERE session_id = ?1 AND repo = ?4 AND number = ?5 AND host = ?6",
+                params![
+                    binding.session_id,
+                    state,
+                    title,
+                    binding.repo,
+                    i64::try_from(binding.number).unwrap_or(i64::MAX),
+                    binding.host
+                ],
+            )?;
+        }
+        tx.commit()?;
         Ok(changed > 0)
     }
 
@@ -6299,6 +6328,23 @@ impl SessionKind {
             _ => Self::Interactive,
         }
     }
+}
+
+/// Maps a request row selected as `session_id, forge, host, repo, number,
+/// title, web_url, head_branch, state` (from `session_requests` or
+/// `session_request_history`).
+fn session_request_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRequest> {
+    Ok(SessionRequest {
+        session_id: r.get(0)?,
+        forge: r.get(1)?,
+        host: r.get(2)?,
+        repo: r.get(3)?,
+        number: u64::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
+        title: r.get(5)?,
+        web_url: r.get(6)?,
+        head_branch: r.get(7)?,
+        state: r.get(8)?,
+    })
 }
 
 /// Maps a full session row (schema with `format_version`).

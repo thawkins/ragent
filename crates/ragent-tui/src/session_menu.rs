@@ -277,13 +277,8 @@ fn request_items(app: &App, target: &MenuTarget) -> Vec<MenuItem> {
     history
         .iter()
         .map(|r| {
-            let (short, sigil) =
-                ragent_agent::project::RemoteKind::parse(&r.forge).map_or(("#", '#'), |kind| {
-                    let noun = kind.noun();
-                    (noun.short, noun.sigil)
-                });
-            let title: String = r.title.chars().take(REQUEST_TITLE_WIDTH).collect();
-            let label = format!("{short} {sigil}{} [{}] {title}", r.number, r.state);
+            let title = crate::sessions_sidebar::fit(&r.title, REQUEST_TITLE_WIDTH);
+            let label = format!("{} [{}] {title}", crate::app::autofix::label_of(r), r.state);
             item(&label, None, MenuAction::OpenUrl(r.web_url.clone()), 0)
         })
         .collect()
@@ -489,9 +484,15 @@ pub fn open_project(app: &mut App, project_id: &str, row_y: u16) {
 /// Whether session `id` carries the unread mark, the state `Mark as
 /// unread` / `Mark as read` toggles. A storage failure reads as not unread.
 fn is_unread(app: &App, id: &str) -> bool {
-    app.session_unread(id).unwrap_or_else(|e| {
+    unread_marks(app).contains(id)
+}
+
+/// Ids of the sessions carrying the unread mark, read once. A storage
+/// failure reads as none.
+fn unread_marks(app: &App) -> std::collections::HashSet<String> {
+    app.unread_marks().unwrap_or_else(|e| {
         tracing::warn!(error = %e, "unread marks not read");
-        false
+        std::collections::HashSet::new()
     })
 }
 
@@ -499,10 +500,11 @@ fn is_unread(app: &App, id: &str) -> bool {
 /// apply to every selected session unless all already have that state, in
 /// which case they read `Unpin` and `Mark as read`.
 fn selection_items(app: &App) -> Vec<MenuItem> {
-    let selected = &app.sidebar.selected;
+    let selected = crate::sessions_sidebar::selected_ids(app);
     let n = selected.len();
     let all_pinned = selected.iter().all(|id| app.sidebar.pinned.contains(id));
-    let all_unread = selected.iter().all(|id| is_unread(app, id));
+    let marks = unread_marks(app);
+    let all_unread = selected.iter().all(|id| marks.contains(id));
     vec![
         item(
             &format!("{} ({n})", if all_pinned { "Unpin" } else { "Pin" }),
@@ -729,15 +731,12 @@ fn dispatch_project(app: &mut App, project_id: &str, action: MenuAction) -> Resu
         .ok_or_else(|| "that project is no longer listed".to_string())?;
     let listed = || crate::sessions_sidebar::project_session_ids(app, project_id);
     match action {
-        MenuAction::NewSession => {
-            app.open_new_session_in_project(&project.into(), None)?;
-            app.sidebar.focused = false;
-        }
+        MenuAction::NewSession => crate::sessions_sidebar::new_session_in(app, project)?,
         MenuAction::NewSessionOnBranch => {
             let text = crate::sessions_sidebar::branch_session_command(app, &project);
-            prefill(app, &text);
+            crate::sessions_sidebar::prefill_input(app, &text);
         }
-        MenuAction::RenameProject => prefill(
+        MenuAction::RenameProject => crate::sessions_sidebar::prefill_input(
             app,
             &format!("/project rename --project {project_id} {}", project.name),
         ),
@@ -780,37 +779,40 @@ fn dispatch_project(app: &mut App, project_id: &str, action: MenuAction) -> Resu
     Ok(())
 }
 
-/// Runs a selection menu `action` on every selected session.
+/// Runs a selection menu `action` on every selected session the sidebar
+/// lists. Every session is tried; the status line counts the ones done.
 fn dispatch_selection(app: &mut App, action: MenuAction) -> Result<(), String> {
-    let ids: Vec<String> = app.sidebar.selected.iter().cloned().collect();
-    let n = ids.len();
+    let ids = crate::sessions_sidebar::selected_ids(app);
     match action {
         MenuAction::TogglePin => {
             let pin = !ids.iter().all(|id| app.sidebar.pinned.contains(id));
-            for id in &ids {
-                if app.sidebar.pinned.contains(id) != pin {
-                    app.toggle_session_pin(id)?;
+            let verb = if pin { "pinned" } else { "unpinned" };
+            app.for_each_session(&ids, verb, |app, id| {
+                if app.sidebar.pinned.contains(id) == pin {
+                    return Ok(());
                 }
-            }
-            app.status = format!("{n} session(s) {}", if pin { "pinned" } else { "unpinned" });
+                app.toggle_session_pin(id)
+            })?;
         }
         MenuAction::ToggleUnread => {
-            let unread = !ids.iter().all(|id| is_unread(app, id));
-            for id in &ids {
-                if is_unread(app, id) != unread {
-                    app.toggle_session_unread(id)?;
+            let marks = unread_marks(app);
+            let unread = !ids.iter().all(|id| marks.contains(id));
+            let verb = if unread {
+                "marked unread"
+            } else {
+                "marked read"
+            };
+            app.for_each_session(&ids, verb, |app, id| {
+                if marks.contains(id) == unread {
+                    return Ok(());
                 }
-            }
-            app.status = format!(
-                "{n} session(s) marked {}",
-                if unread { "unread" } else { "read" }
-            );
+                app.set_session_unread_mark(id, unread)
+            })?;
         }
         MenuAction::MoveToSection(section) => {
-            for id in &ids {
-                app.move_session_to_section(id, section.as_deref())?;
-            }
-            app.status = format!("{n} session(s) moved");
+            app.for_each_session(&ids, "moved", |app, id| {
+                app.move_session_to_section(id, section.as_deref())
+            })?;
         }
         MenuAction::ClearSelection => app.sidebar.selected.clear(),
         MenuAction::Archive => app.archive_sessions_by_id(&ids)?,
@@ -835,14 +837,6 @@ fn dispatch_selection(app: &mut App, action: MenuAction) -> Result<(), String> {
         | MenuAction::ExpandAll => {}
     }
     Ok(())
-}
-
-/// Puts `text` in the input with the cursor at its end and returns focus
-/// to the input.
-fn prefill(app: &mut App, text: &str) {
-    app.session.input_cursor = text.chars().count();
-    app.session.input = text.to_string();
-    app.sidebar.focused = false;
 }
 
 /// Runs a session menu `action` on `session_id`.
