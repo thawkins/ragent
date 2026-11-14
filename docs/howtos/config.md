@@ -29,6 +29,7 @@ the project root `README.md` and the **Tutorial** in
    - 7.6  [`command`](#76-command)
    - 7.7  [`mcp`](#77-mcp)
    - 7.8  [`instructions`](#78-instructions)
+   - 7.8a [`response_language`](#78a-response_language)
    - 7.9  [`skill_dirs`](#79-skill_dirs)
    - 7.10 [`experimental`](#710-experimental)
    - 7.11 [`hooks`](#711-hooks)
@@ -193,6 +194,7 @@ provider entry (`thinking`, `env`, `models`) still merges.
 | `provider` | Deep merge per provider key: provider-level `api`, `env`, `thinking`, and `options` are replaced when the overlay specifies them, while `models` entries are merged per-model-id so a partial overlay (e.g. `provider.openrouter.models."anthropic/claude-sonnet-4".thinking`) does not discard lower-layer fields such as `name` or `capabilities`. Model-level `thinking` overrides provider-level `thinking`. |
 | `agent`, `command`, `mcp` | Per-key overlay replaces base entry. |
 | `permission`, `instructions`, `skill_dirs`, `hooks` | Append (union). |
+| `response_language` | Overlay overrides base when `Some` (a value, not additive). |
 | `bash.allowlist`, `bash.denylist` | Union (deduplicated). |
 | `prices` | Per-model last-wins (overlay entry replaces base entry for the same model id). |
 | `code_index` | Overlay wins **only** for explicitly-set fields. The `specified` flags are propagated so the value survives a reload. |
@@ -657,6 +659,32 @@ Additional instruction strings appended to agent system prompts.
 
 Type: `Vec<String>`. Default: `[]`. These are appended to every agent's system
 prompt, merged (union) across config layers.
+
+---
+
+### 7.8a `response_language`
+
+The language the model must answer in, e.g. `"English"`.
+
+```json
+{
+  "response_language": "English"
+}
+```
+
+Type: `Option<String>`. Default: unset (no section is emitted, so the model's
+own default applies). A project-level value overrides the global one.
+
+This is the fix for models that drift into another language. DeepSeek models in
+particular are trained predominantly on Chinese data and default to Chinese
+whenever the prompt carries no explicit constraint, and a correction typed into
+the conversation is lost at the next compaction. Because the system prompt is
+rebuilt from config on every step, a section there survives compaction.
+
+The section is emitted **last**, after every other instruction, and states that
+it outranks tool output, source material, earlier turns and compacted summaries.
+It reaches tool-free single-step agents too, which take the early return that
+skips project context. A blank or whitespace-only value is treated as unset.
 
 ---
 

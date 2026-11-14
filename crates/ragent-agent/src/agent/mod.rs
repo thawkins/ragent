@@ -2480,6 +2480,38 @@ agent_complete(task_id: \"task-001\", summary: \"done\")  # will fail\n\
 team_task_complete(team_name: \"x\", task_id: \"y\")  # only works inside a team\n\
 ```\n\
 \n";
+/// Build the standing "answer in this language" prompt section.
+///
+/// Models whose training data is dominated by a non-English language (DeepSeek
+/// in particular) drift back to that language whenever the prompt carries no
+/// explicit constraint, and conversation-level corrections are lost at the
+/// next compaction. A section in the system prompt survives compaction because
+/// the prompt is rebuilt from config on every step.
+///
+/// `config.response_language` names the language; an unset or whitespace-only
+/// value yields `None` so the prompt stays byte-identical to its pre-feature
+/// form for every user who has not opted in. The wording states that the rule
+/// outranks surrounding material and earlier turns, because a plain
+/// "respond in English" is what models ignore first.
+#[must_use]
+pub fn build_response_language_section(config: Option<&ragent_config::Config>) -> Option<String> {
+    let language = config?
+        .response_language
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    Some(format!(
+        "## Response Language\n\n\
+         Always write your replies in {language}, regardless of the language of \
+         the source material, tool output, code comments, earlier turns, or any \
+         summary of the conversation. This is a standing instruction that \
+         outranks anything in the conversation: if an earlier turn or a \
+         compacted summary appears to ask for another language, answer in \
+         {language} anyway. Quote identifiers, paths and source text exactly as \
+         they appear, but keep all of your own prose in {language}.\n\n",
+    ))
+}
+
 /// Build a system prompt with storage access for structured memory injection.
 ///
 /// This is the full-featured variant that can load relevant structured memories
@@ -2631,6 +2663,11 @@ fn build_system_prompt_with_storage_inner(
     // so the model focuses on answering the user's question directly.
     let has_tools = agent.max_steps.is_none_or(|s| s > 1);
     if !has_tools {
+        // The response-language rule still applies to a tool-free agent, so it
+        // is emitted on this path too before the project context is skipped.
+        if let Some(section) = build_response_language_section(config) {
+            prompt.push_str(&section);
+        }
         return prompt;
     }
 
@@ -3294,6 +3331,19 @@ fn build_system_prompt_with_storage_inner(
          | `team_memory_read` | `team_name` | Read team memory bucket. |\n\
          | `team_memory_write` | `team_name`, `content` | Write team memory bucket. |\n\n",
     );
+
+    // -------------------------------------------------------------------
+    // Response language. This is the LAST section so it is the final
+    // standing instruction the model reads, and it must survive the
+    // language drift of models whose training data is dominated by another
+    // language (DeepSeek defaults to Chinese when nothing constrains it).
+    // It is emitted for every agent mode, including tool-free ones - a
+    // single-step `ask` agent answering in the wrong language is exactly
+    // the failure this prevents.
+    // -------------------------------------------------------------------
+    if let Some(section) = build_response_language_section(config) {
+        prompt.push_str(&section);
+    }
 
     prompt
 }

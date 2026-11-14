@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added - response language directive
+
+- `agent.response_language` (e.g. `"English"`) injects a `## Response Language`
+  section as the **last** standing instruction in the system prompt. Models
+  whose training data is dominated by another language drift back to it when
+  the prompt carries no explicit constraint (DeepSeek defaults to Chinese), and
+  a conversation-level correction is lost at the next compaction; a system
+  prompt section survives because the prompt is rebuilt from config on every
+  step. The wording states the rule outranks tool output, earlier turns and
+  compacted summaries. Unset or blank emits nothing, so existing prompts stay
+  byte-identical, and the section reaches tool-free single-step agents too.
+  A project-level value overrides the global one.
+
 ## [1.0.169] - 2026-11-13
 
 Projects, session menus and PR/MR Auto-fix release.

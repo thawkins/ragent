@@ -574,6 +574,8 @@ mod test_task_registry_snapshot;
 #[path = "test_task_status_transitions.rs"]
 mod test_task_status_transitions;
 
+#[path = "test_response_language.rs"]
+mod test_response_language;
 #[path = "test_task_complete_parks_idle.rs"]
 mod test_task_complete_parks_idle;
 #[path = "test_task_tool_family_prompts.rs"]

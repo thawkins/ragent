@@ -59,6 +59,8 @@ mod test_dir_lists_runtime;
 
 #[path = "test_dirs_merge.rs"]
 mod test_dirs_merge;
+#[path = "test_response_language_config.rs"]
+mod test_response_language_config;
 
 #[path = "test_edit_log_and_gcf_toggles.rs"]
 mod test_edit_log_and_gcf_toggles;
