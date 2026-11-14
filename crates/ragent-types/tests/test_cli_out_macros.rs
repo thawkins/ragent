@@ -168,7 +168,21 @@ fn test_macros_do_not_panic_when_stdout_and_stderr_are_closed() {
         "the --exact filter must select exactly one test (the probe)\n\
          stdout: {stdout}\nstderr: {stderr}"
     );
+    // The marker proves the body *started*; this proves it *finished*. The probe
+    // rewrites the marker once every macro has run, so a body that was filtered
+    // out, or that panicked on a closed stream, leaves the initial content and
+    // fails here - which is what catches a filter that names a different
+    // registered module, since such a filter exits successfully having run
+    // nothing.
+    assert_eq!(
+        std::fs::read(&marker).expect("probe marker readable"),
+        PROBE_FINISHED.as_bytes(),
+        "the probe must drive every macro to completion before finishing"
+    );
 }
+
+/// The marker content the probe writes once it has driven every macro.
+const PROBE_FINISHED: &str = "ran: macros drove the closed streams";
 
 /// The number preceding `label` in the harness's output, if it wrote one.
 ///
@@ -227,7 +241,7 @@ fn test_macro_output_probe() {
     if let Some(parent) = marker.parent() {
         let _ = std::fs::create_dir_all(parent); // INTENTIONAL: best-effort, the create below is the assertion
     }
-    std::fs::write(&marker, b"ran").expect("probe marker");
+    std::fs::write(&marker, b"started").expect("probe marker");
 
     // Closing fd 1 and 2 is only meaningful on Unix; elsewhere the probe body
     // is a no-op and the parent's assertion still holds (the macros are
@@ -269,4 +283,9 @@ fn test_macro_output_probe() {
         format_args!("io stderr"),
         false
     ));
+
+    // Every macro returned, so record completion: the marker is the parent's
+    // only evidence that the body ran through, because its streams are closed by
+    // now.
+    std::fs::write(&marker, PROBE_FINISHED.as_bytes()).expect("probe marker");
 }

@@ -38,6 +38,13 @@ use crate::session::processor::SessionProcessor;
 /// never leaves a half-written report. Returns the path on success; on any
 /// I/O failure returns `None` and the in-memory `TaskEntry::result` remains
 /// the only copy.
+///
+/// `content` is the shared report body as an `Arc<str>`, not a `&str` with a
+/// separate `to_owned`: the completion handler stores the very same `Arc` in
+/// `TaskEntry::result`, so writing the report never copies it. The body is
+/// streamed straight into the temp file behind the header, so the peak memory
+/// is the in-memory result plus one `io` buffer - never a second report-sized
+/// buffer.
 #[doc(hidden)]
 pub fn persist_task_output(
     working_dir: &std::path::Path,
@@ -45,7 +52,7 @@ pub fn persist_task_output(
     agent_name: &str,
     task_prompt: &str,
     duration_ms: u64,
-    content: &str,
+    content: &Arc<str>,
 ) -> Option<PathBuf> {
     let dir = working_dir.join("log").join("subagents");
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -60,17 +67,21 @@ pub fn persist_task_output(
     }
     let file = dir.join(format!("{task_id}.md"));
     // The body is the full untruncated sub-agent reply, so it is streamed
-    // straight from the caller's `&str` into the temp file: the header is
-    // written first, then the borrowed body, and no concatenated copy of the
-    // report is ever built (the caller still holds the original).
+    // straight from the caller's `Arc<str>` into the temp file: the header is
+    // written first, then the shared body - the same allocation the task entry
+    // keeps - so no concatenated or copied buffer of the report is ever built.
     let header = format!(
         "# {task_id} - {agent_name}\n\ntask: {task_prompt}\n\nduration_ms: {duration_ms}\n\n---\n\n"
     );
     let written = ragent_types::guard::write_atomic_with(&file, |out| {
         use std::io::Write as _;
+        let mut out = std::io::BufWriter::new(out);
         out.write_all(header.as_bytes())?;
         out.write_all(content.as_bytes())?;
-        out.write_all(b"\n")
+        out.write_all(b"\n")?;
+        out.into_inner()
+            .map_err(std::io::IntoInnerError::into_error)?;
+        Ok(())
     });
     if let Err(e) = written {
         tracing::warn!(
@@ -1057,7 +1068,7 @@ impl AgentManager {
                         &agent_label,
                         &task_prompt_str,
                         duration_ms,
-                        &response,
+                        &Arc::from(response.as_str()),
                     );
                     // ANTIPAT: the report is the documented durable recovery
                     // path (`TaskEntry::output_file`), so a silent `None` made

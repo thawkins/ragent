@@ -88,6 +88,18 @@ pub fn read_version(vault_root: &Path) -> Result<u32> {
     })
 }
 
+/// The exact bytes a ledger recording `version` holds: the bare version number
+/// and a newline, which is what [`read_version`] trims and parses.
+///
+/// The migration loop is the only writer of the ledger, so a test can assert the
+/// format from here without reproducing the write by hand - a hand-rolled copy
+/// would keep passing if the loop stopped writing the ledger or changed what it
+/// writes.
+#[must_use]
+pub fn ledger_bytes(version: u32) -> String {
+    format!("{version}\n")
+}
+
 /// Bring the vault up to [`current_version`].
 ///
 /// # Errors
@@ -110,7 +122,7 @@ pub fn apply_pending(vault_root: &Path) -> Result<u32> {
         // replays.
         version += 1;
         let path = vault_root.join(MIGRATIONS_FILE);
-        std::fs::write(&path, format!("{version}\n")).map_err(|err| Error::io(&path, err))?;
+        std::fs::write(&path, ledger_bytes(version)).map_err(|err| Error::io(&path, err))?;
     }
 
     Ok(version)

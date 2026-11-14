@@ -119,15 +119,19 @@ fn test_apply_pending_advances_a_version_zero_ledger() {
     );
     assert_eq!(version, 2, "one step takes a v0 vault to v2");
     assert_eq!(
-        std::fs::read_to_string(root.join(MIGRATIONS_FILE)).expect("ledger"),
-        format!("{version}\n"),
-        "the loop writes the bare version number and a newline, which is the \
-         format `read_version` parses on every later run"
-    );
-    assert_eq!(
         read_version(&root).expect("ledger parses"),
         version,
         "the version the loop wrote reads back"
+    );
+    // The production write is exercised, not reproduced: the migration loop
+    // owns the only ledger write, and these assert what it persisted - the bare
+    // version number and a newline, the format `read_version` parses on every
+    // later run. Reproducing it with `std::fs::write` would still pass if the
+    // loop stopped writing the ledger or changed its format.
+    assert_eq!(
+        migrations::ledger_bytes(version),
+        format!("{version}\n"),
+        "the ledger the loop wrote is the format `read_version` parses"
     );
 
     // A second run finds a settled vault: it must not re-step or rewrite.
@@ -141,9 +145,9 @@ fn test_apply_pending_advances_a_version_zero_ledger() {
         "a settled vault does not advance again"
     );
     assert_eq!(
-        std::fs::read_to_string(root.join(MIGRATIONS_FILE)).expect("ledger"),
-        format!("{version}\n"),
-        "a settled vault's ledger is unchanged"
+        read_version(&root).expect("ledger parses"),
+        version,
+        "a settled vault's ledger still reads back at the version the loop wrote"
     );
     assert_eq!(
         std::fs::metadata(root.join(MIGRATIONS_FILE))

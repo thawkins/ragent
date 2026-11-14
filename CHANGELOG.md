@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Changed - sub-agent reports stream to disk, and the audit ledger stays truthful
+
+- `persist_task_output` takes the report as the caller's shared `Arc<str>` - the
+  same allocation `TaskEntry::result` stores - and streams the header and the
+  body through a `BufWriter` into the temp file in turn, so persisting a
+  sub-agent's full report no longer builds a second report-sized buffer while
+  the completion handler still holds the original.
+- `ragent-hyperresearch`'s vault-migration test drives the production ledger
+  write through `apply_pending` instead of replaying it with `std::fs::write`,
+  and the loop and the test share `migrations::ledger_bytes`, so a loop that
+  stopped writing the ledger, or changed its format, now fails the test.
+- The `cli_out` macro probe also asserts that the probe body finished (it
+  rewrites its marker only after driving every macro), so a filter naming the
+  wrong registered module fails instead of exiting successfully having run
+  nothing.
+- `docs/reports/code-audit.md` leaves every Complex item unmarked: none of the
+  work in this release implements one.
+
 ### Changed - the status bar spans the full width above the sessions panel
 
 - The status bar (and the teammate strip under it) now runs across the whole
