@@ -59,17 +59,20 @@ pub fn persist_task_output(
         return None;
     }
     let file = dir.join(format!("{task_id}.md"));
-    // Build the header (small) and append the report body, which is the full
-    // untruncated sub-agent reply: the body is written straight through rather
-    // than concatenated into one `String`, so the peak memory stays one copy.
-    let mut bytes = Vec::with_capacity(content.len() + 256);
-    bytes.extend_from_slice(
-        format!("# {task_id} - {agent_name}\n\ntask: {task_prompt}\n\nduration_ms: {duration_ms}\n\n---\n\n")
-            .as_bytes(),
+    // The body is the full untruncated sub-agent reply, so it is streamed
+    // straight from the caller's `&str` into the temp file: the header is
+    // written first, then the borrowed body, and no concatenated copy of the
+    // report is ever built (the caller still holds the original).
+    let header = format!(
+        "# {task_id} - {agent_name}\n\ntask: {task_prompt}\n\nduration_ms: {duration_ms}\n\n---\n\n"
     );
-    bytes.extend_from_slice(content.as_bytes());
-    bytes.push(b'\n');
-    if let Err(e) = ragent_types::guard::write_atomic(&file, &bytes) {
+    let written = ragent_types::guard::write_atomic_with(&file, |out| {
+        use std::io::Write as _;
+        out.write_all(header.as_bytes())?;
+        out.write_all(content.as_bytes())?;
+        out.write_all(b"\n")
+    });
+    if let Err(e) = written {
         tracing::warn!(
             path = %file.display(),
             task_id,

@@ -119,23 +119,64 @@ fn test_macros_do_not_panic_when_stdout_and_stderr_are_closed() {
     // Re-executes this test binary as a probe, because the only way to prove a
     // macro tolerates a dead stream is to actually close one - and closing the
     // harness's own stdout would wedge the run.
+    let marker = probe_marker();
+    let _ = std::fs::remove_file(&marker); // INTENTIONAL: clears any stale marker from an earlier run
     let output = std::process::Command::new(std::env::current_exe().expect("test binary path"))
         .args([
             "--exact",
-            "test_cli_out::test_macro_output_probe",
+            // `tests/all.rs` registers this file as the `test_cli_out_macros`
+            // module, so the name the harness knows the probe by carries that
+            // prefix. A filter that matches nothing exits successfully, so the
+            // "one probe ran" assertion below is what makes a stale name fail.
+            "test_cli_out_macros::test_macro_output_probe",
             "--nocapture",
             "--ignored",
         ])
         .env("RAGENT_CLI_OUT_PROBE", "1")
+        // The marker path is passed in rather than recomputed in the child: the
+        // helper derives it from the process id, and the child's id is not the
+        // parent's, so a recomputed path could never be observed here.
+        .env("RAGENT_CLI_OUT_PROBE_MARKER", &marker)
         .output()
         .expect("probe runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "probe failed: status={:?}\nstdout: {}\nstderr: {}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        "probe failed: status={:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status
     );
+    // The probe closes stdout and stderr as its first act, so the harness's own
+    // `running 1 test` / `1 passed` lines land on /dev/null. The probe therefore
+    // reports that it ran by creating a marker file, and a filter that selected
+    // no test leaves no marker - which is exactly the silent false positive this
+    // guards against.
+    assert!(
+        marker.exists(),
+        "the probe did not run: the --exact filter selected no test, so this \
+         case would pass without exercising a single macro\nstdout: {stdout}\nstderr: {stderr}"
+    );
+}
+
+/// Path of the marker the probe body creates once it has started.
+///
+/// Under `target/temp` (NFR-004: tests never write outside the workspace) and
+/// keyed by pid, so two concurrent runs of this binary cannot see each other's
+/// marker. The child does not call this: the parent computes it once, removes any
+/// stale file, and passes the path through `RAGENT_CLI_OUT_PROBE_MARKER`, because
+/// a path derived from the child's own pid could never match what the parent
+/// checks.
+fn probe_marker() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("temp")
+        .join("cli-out-probe")
+        .join(format!("ran-{}.marker", std::process::id()))
+}
+
+/// The marker path the parent handed this probe, if any.
+fn inherited_probe_marker() -> Option<std::path::PathBuf> {
+    std::env::var_os("RAGENT_CLI_OUT_PROBE_MARKER").map(std::path::PathBuf::from)
 }
 
 /// Probe body: closes stdout and stderr, then drives every macro.
@@ -150,6 +191,15 @@ fn test_macro_output_probe() {
     if std::env::var_os("RAGENT_CLI_OUT_PROBE").is_none() {
         return;
     }
+
+    // Announce that the probe body ran, before the streams are closed: the
+    // parent's only other evidence would be the harness's own output, which the
+    // next lines send to /dev/null.
+    let marker = inherited_probe_marker().expect("parent passes the marker path");
+    if let Some(parent) = marker.parent() {
+        let _ = std::fs::create_dir_all(parent); // INTENTIONAL: best-effort, the create below is the assertion
+    }
+    std::fs::write(&marker, b"ran").expect("probe marker");
 
     // Closing fd 1 and 2 is only meaningful on Unix; elsewhere the probe body
     // is a no-op and the parent's assertion still holds (the macros are

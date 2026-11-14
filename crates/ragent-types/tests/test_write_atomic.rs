@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ragent_types::guard::write_atomic;
+use ragent_types::guard::{write_atomic, write_atomic_with};
 
 /// A per-test scratch directory under `target/temp` (NFR-004: tests never write
 /// outside the workspace).
@@ -132,4 +132,51 @@ fn test_write_atomic_to_a_bare_file_name_uses_the_current_directory() {
     std::env::set_current_dir(&previous).expect("restore cwd");
     result.expect("bare file name writes");
     assert_eq!(std::fs::read(dir.join("bare.json")).expect("read"), b"body");
+}
+
+#[test]
+fn test_write_atomic_with_streams_each_part_into_one_file() {
+    // The streaming form exists so a caller holding a body by reference writes
+    // its header and body separately, with no concatenated copy in between.
+    use std::io::Write as _;
+
+    let dir = scratch("streamed");
+    let target = dir.join("report.md");
+    write_atomic_with(&target, |file| {
+        file.write_all(b"# header\n")?;
+        file.write_all(b"the borrowed body")
+    })
+    .expect("write");
+    assert_eq!(
+        std::fs::read(&target).expect("read"),
+        b"# header\nthe borrowed body"
+    );
+}
+
+#[test]
+fn test_write_atomic_with_leaves_the_target_intact_when_the_writer_fails() {
+    // A writer that fails part-way must behave like a failed buffered write: the
+    // previous contents survive and no temp file is left behind.
+    let dir = scratch("streamed-failure");
+    let target = dir.join("report.md");
+    std::fs::write(&target, b"previous").expect("seed");
+    let err = write_atomic_with(&target, |_file| {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::WriteZero,
+            "writer gave up",
+        ))
+    })
+    .expect_err("a failing writer must fail the write");
+    assert_eq!(err.kind(), std::io::ErrorKind::WriteZero);
+    assert_eq!(std::fs::read(&target).expect("read"), b"previous");
+    let names: Vec<String> = std::fs::read_dir(&dir)
+        .expect("read dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["report.md".to_string()],
+        "the failed write must clean up its temp: {names:?}"
+    );
 }

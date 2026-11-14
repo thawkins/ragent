@@ -11,7 +11,8 @@
 //! `apply_pending` deliberately writes the ledger only when a step actually
 //! runs (the loop body owns the write), so with an empty `MIGRATIONS` list a
 //! fresh vault stays ledger-less and reads back as version 1 either way. These
-//! tests pin that, and pin the write the loop performs by replaying it. If a
+//! tests pin that, and pin the loop's write by driving it from a seeded
+//! version-0 ledger: that is the only state that enters the loop today. If a
 //! future migration is added the "settled vault" assertions below should be
 //! revisited to assert the ledger file directly.
 
@@ -80,21 +81,56 @@ fn test_apply_pending_is_idempotent() {
 }
 
 #[test]
-fn test_replayed_step_writes_the_ledger_in_the_readable_format() {
-    // The migration loop writes `{version}\n` to the ledger for each step it
-    // applies. With no step to apply today, replay that one line by hand so a
-    // change to the ledger format (which `read_version` parses on every run)
-    // fails here rather than on a user's vault after an upgrade.
-    let root = scratch("replayed-step");
-    for version in [2u32, 3] {
-        std::fs::write(root.join(MIGRATIONS_FILE), format!("{version}\n")).expect("step write");
-        assert_eq!(
-            std::fs::read_to_string(root.join(MIGRATIONS_FILE)).expect("ledger"),
-            format!("{version}\n"),
-            "the ledger is the bare version number and a newline"
-        );
-        assert_eq!(read_version(&root).expect("ledger parses"), version);
-    }
+fn test_apply_pending_advances_a_version_zero_ledger() {
+    // A version-0 ledger (a vault predating this build's ledger format) is the
+    // only state that makes `apply_pending` enter its migration loop while
+    // `MIGRATIONS` is empty, so it is the one case that drives the production
+    // ledger write. Seeding the file by hand instead would prove nothing about
+    // that write.
+    let root = scratch("version-zero");
+    std::fs::write(root.join(MIGRATIONS_FILE), "0\n").expect("seed version-0 ledger");
+
+    let version = apply_pending(&root).expect("the ledger advances");
+    assert_eq!(
+        version,
+        current_version(),
+        "a v0 vault reaches the current version"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join(MIGRATIONS_FILE)).expect("ledger"),
+        format!("{version}\n"),
+        "the loop writes the bare version number and a newline, which is the \
+         format `read_version` parses on every later run"
+    );
+    assert_eq!(
+        read_version(&root).expect("ledger parses"),
+        version,
+        "the version the loop wrote reads back"
+    );
+
+    // A second run finds a settled vault: it must not re-step or rewrite.
+    let settled = std::fs::metadata(root.join(MIGRATIONS_FILE))
+        .expect("stat")
+        .modified()
+        .expect("mtime");
+    assert_eq!(
+        apply_pending(&root).expect("second run"),
+        version,
+        "a settled vault does not advance again"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join(MIGRATIONS_FILE)).expect("ledger"),
+        format!("{version}\n"),
+        "a settled vault's ledger is unchanged"
+    );
+    assert_eq!(
+        std::fs::metadata(root.join(MIGRATIONS_FILE))
+            .expect("stat")
+            .modified()
+            .expect("mtime"),
+        settled,
+        "a settled vault's ledger is not rewritten"
+    );
 }
 
 #[test]

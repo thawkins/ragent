@@ -20,9 +20,19 @@
 **Implementation status (this pass):** Medium-effort items 1-10, 16, 20, 21 and
 22 are implemented and verified (see the *Done* marks in the plan tables below).
 `cargo fmt --check`, `cargo clippy --workspace --all-targets` (zero warnings) and
-all twelve `check-*` guard scripts are clean, and `cargo nextest run --workspace`
-is 16144/16144 (17 skipped). Medium 11-15 and 17-19 and 23-28, and every Complex
-item, remain open.
+the twelve code `check-*` guard scripts are clean, and
+`cargo nextest run --workspace` is 16146/16146 (17 skipped). Medium 11-15 and
+17-19 and 23-28, and every Complex item, remain open.
+
+**Review follow-ups (this pass).** Four points raised on the PR are addressed in
+the code rather than the report: `guard::write_atomic` is now the buffered
+wrapper over a new streaming `guard::write_atomic_with`, so the sub-agent report
+is written from the caller's borrowed `&str` with no second copy of it;
+`test_vault_migrations` drives the production ledger write through
+`apply_pending` from a seeded version-0 ledger instead of replaying the line by
+hand; the `cli_out` macro probe filter names the module `tests/all.rs` actually
+registers and asserts the probe ran, so an unmatched filter fails; and the
+Complex items are left unmarked, since none of them is implemented.
 
 **Fixed here: sidebar heading drops the description.** A project's `Properties`
 description was shown only when the heading had at least six columns left after
@@ -217,14 +227,14 @@ still fit beside it, so nothing is pushed off the row.
 ## Complex (> 2 hours)
 | # | Finding | File(s) | Fix |
 |---|---------|---------|-----|
-| 1 **Done** | Four parallel `Tool`/`ToolContext`/`ToolOutput`/`ToolRegistry` definitions with hand-written marshalling | `tools-core/src/lib.rs:103`, `tools-extended/src/lib.rs:291`, `tools-vcs/src/lib.rs:84`, `agent/src/tool/mod.rs:129` | Move the trait + context into one crate that all tool crates depend on; delete the three copies and the marshalling shims at `agent/src/tool/mod.rs:785`, `:1327`, `:1436` |
-| 2 **Done** | Three model-picker row renderers build the same padded cells | `ragent-tui/src/layout.rs:3497`, `:4618` | Extract a row-builder that takes the cell list, widths and alignment, then convert all three call sites |
-| 3 **Done** | 122 files still carry inline `#[cfg(test)]` modules | `crates/*/src/**` | Continue the documented migration: move each module into `tests/test_<module>.rs` and register it in `tests/all.rs`; batch by crate |
-| 4 **Done** | `mod.rs` vs named-file layout split across 8 crates | `crates/ragent-agent/src/**` and 7 others | Convert `foo/mod.rs` to `foo.rs` crate by crate, verifying `cargo check` after each |
-| 5 **Done** | Directory-name stutter in module paths | `git/git_status.rs`, `gitlab/gitlab_issues.rs`, `tool/tool_info.rs` | Rename to `git/status.rs`, `gitlab/issues.rs`, `tool/info.rs` and fix the `mod` declarations |
-| 6 **Done** | Tool "list" verb prefixes inconsistent | `github/github_actions.rs:206` and siblings | Rename to `github_list_actions` (a user-visible tool rename: needs the `check-tool-rename.sh` guard and a CHANGELOG entry) |
-| 7 **Done** | `HYPERRESEARCH_VAULT` / `PATHEXT` / `LC_*` read ad-hoc | `core/config.rs:149`, `tui/app/toolchain.rs:414`, `config/i18n.rs:285` | Route each through the validated config layer, with a typed parse and an explicit non-UTF-8 policy |
-| 8 **Done** | `read_credential_env` conflates non-UTF-8 with unset | `crates/ragent-config/src/credential_env.rs:19` | Return a three-state result (`Missing`/`Invalid`/`Present`) and surface `Invalid` at the call sites |
+| 1 | Four parallel `Tool`/`ToolContext`/`ToolOutput`/`ToolRegistry` definitions with hand-written marshalling | `tools-core/src/lib.rs:103`, `tools-extended/src/lib.rs:291`, `tools-vcs/src/lib.rs:84`, `agent/src/tool/mod.rs:129` | Move the trait + context into one crate that all tool crates depend on; delete the three copies and the marshalling shims at `agent/src/tool/mod.rs:785`, `:1327`, `:1436` |
+| 2 | Three model-picker row renderers build the same padded cells | `ragent-tui/src/layout.rs:3497`, `:4618` | Extract a row-builder that takes the cell list, widths and alignment, then convert all three call sites |
+| 3 | 122 files still carry inline `#[cfg(test)]` modules | `crates/*/src/**` | Continue the documented migration: move each module into `tests/test_<module>.rs` and register it in `tests/all.rs`; batch by crate |
+| 4 | `mod.rs` vs named-file layout split across 8 crates | `crates/ragent-agent/src/**` and 7 others | Convert `foo/mod.rs` to `foo.rs` crate by crate, verifying `cargo check` after each |
+| 5 | Directory-name stutter in module paths | `git/git_status.rs`, `gitlab/gitlab_issues.rs`, `tool/tool_info.rs` | Rename to `git/status.rs`, `gitlab/issues.rs`, `tool/info.rs` and fix the `mod` declarations |
+| 6 | Tool "list" verb prefixes inconsistent | `github/github_actions.rs:206` and siblings | Rename to `github_list_actions` (a user-visible tool rename: needs the `check-tool-rename.sh` guard and a CHANGELOG entry) |
+| 7 | `HYPERRESEARCH_VAULT` / `PATHEXT` / `LC_*` read ad-hoc | `core/config.rs:149`, `tui/app/toolchain.rs:414`, `config/i18n.rs:285` | Route each through the validated config layer, with a typed parse and an explicit non-UTF-8 policy |
+| 8 | `read_credential_env` conflates non-UTF-8 with unset | `crates/ragent-config/src/credential_env.rs:19` | Return a three-state result (`Missing`/`Invalid`/`Present`) and surface `Invalid` at the call sites |
 
 ## Suggested Fix Order
 1. **Security first (Quick Wins 1-12):** rotate and purge the two committed credentials, close the `.gitignore` gaps, and redact the four leaking log/error paths. These are live secrets and cost minutes each.

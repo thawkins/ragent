@@ -511,6 +511,32 @@ pub fn cap_read(bytes: &[u8], max_bytes: usize) -> String {
 /// Write `bytes` to `path` atomically: a unique temp file in the same
 /// directory, then a rename.
 ///
+/// The buffered form of [`write_atomic_with`]; use the latter when the payload
+/// is already held as borrowed parts, so no second copy of it is built.
+///
+/// # Errors
+///
+/// Returns the underlying [`std::io::Error`]. A failed write or rename removes
+/// the temp file best-effort and leaves `path` untouched.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_types::guard::write_atomic;
+///
+/// write_atomic(std::path::Path::new("/tmp/state.json"), b"{}").expect("write");
+/// ```
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    write_atomic_with(path, |file| {
+        use std::io::Write as _;
+        file.write_all(bytes)
+    })
+}
+
+/// Write a file atomically, streaming its contents from a writer callback:
+/// a unique temp file in the same directory, the callback, `sync_all`, then a
+/// rename.
+///
 /// Every on-disk state file ragent owns needs the same three properties, and
 /// each was previously re-implemented where it was needed:
 ///
@@ -529,20 +555,32 @@ pub fn cap_read(bytes: &[u8], max_bytes: usize) -> String {
 /// process (or two processes) never collide; a stale temp left by a crashed run
 /// is skipped rather than wedging the write.
 ///
+/// Streaming the body keeps the peak memory at the caller's own copy: a report
+/// persisted from a borrowed `&str` writes its header and body to the temp file
+/// in turn, instead of concatenating them into one buffer first.
+///
 /// # Errors
 ///
-/// Returns the underlying [`std::io::Error`]. A failed write or rename removes
-/// the temp file best-effort and leaves `path` untouched.
+/// Returns the underlying [`std::io::Error`] from `write` or from the rename. A
+/// failed write or rename removes the temp file best-effort and leaves `path`
+/// untouched.
 ///
 /// # Examples
 ///
 /// ```no_run
-/// use ragent_types::guard::write_atomic;
+/// use std::io::Write as _;
+/// use ragent_types::guard::write_atomic_with;
 ///
-/// write_atomic(std::path::Path::new("/tmp/state.json"), b"{}").expect("write");
+/// write_atomic_with(std::path::Path::new("/tmp/report.md"), |file| {
+///     file.write_all(b"# header\n")?;
+///     file.write_all(b"body")
+/// })
+/// .expect("write");
 /// ```
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
+pub fn write_atomic_with<F>(path: &Path, write: F) -> std::io::Result<()>
+where
+    F: FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+{
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -576,7 +614,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             format!("no free temp file name for {}", path.display()),
         ));
     };
-    if let Err(e) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+    if let Err(e) = write(&mut file).and_then(|()| file.sync_all()) {
         drop(file);
         let _ = std::fs::remove_file(&tmp); // INTENTIONAL: best-effort temp cleanup
         return Err(e);
