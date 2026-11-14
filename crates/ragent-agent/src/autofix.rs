@@ -25,7 +25,9 @@
 //!   redacted before it reaches the prompt.
 //!
 //! Review comments come from the REST API, which has no resolved state on
-//! GitHub; dedup on comment id keeps each comment to one wake-up
+//! GitHub; the resolved review threads are read over GraphQL and their
+//! comments are left out, so an answered comment never wakes the session.
+//! Dedup on comment id keeps each remaining comment to one wake-up
 //! (spec R1).
 //!
 //! Depends on the GitHub and GitLab clients in `ragent-tools-vcs` and the
@@ -257,6 +259,61 @@ async fn github_list(
     Ok(all)
 }
 
+/// The GraphQL node id of a REST review comment.
+fn github_comment_node_id(comment: &Value) -> String {
+    comment["node_id"].as_str().unwrap_or_default().to_string()
+}
+
+/// The node ids of the review comments that sit in a **resolved** review
+/// thread, read over GraphQL because the REST comment list carries no
+/// resolved state.
+///
+/// A thread query that fails (an enterprise host without GraphQL, a rate
+/// limit) yields an empty set with a `debug` record rather than an error, so
+/// a poll degrades to the previous behaviour (every comment counts, deduped by
+/// id) instead of losing its CI and conflict triggers too.
+async fn resolved_github_threads(
+    client: &ragent_tools_vcs::github::client::GitHubClient,
+    repo: &str,
+    number: u64,
+) -> Result<std::collections::HashSet<String>, FetchError> {
+    let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
+    let path = format!("/graphql?owner={owner}&name={name}&number={number}");
+    let body = match client.get(&path).await {
+        Ok(body) => body,
+        Err(e) => {
+            // A rate limit is a poll-wide condition: surface it so the
+            // heartbeat records it.
+            if let FetchError::RateLimited(text) = api_error(&e) {
+                return Err(FetchError::RateLimited(text));
+            }
+            tracing::debug!(
+                error = %e,
+                "autofix: GitHub review-thread state unavailable; resolved threads are not detected"
+            );
+            return Ok(std::collections::HashSet::new());
+        }
+    };
+    let mut resolved = std::collections::HashSet::new();
+    for thread in body["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice)
+    {
+        if thread["isResolved"] != Value::Bool(true) {
+            continue;
+        }
+        for comment in thread["comments"]["nodes"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+        {
+            if let Some(id) = comment["id"].as_str() {
+                resolved.insert(id.to_string());
+            }
+        }
+    }
+    Ok(resolved)
+}
+
 /// Every item of a paginated GitLab list, following `x-next-page`, up to
 /// [`MAX_PAGES`] pages. `path` already has a query string.
 async fn gitlab_list(
@@ -399,7 +456,14 @@ async fn github_snapshot(
         None,
     )
     .await?;
+    // The REST comment list carries no resolved state; the GraphQL review
+    // threads do. A comment inside a resolved thread is answered and must
+    // not wake the session, so read what has been resolved first.
+    let resolved = resolved_github_threads(client, repo, number).await?;
     for c in &inline {
+        if resolved.contains(&github_comment_node_id(c)) {
+            continue;
+        }
         let author = c["user"]["login"].as_str().unwrap_or_default();
         let Some(id) = c["id"].as_u64().filter(|_| author != me) else {
             continue;

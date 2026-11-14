@@ -130,6 +130,28 @@ async fn github_pull(
     get(server, "/user", json!({ "login": "bot" })).await;
     get(server, "/repos/acme/app/pulls/7/comments", comments).await;
     get(server, "/repos/acme/app/pulls/7/reviews", json!([])).await;
+    get(server, "/graphql", review_threads(&[])).await;
+}
+
+/// A GraphQL `reviewThreads` response whose `resolved` threads hold comments
+/// with the given node ids.
+fn review_threads(resolved: &[(&str, &[&str])]) -> Value {
+    let nodes: Vec<Value> = resolved
+        .iter()
+        .map(|(thread_id, comment_ids)| {
+            json!({
+                "id": thread_id,
+                "isResolved": true,
+                "comments": {
+                    "nodes": comment_ids
+                        .iter()
+                        .map(|id| json!({ "id": id }))
+                        .collect::<Vec<Value>>()
+                }
+            })
+        })
+        .collect();
+    json!({ "data": { "repository": { "pullRequest": { "reviewThreads": { "nodes": nodes } } } } })
 }
 
 /// `(kind, summary, prompt)` of each trigger event.
@@ -244,6 +266,78 @@ async fn test_autofix_watcher_github_conflict_and_review() {
         "the token's own comments never wake the session"
     );
     assert_eq!(watcher.tick().await.len(), 0, "each item fires once");
+}
+
+#[tokio::test]
+async fn test_autofix_watcher_github_resolved_thread_does_not_wake() {
+    let server = MockServer::start().await;
+    let storage = storage_with_binding("github", "acme/app");
+    let watcher = github_watcher(&storage, &server);
+
+    let comments = json!([
+        { "id": 501, "node_id": "PRRC_open", "user": { "login": "alice" },
+          "path": "src/lib.rs", "line": 12, "body": "Please rename this." },
+        { "id": 502, "node_id": "PRRC_done", "user": { "login": "bob" },
+          "path": "src/lib.rs", "line": 20, "body": "Rename `a` to `b`." }
+    ]);
+    github_pull(&server, SHA_A, &[], false, comments).await;
+    // The fixture mounts an empty thread list; a second response replaces it.
+    server.reset().await;
+    github_pull(&server, SHA_A, &[], false, json!([])).await;
+    server.reset().await;
+    get(
+        &server,
+        "/repos/acme/app/pulls/7",
+        json!({
+            "number": 7, "state": "open", "title": "Fix", "merged_at": null,
+            "html_url": "https://github.com/acme/app/pull/7",
+            "head": { "ref": "fix", "sha": SHA_A, "repo": { "full_name": "acme/app" } },
+            "base": { "ref": "main" },
+            "mergeable": true, "mergeable_state": "clean"
+        }),
+    )
+    .await;
+    get(
+        &server,
+        &format!("/repos/acme/app/commits/{SHA_A}/check-runs"),
+        json!({ "check_runs": [] }),
+    )
+    .await;
+    get(
+        &server,
+        &format!("/repos/acme/app/commits/{SHA_A}/statuses"),
+        json!([]),
+    )
+    .await;
+    get(&server, "/user", json!({ "login": "bot" })).await;
+    get(
+        &server,
+        "/repos/acme/app/pulls/7/comments",
+        json!([
+            { "id": 501, "node_id": "PRRC_open", "user": { "login": "alice" },
+              "path": "src/lib.rs", "line": 12, "body": "Please rename this." },
+            { "id": 502, "node_id": "PRRC_done", "user": { "login": "bob" },
+              "path": "src/lib.rs", "line": 20, "body": "Rename `a` to `b`." }
+        ]),
+    )
+    .await;
+    get(&server, "/repos/acme/app/pulls/7/reviews", json!([])).await;
+    get(
+        &server,
+        "/graphql",
+        review_threads(&[("PRRT_1", &["PRRC_done"])]),
+    )
+    .await;
+
+    let fired = triggers(&watcher.tick().await);
+    let kinds: Vec<&str> = fired.iter().map(|(k, _, _)| k.as_str()).collect();
+    assert_eq!(kinds, ["review"], "{fired:?}");
+    let review = &fired[0].2;
+    assert!(review.contains("Please rename this."), "{review}");
+    assert!(
+        !review.contains("Rename `a` to `b`."),
+        "a comment in a resolved thread must not wake the session: {review}"
+    );
 }
 
 #[tokio::test]
