@@ -287,8 +287,14 @@ pub enum SidebarRow {
 ///
 /// `(Some(sidebar), chat)` when the sidebar is shown, `(None, area)` when it
 /// is turned off or the terminal is narrower than [`MIN_TERMINAL_WIDTH`].
+///
+/// The height test matters because `area` is the body below the status band,
+/// not the whole frame: on a terminal short enough that the band (the status
+/// bar, plus the teammate strip when a team is shown) leaves no room, the
+/// sidebar would paint a bordered box of zero or fewer inner rows and swallow
+/// every list row it holds, so it is dropped and the chat takes the body.
 pub fn split_area(app: &App, area: Rect) -> (Option<Rect>, Rect) {
-    if !app.sidebar.visible || area.width < MIN_TERMINAL_WIDTH {
+    if !app.sidebar.visible || area.width < MIN_TERMINAL_WIDTH || area.height <= 2 {
         return (None, area);
     }
     let width = app.sidebar.width.clamp(MIN_WIDTH, area.width / 2);

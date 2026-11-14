@@ -16,7 +16,7 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::utils::shorten_middle;
+use crate::utils::{ResponsiveBreakpoint, shorten_middle};
 use ragent_config::i18n::{MessageKey, t};
 
 /// Configuration for status bar rendering.
@@ -185,6 +185,67 @@ pub mod abbreviations {
             "azure_foundry" => "AzF",
             _ => name,
         }
+    }
+}
+
+/// The rectangles a full-width status band occupies.
+///
+/// The band sits above everything else in the frame, so the session sidebar
+/// starts below it rather than beside it. Splitting the band out here keeps the
+/// height it consumes next to the renderer that consumes it: the status bar's
+/// responsive height and the optional teammate strip are the only two rows the
+/// body cedes, and [`crate::layout::render`] splits what is left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusBand {
+    /// The status bar itself, spanning the full frame width.
+    pub status: Rect,
+    /// The one-row teammate strip under the status bar, when a team is shown
+    /// (spec agentui FR-027; a team with no members reserves no row, FR-066).
+    pub teammate_strip: Option<Rect>,
+    /// The area left for the sidebar and chat below the band.
+    pub body: Rect,
+}
+
+/// Lay out the full-width status band and the body beneath it.
+///
+/// # Arguments
+///
+/// * `app` - for the teammate strip's visibility and the responsive height.
+/// * `area` - the whole frame.
+///
+/// # Returns
+///
+/// A [`StatusBand`] whose `status` and `teammate_strip` span `area`'s full
+/// width and whose `body` is the remainder, starting below the last band row.
+#[must_use]
+pub fn status_band(app: &App, area: Rect) -> StatusBand {
+    let breakpoint = ResponsiveBreakpoint::from_width(area.width);
+    let status_h = breakpoint.status_bar_height().min(area.height);
+    let strip_h = if crate::teammate_strip::is_visible(app) {
+        1_u16.min(area.height.saturating_sub(status_h))
+    } else {
+        0
+    };
+
+    let band_h = status_h.saturating_add(strip_h);
+    let status = Rect {
+        height: status_h,
+        ..area
+    };
+    let teammate_strip = (strip_h > 0).then(|| Rect {
+        y: area.y + status_h,
+        height: strip_h,
+        ..area
+    });
+    let body = Rect {
+        y: area.y + band_h,
+        height: area.height.saturating_sub(band_h),
+        ..area
+    };
+    StatusBand {
+        status,
+        teammate_strip,
+        body,
     }
 }
 

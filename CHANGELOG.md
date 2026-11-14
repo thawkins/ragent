@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Changed - the status bar spans the full width above the sessions panel
+
+- The status bar (and the teammate strip under it) now runs across the whole
+  window, over the top of the sessions panel, instead of stopping at the
+  panel's right-hand edge. The panel and the chat start on the row below it, so
+  the panel's top border no longer shares a row with the status bar's first
+  line. The band's geometry lives in `layout_statusbar::status_band`, next to
+  the renderer that consumes it, and `layout::render` splits only the body
+  beneath it. Nothing else moves: the panel keeps its column, width and
+  heading, and a window with no panel renders exactly as before.
+- A terminal too short for the band to leave the panel three or more rows
+  (`layout_statusbar` height plus a teammate strip) drops the panel and gives
+  the body to the chat, so a bordered box with no inner row can no longer
+  swallow every session it lists.
+
 ### Fixed - the wrong terminal is started by `Open in` / `Terminal`
 
 - Terminal selection is no longer a fixed list of guesses that ignored the

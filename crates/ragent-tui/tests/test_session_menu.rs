@@ -14,7 +14,10 @@ use ratatui::backend::TestBackend;
 mod support;
 
 const WIDTH: u16 = 120;
-const HEIGHT: u16 = 30;
+/// Tall enough that the session sidebar still shows every fixture row below
+/// the full-width status band, which now spans the top of the frame and so
+/// costs the sidebar its two rows: at 30 the second session fell off the list.
+const HEIGHT: u16 = 32;
 
 /// An app with the sidebar on and two sessions: `(app, a, b)`, `b` focused.
 async fn app_with_sidebar() -> (App, String, String) {
@@ -68,11 +71,15 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
 }
 
 /// Focuses the sidebar with its cursor on session `id`'s row.
+///
+/// The cursor index is the row's offset from the sidebar's first inner line,
+/// not from the top of the screen: the status band spans the full width above
+/// the sidebar, so the box starts at `app.sidebar.area.y` rather than row 0.
 fn put_cursor_on(app: &mut App, id: &str) -> usize {
     let row = row_of_session(app, id);
     app.sidebar.focused = true;
     // Rows inside the border start one line below the sidebar top.
-    app.sidebar.cursor = row - 1;
+    app.sidebar.cursor = row - usize::from(app.sidebar.area.y) - 1;
     row
 }
 
@@ -222,7 +229,7 @@ async fn test_session_menu_right_click_opens_for_clicked_row() {
     assert_eq!(menu.target, MenuTarget::Session(a.clone()));
     assert_eq!(
         app.sidebar.cursor,
-        row - 1,
+        row - usize::from(app.sidebar.area.y) - 1,
         "cursor moves to the clicked row"
     );
     assert_eq!(
@@ -250,9 +257,7 @@ async fn test_session_menu_accelerator_pins_like_p() {
     );
 
     let _ = draw(&mut app); // reloads the cached pin set
-    let row = row_of_session(&mut app, &a);
-    app.sidebar.focused = true;
-    app.sidebar.cursor = row - 1;
+    put_cursor_on(&mut app, &a);
     app.handle_key_event(key(KeyCode::Char('m'))).await;
     let menu = app.sidebar.menu.as_ref().expect("menu");
     let pin = menu

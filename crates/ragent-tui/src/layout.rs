@@ -388,9 +388,19 @@ fn model_picker_heading_band(widths: &[usize]) -> String {
 /// # }
 /// ```
 pub fn render(frame: &mut Frame, app: &mut App) {
+    // The status bar (and the teammate strip beneath it) span the whole frame,
+    // running across the top of the session sidebar rather than stopping at its
+    // right-hand edge. Only the body below that band is split horizontally, so
+    // the sidebar's top border sits under the status bar instead of beside it.
+    let band = crate::layout_statusbar::status_band(app, frame.area());
+    crate::layout_statusbar::render_status_bar(frame, app, band.status);
+    if let Some(strip_area) = band.teammate_strip {
+        crate::teammate_strip::render(frame, app, strip_area);
+    }
+
     // Session sidebar on the left (spec MULTISESSION M5); the chat gets the
     // rest. Overlays below still centre on the whole frame.
-    let (sidebar_area, chat_area) = crate::sessions_sidebar::split_area(app, frame.area());
+    let (sidebar_area, chat_area) = crate::sessions_sidebar::split_area(app, band.body);
     match sidebar_area {
         Some(area) => crate::sessions_sidebar::render(frame, app, area),
         None => {
@@ -6125,27 +6135,15 @@ fn render_chat(frame: &mut Frame, app: &mut App, chat_area: Rect) {
     refresh_input_render_cache(app, input_inner_width as u16);
     let input_height = app.session.input_render_cache.height;
 
-    // Whether to show the teammate strip (1 row under the status bar, FR-027).
-    // A team with no members reserves no line at all (FR-066).
-    let team_strip = crate::teammate_strip::is_visible(app);
-    let team_strip_h = if team_strip { 1u16 } else { 0 };
-
+    // The status bar and teammate strip are rendered by `render` above, across
+    // the whole frame, so this area holds only the messages/log and the input.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(breakpoint.status_bar_height()), // status bar (responsive)
-            Constraint::Length(team_strip_h),                   // teammate strip (0 when hidden)
-            Constraint::Min(3),                                 // messages + optional log
-            Constraint::Length(input_height),                   // input (dynamic)
+            Constraint::Min(3),               // messages + optional log
+            Constraint::Length(input_height), // input (dynamic)
         ])
         .split(chat_area);
-
-    // Use v2 status bar with responsive design
-    crate::layout_statusbar::render_status_bar(frame, app, chunks[0]);
-
-    if team_strip {
-        crate::teammate_strip::render(frame, app, chunks[1]);
-    }
 
     // Split the middle area horizontally when an auxiliary side panel is visible.
     // Use responsive split based on terminal width. Only one side panel is
@@ -6168,7 +6166,7 @@ fn render_chat(frame: &mut Frame, app: &mut App, chat_area: Rect) {
                 Constraint::Percentage(msg_pct), // messages (responsive)
                 Constraint::Percentage(log_pct), // side panel (responsive)
             ])
-            .split(chunks[2]);
+            .split(chunks[0]);
 
         app.message_area = h_chunks[0];
         render_messages(frame, app, h_chunks[0]);
@@ -6274,7 +6272,7 @@ fn render_chat(frame: &mut Frame, app: &mut App, chat_area: Rect) {
             }
         }
     } else {
-        app.message_area = chunks[2];
+        app.message_area = chunks[0];
         app.log_area = Rect::default();
         app.profile_area = Rect::default();
         app.tasks_area = Rect::default();
@@ -6284,14 +6282,14 @@ fn render_chat(frame: &mut Frame, app: &mut App, chat_area: Rect) {
         app.active_agents_area = Rect::default();
         app.teams_area = Rect::default();
         app.teams_rows_area = Rect::default();
-        render_messages(frame, app, chunks[2]);
-        apply_selection_highlight(frame, app, SelectionPane::Messages, chunks[2]);
+        render_messages(frame, app, chunks[0]);
+        apply_selection_highlight(frame, app, SelectionPane::Messages, chunks[0]);
     }
 
     let input_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(button_col_w), Constraint::Min(20)])
-        .split(chunks[3]);
+        .split(chunks[1]);
 
     app.input_area = input_chunks[1];
     render_input(frame, app, input_chunks[1]);
