@@ -206,6 +206,22 @@ pub fn create_session_worktree(project: &Project, branch: &str, root: &Path) -> 
     Ok(dest.canonicalize().unwrap_or(dest))
 }
 
+/// Removes the session worktree at `path` from the project's repository,
+/// discarding any changes in it. Used to undo [`create_session_worktree`]
+/// when the session that was to own the worktree could not be recorded.
+///
+/// # Errors
+///
+/// Returns an error when git refuses to remove the worktree.
+pub fn remove_session_worktree(project: &Project, path: &Path) -> Result<()> {
+    let path_text = path.display().to_string();
+    git(
+        &["worktree", "remove", "--force", &path_text],
+        &project.worktree,
+    )?;
+    Ok(())
+}
+
 /// Why a worktree was left in place by [`prune_worktrees`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkippedWorktree {

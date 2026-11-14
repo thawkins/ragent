@@ -367,7 +367,22 @@ impl ProjectManager {
             worktree: Some(path.display().to_string()),
             pr_count: None,
         };
-        sessions.create_session_in_project(project_id, path, &checkout)
+        // The worktree exists only for this session: when the session cannot
+        // be recorded, remove it again rather than leave an orphan on disk.
+        sessions
+            .create_session_in_project(project_id, path.clone(), &checkout)
+            .map_err(|e| {
+                if let Err(cleanup) = worktree::remove_session_worktree(&project, &path) {
+                    tracing::warn!(
+                        error = %cleanup,
+                        worktree = %path.display(),
+                        "could not remove the worktree of a session that was not recorded"
+                    );
+                }
+                e.context(format!(
+                    "the session for branch '{branch}' could not be recorded"
+                ))
+            })
     }
 
     /// Removes a project from the list; its files and archived sessions are

@@ -113,6 +113,9 @@ tracing-subscriber = { workspace = true }
 # (`tests/test_profiler.rs`). Same version and `testing` feature the telemetry
 # crate's dev-dependencies already enable.
 opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
+# Forces a session insert to fail (`tests/test_session_worktree.rs`) so the
+# worktree rollback in `ProjectManager::create_session` can be exercised.
+rusqlite = { workspace = true }
 
 [[bench]]
 name = "agent_loop"
