@@ -5,18 +5,20 @@
 ### Changed - sub-agent reports stream to disk, and the audit ledger stays truthful
 
 - `persist_task_output` takes the report as the caller's shared `Arc<str>` - the
-  same allocation `TaskEntry::result` stores - and streams the header and the
-  body through a `BufWriter` into the temp file in turn, so persisting a
-  sub-agent's full report no longer builds a second report-sized buffer while
-  the completion handler still holds the original.
+  same allocation `TaskEntry::result` stores - and writes the header and the
+  body into the temp file in turn, so persisting a sub-agent's full report no
+  longer builds a second report-sized buffer while the completion handler still
+  holds the original.
 - `ragent-hyperresearch`'s vault-migration test drives the production ledger
   write through `apply_pending` instead of replaying it with `std::fs::write`,
-  and the loop and the test share `migrations::ledger_bytes`, so a loop that
+  seeds the version-0 ledger with `migrations::ledger_bytes` (the loop's own
+  writer) and asserts the ledger file the loop left behind, so a loop that
   stopped writing the ledger, or changed its format, now fails the test.
-- The `cli_out` macro probe also asserts that the probe body finished (it
-  rewrites its marker only after driving every macro), so a filter naming the
-  wrong registered module fails instead of exiting successfully having run
-  nothing.
+- The `cli_out` macro probe is verified to run under the registered module name
+  (`test_cli_out_macros::test_macro_output_probe` selects exactly one test,
+  where the bare name selects none and still exits 0) and also asserts that the
+  probe body finished (it rewrites its marker only after driving every macro),
+  so a filter naming the wrong module fails instead of passing silently.
 - `docs/reports/code-audit.md` leaves every Complex item unmarked: none of the
   work in this release implements one.
 

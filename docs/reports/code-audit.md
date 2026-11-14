@@ -26,16 +26,19 @@ the twelve code `check-*` guard scripts are clean, and
 
 **Review follow-ups (this pass).** Four points raised on the PR are addressed in
 the code rather than the report: `guard::write_atomic` is the buffered wrapper
-over a new streaming `guard::write_atomic_with`, and `persist_task_output` takes
-the report as the caller's shared `Arc<str>` (the same allocation
-`TaskEntry::result` stores) and streams it through a `BufWriter` in turn with the
-header, so no second report-sized buffer is built; `test_vault_migrations` drives
-the production ledger write through `apply_pending` (via a test-only step-count
+over a new streaming `guard::write_atomic_with`, and the completion handler
+builds the report body once as a shared `Arc<str>` - the same allocation
+`TaskEntry::result` stores - which `persist_task_output` writes into the temp
+file in turn with the header, so no second report-sized buffer is built while
+the loop's own `String` is still live; `test_vault_migrations` drives the
+production ledger write through `apply_pending` (via a test-only step-count
 override, since `MIGRATIONS` is empty and a bare version-0 seed never reaches the
-loop), seeds a version-0 ledger, and asserts the persisted version, the format
-the loop writes (`migrations::ledger_bytes`, which the loop itself uses) and the
-settled re-run - none of it replayed with `std::fs::write`; the `cli_out` macro
-probe filter names the registered module `test_cli_out_macros::test_macro_output_probe`,
+loop), seeds a version-0 ledger with `migrations::ledger_bytes` exactly as the
+loop writes it, and asserts the returned version, the ledger file the loop left
+behind (read back and compared against `ledger_bytes`), and the settled re-run -
+none of it replayed with `std::fs::write`; the `cli_out` macro probe filter names
+the registered module `test_cli_out_macros::test_macro_output_probe` (verified to
+select exactly one test, where the bare name selects none and still exits 0),
 and asserts that the probe ran, that the `--exact` filter selected exactly one
 test, and that the probe body finished (it rewrites its marker only after driving
 every macro), so a stale name fails instead of passing silently; and every

@@ -39,12 +39,11 @@ use crate::session::processor::SessionProcessor;
 /// I/O failure returns `None` and the in-memory `TaskEntry::result` remains
 /// the only copy.
 ///
-/// `content` is the shared report body as an `Arc<str>`, not a `&str` with a
-/// separate `to_owned`: the completion handler stores the very same `Arc` in
-/// `TaskEntry::result`, so writing the report never copies it. The body is
-/// streamed straight into the temp file behind the header, so the peak memory
-/// is the in-memory result plus one `io` buffer - never a second report-sized
-/// buffer.
+/// `content` is the shared report body as an `Arc<str>` - the very same
+/// allocation `TaskEntry::result` stores, so writing the report never copies it.
+/// The header and the borrowed body are written to the temp file in turn
+/// through [`ragent_types::guard::write_atomic_with`], which keeps the peak at
+/// the caller's one copy of the report rather than a second report-sized buffer.
 #[doc(hidden)]
 pub fn persist_task_output(
     working_dir: &std::path::Path,
@@ -66,22 +65,19 @@ pub fn persist_task_output(
         return None;
     }
     let file = dir.join(format!("{task_id}.md"));
-    // The body is the full untruncated sub-agent reply, so it is streamed
-    // straight from the caller's `Arc<str>` into the temp file: the header is
-    // written first, then the shared body - the same allocation the task entry
-    // keeps - so no concatenated or copied buffer of the report is ever built.
+    // The body is the full untruncated sub-agent reply, so it is written
+    // straight from the caller's `Arc<str>` into the temp file: the header
+    // first, then the shared body and its trailing newline - the same
+    // allocation the task entry keeps - so no concatenated or copied buffer of
+    // the report is ever built.
     let header = format!(
         "# {task_id} - {agent_name}\n\ntask: {task_prompt}\n\nduration_ms: {duration_ms}\n\n---\n\n"
     );
     let written = ragent_types::guard::write_atomic_with(&file, |out| {
         use std::io::Write as _;
-        let mut out = std::io::BufWriter::new(out);
         out.write_all(header.as_bytes())?;
         out.write_all(content.as_bytes())?;
-        out.write_all(b"\n")?;
-        out.into_inner()
-            .map_err(std::io::IntoInnerError::into_error)?;
-        Ok(())
+        out.write_all(b"\n")
     });
     if let Err(e) = written {
         tracing::warn!(
@@ -1046,6 +1042,11 @@ impl AgentManager {
                 }
                 Ok(response) => {
                     let summary = truncate_str(&response, 2000).into_owned();
+                    // The report body is built once, as the shared `Arc<str>` the
+                    // task entry below stores: persistence streams that same
+                    // allocation into the temp file, so writing the report never
+                    // doubles it while `response` is still live.
+                    let full_report: Arc<str> = Arc::from(response.as_str());
                     // Report the real loop outcome: before this fix every
                     // successful completion was hard-coded "stop", so a run
                     // cut by the provider's silent end-of-stream still
@@ -1068,7 +1069,7 @@ impl AgentManager {
                         &agent_label,
                         &task_prompt_str,
                         duration_ms,
-                        &Arc::from(response.as_str()),
+                        &full_report,
                     );
                     // ANTIPAT: the report is the documented durable recovery
                     // path (`TaskEntry::output_file`), so a silent `None` made
@@ -1085,7 +1086,7 @@ impl AgentManager {
                     {
                         if let Some(mut entry) = tasks.get_mut(&tid) {
                             entry.status = TaskStatus::Completed;
-                            entry.result = Some(Arc::from(response.as_str()));
+                            entry.result = Some(Arc::clone(&full_report));
                             entry.completed_at = Some(Utc::now());
                             entry.output_file = output_file.clone();
                             entry.report_status = report_status;

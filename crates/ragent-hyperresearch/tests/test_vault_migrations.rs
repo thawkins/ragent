@@ -109,7 +109,11 @@ fn test_apply_pending_advances_a_version_zero_ledger() {
     // which is exactly the regression this test exists to catch.
     let _guard = with_step_count(1);
     let root = scratch("version-zero");
-    std::fs::write(root.join(MIGRATIONS_FILE), "0\n").expect("seed version-0 ledger");
+    // The version-0 ledger is seeded as the exact bytes the migration loop
+    // writes (`migrations::ledger_bytes`), so `read_version` sees a real v0
+    // vault and the loop below is the only thing that advances it.
+    std::fs::write(root.join(MIGRATIONS_FILE), migrations::ledger_bytes(0))
+        .expect("seed version-0 ledger");
 
     let version = apply_pending(&root).expect("the ledger advances");
     assert_eq!(
@@ -123,15 +127,15 @@ fn test_apply_pending_advances_a_version_zero_ledger() {
         version,
         "the version the loop wrote reads back"
     );
-    // The production write is exercised, not reproduced: the migration loop
-    // owns the only ledger write, and these assert what it persisted - the bare
+    // The production write is exercised, not reproduced: the migration loop owns
+    // the only ledger write, and these assert what it persisted - the bare
     // version number and a newline, the format `read_version` parses on every
-    // later run. Reproducing it with `std::fs::write` would still pass if the
-    // loop stopped writing the ledger or changed its format.
+    // later run. Reproducing it with a hand-rolled `write` would still pass if
+    // the loop stopped writing the ledger or changed its format.
     assert_eq!(
+        std::fs::read_to_string(root.join(MIGRATIONS_FILE)).expect("ledger"),
         migrations::ledger_bytes(version),
-        format!("{version}\n"),
-        "the ledger the loop wrote is the format `read_version` parses"
+        "the file the loop left behind is the ledger format, recording the new version"
     );
 
     // A second run finds a settled vault: it must not re-step or rewrite.
