@@ -86,19 +86,24 @@ async fn test_session_menu_m_opens_menu_with_accelerators_and_rules() {
     let menu = app.sidebar.menu.clone().expect("menu open");
     assert_eq!(menu.target, MenuTarget::Session(a.clone()));
     let actions: Vec<MenuAction> = menu.items.iter().map(|i| i.action.clone()).collect();
-    assert_eq!(
-        actions,
-        [
-            MenuAction::OpenIn,
-            MenuAction::TogglePin,
-            MenuAction::ToggleUnread,
-            MenuAction::Rename,
-            MenuAction::Fork,
-            MenuAction::MoveTo,
-            MenuAction::Archive,
-            MenuAction::Delete
-        ]
-    );
+    // `Terminal` is listed only when this machine can start one, so the expected
+    // list names it conditionally: every other item is unconditional.
+    let mut expected = vec![MenuAction::OpenIn];
+    let has_terminal = actions.contains(&MenuAction::Terminal);
+    expected.extend([
+        MenuAction::TogglePin,
+        MenuAction::ToggleUnread,
+        MenuAction::Rename,
+        MenuAction::Fork,
+        MenuAction::MoveTo,
+        MenuAction::Archive,
+        MenuAction::Delete,
+    ]);
+    // `Terminal` closes the menu so the items above keep their positions.
+    if has_terminal {
+        expected.push(MenuAction::Terminal);
+    }
+    assert_eq!(actions, expected);
     let rows = draw(&mut app);
     let area = app.sidebar.menu.as_ref().expect("menu").area;
     assert_eq!(usize::from(area.y), row + 1, "menu opens below its row");
@@ -111,29 +116,66 @@ async fn test_session_menu_m_opens_menu_with_accelerators_and_rules() {
                 .collect()
         })
         .collect();
-    assert!(
-        lines[3].contains("Pin") && lines[3].contains(" P "),
-        "{lines:#?}"
-    );
-    for (line, label, accel) in [
-        (1, "Open in", " > "),
-        (4, "Mark as unread", " U "),
-        (5, "Rename", " R "),
-        (6, "Fork", " F "),
-        (8, "Move to section", " > "),
-        (10, "Archive", " A "),
-        (11, "Delete", " D "),
+    // The menu's top border is `lines[0]`, so an item's screen line is its
+    // position plus the group rules drawn above it, plus one for that border.
+    // The optional `Terminal` entry shifts every line after it.
+    let items = &menu.items;
+    let rule_above = |index: usize| index > 0 && items[index - 1].group != items[index].group;
+    let rules_before = |index: usize| (1..=index).filter(|&i| rule_above(i)).count();
+    let line_of = |action: &MenuAction| {
+        let index = items
+            .iter()
+            .position(|i| &i.action == action)
+            .expect("item present");
+        1 + index + rules_before(index)
+    };
+
+    // An item's line is `│ label ... hint │`: the label sits just after the
+    // border and the accelerator (or `>` for a submenu) just before it.
+    for (action, label) in [
+        (MenuAction::OpenIn, "Open in"),
+        (MenuAction::TogglePin, "Pin"),
+        (MenuAction::ToggleUnread, "Mark as unread"),
+        (MenuAction::Rename, "Rename"),
+        (MenuAction::Fork, "Fork"),
+        (MenuAction::MoveTo, "Move to section"),
+        (MenuAction::Archive, "Archive"),
+        (MenuAction::Delete, "Delete"),
+        (MenuAction::Terminal, "Terminal"),
     ] {
+        let line = &lines[line_of(&action)];
+        let body = line.trim_start_matches('│').trim_end_matches('│');
+        let hint = body.trim_end().chars().last().expect("a hint column");
         assert!(
-            lines[line].contains(label) && lines[line].contains(accel),
-            "{label}: {lines:#?}"
+            body.contains(&format!(" {label} ")),
+            "{label} on line {}, body {body:?}: {lines:#?}",
+            line_of(&action)
+        );
+        assert!(
+            hint == '>' || hint.is_ascii_uppercase(),
+            "{label} has an accelerator or submenu marker: {line}"
         );
     }
+    // A rule sits between groups: one drawn line after an item whose successor
+    // starts a later group.
+    let rules: Vec<usize> = (1..items.len())
+        .filter(|&i| rule_above(i))
+        .map(|i| line_of(&items[i].action) - 1)
+        .collect();
+    assert_eq!(
+        rules.len(),
+        usize::from(has_terminal) + 3,
+        "three group rules, one more above Terminal: {lines:#?}"
+    );
     assert!(
-        [2, 7, 9].iter().all(|&l| lines[l].contains("-----")),
+        rules.iter().all(|&l| lines[l].contains("-----")),
         "rule between groups: {lines:#?}"
     );
-    assert!(menu.items[7].danger, "Delete is drawn as dangerous");
+    let delete = items
+        .iter()
+        .position(|i| i.action == MenuAction::Delete)
+        .expect("a delete item");
+    assert!(items[delete].danger, "Delete is drawn as dangerous");
 }
 
 #[tokio::test]
@@ -212,8 +254,13 @@ async fn test_session_menu_accelerator_pins_like_p() {
     app.sidebar.focused = true;
     app.sidebar.cursor = row - 1;
     app.handle_key_event(key(KeyCode::Char('m'))).await;
-    let label = &app.sidebar.menu.as_ref().expect("menu").items[1].label;
-    assert_eq!(label, "Unpin");
+    let menu = app.sidebar.menu.as_ref().expect("menu");
+    let pin = menu
+        .items
+        .iter()
+        .find(|i| i.action == MenuAction::TogglePin)
+        .expect("a pin item");
+    assert_eq!(pin.label, "Unpin");
 }
 
 #[tokio::test]
@@ -222,8 +269,20 @@ async fn test_session_menu_enter_on_archive_archives_background_session() {
     put_cursor_on(&mut app, &a);
 
     app.handle_key_event(key(KeyCode::Char('m'))).await;
-    app.handle_key_event(key(KeyCode::End)).await;
-    app.handle_key_event(key(KeyCode::Up)).await;
+    let archive = app
+        .sidebar
+        .menu
+        .as_ref()
+        .expect("menu")
+        .items
+        .iter()
+        .position(|i| i.action == MenuAction::Archive)
+        .expect("an archive item");
+    // Walk to `Archive` by name, because the optional trailing `Terminal`
+    // entry changes what `End` lands on.
+    for _ in 0..archive {
+        app.handle_key_event(key(KeyCode::Down)).await;
+    }
     app.handle_key_event(key(KeyCode::Enter)).await;
 
     let row = app.storage.get_session(&a).expect("read").expect("row A");
@@ -238,12 +297,27 @@ async fn test_session_menu_click_on_rename_prefills_input() {
     app.handle_key_event(key(KeyCode::Char('m'))).await;
     let _ = draw(&mut app);
     let area = app.sidebar.menu.as_ref().expect("menu").area;
+    let rename = app
+        .sidebar
+        .menu
+        .as_ref()
+        .expect("menu")
+        .items
+        .iter()
+        .position(|i| i.action == MenuAction::Rename)
+        .expect("a rename item");
 
-    // Line 5 inside the border is `Rename`.
+    // The menu's border and the group rules above an item are drawn lines too,
+    // so the row is derived rather than assumed: the item's position plus one
+    // for the top border, plus one per rule above it.
+    let rules = app.sidebar.menu.as_ref().expect("menu").items[..rename]
+        .windows(2)
+        .filter(|w| w[0].group != w[1].group)
+        .count();
     app.handle_mouse_event(mouse(
         MouseEventKind::Down(MouseButton::Left),
         area.x + 2,
-        area.y + 5,
+        area.y + 1 + rename as u16 + rules as u16,
     ));
 
     assert!(app.sidebar.menu.is_none());
@@ -954,4 +1028,109 @@ async fn test_session_menu_unbound_session_keeps_grey_request_count() {
     let width = usize::from(app.sidebar.area.width);
     let text: String = draw(&mut app)[row].chars().take(width).collect();
     assert!(text.contains(" #1 "), "history survives unbinding: {text}");
+}
+
+#[tokio::test]
+async fn test_session_menu_terminal_opens_a_terminal_at_the_session_directory() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    // Session `A` stays open in the background, and an open view's directory
+    // outranks the stored one, so the fixture has to move both.
+    let worktree = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/temp/worktree");
+    std::fs::create_dir_all(&worktree).expect("worktree directory");
+    set_session_directory(&mut app, &a, &worktree);
+    app.sidebar.launch_log = Some(Vec::new());
+
+    if !has_terminal() {
+        return;
+    }
+
+    menu_on(&mut app, &a, &MenuAction::Terminal).await;
+    app.handle_key_event(key(KeyCode::Enter)).await;
+
+    let log = app.sidebar.launch_log.as_ref().expect("log");
+    assert_eq!(log.len(), 1, "one terminal launched");
+    assert_eq!(
+        log[0].cwd, worktree,
+        "the terminal starts at the session's worktree"
+    );
+    assert!(
+        app.status.contains("opened") && app.status.contains("terminal"),
+        "status reports the launch: {}",
+        app.status
+    );
+    assert!(!app.notice_open, "a present worktree raises no dialog");
+}
+
+#[tokio::test]
+async fn test_session_menu_terminal_reports_a_missing_worktree_in_a_dialog() {
+    let (mut app, a, _b) = app_with_sidebar().await;
+    // A deleted worktree is a session directory that is no longer a directory.
+    let missing = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target/temp/gone-worktree-does-not-exist");
+    assert!(!missing.exists(), "the fixture path must not exist");
+    set_session_directory(&mut app, &a, &missing);
+    app.sidebar.launch_log = Some(Vec::new());
+
+    if !has_terminal() {
+        return;
+    }
+
+    menu_on(&mut app, &a, &MenuAction::Terminal).await;
+    app.handle_key_event(key(KeyCode::Enter)).await;
+
+    // The menu focuses its target before acting, so the active view holds it.
+    assert!(app.notice_open, "the missing worktree raises the dialog");
+    assert_eq!(app.notice_title, " Worktree missing ");
+    assert!(
+        app.notice_message.contains(&missing.display().to_string()),
+        "the dialog names the path: {}",
+        app.notice_message
+    );
+    assert!(
+        app.sidebar.launch_log.as_ref().is_some_and(Vec::is_empty),
+        "no terminal is started for a missing worktree"
+    );
+
+    // The dialog paints and names its single `OK` button.
+    let painted = draw(&mut app).join("\n");
+    assert!(painted.contains("OK"), "an OK button is drawn: {painted}");
+    assert!(
+        painted.contains("Worktree missing"),
+        "the title is drawn: {painted}"
+    );
+
+    // `Enter` closes it and nothing else happens.
+    app.handle_key_event(key(KeyCode::Enter)).await;
+    assert!(!app.notice_open, "Enter closes the notice");
+}
+
+/// Whether this machine can start a terminal, so a build environment without
+/// one skips the terminal tests rather than failing them.
+fn has_terminal() -> bool {
+    ragent_tui::open_in::launch_spec(
+        ragent_tui::open_in::OpenTarget::Terminal,
+        &std::path::PathBuf::from("/"),
+        &ragent_tui::open_in::LaunchEnv::current(),
+    )
+    .is_some()
+}
+
+/// Points session `id` at `directory`: its open view when it has one, and its
+/// stored row, which a session without a view falls back to.
+fn set_session_directory(app: &mut App, id: &str, directory: &std::path::Path) {
+    if app.session.session_id.as_deref() == Some(id) {
+        app.session.directory = directory.to_path_buf();
+    }
+    if let Some(index) = app.background.position(id)
+        && let Some(mut view) = app.background.remove(index)
+    {
+        view.directory = directory.to_path_buf();
+        app.background.insert_front(view);
+    }
+    let conn = app.storage.conn_lock_for_test().expect("connection");
+    conn.execute(
+        "UPDATE sessions SET directory = ?1 WHERE id = ?2",
+        [directory.display().to_string(), id.to_string()],
+    )
+    .expect("store the session directory");
 }

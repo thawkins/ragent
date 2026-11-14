@@ -111,6 +111,9 @@ pub enum InputAction {
     /// Dismiss the `Clear the input queue?` dialog: the `No` option or `Esc`.
     /// Leaves the queue unchanged (spec `inputqueue` FR-035).
     CancelQueueClear,
+    /// Dismiss the single-button notice dialog (`Enter` or `Esc`). It only
+    /// reports a message, so there is nothing to confirm.
+    DismissNotice,
     /// Confirm the `Clear this project's memory?` dialog's `Yes` option
     /// (opened by `/memory clear`).
     ConfirmMemoryClear,
@@ -682,6 +685,17 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             _ => None,
         };
+    }
+
+    // The single-button notice dialog has nothing to decide: `Enter` and `Esc`
+    // both close it, and every other key is swallowed so it cannot mutate the
+    // editable input buffer behind the modal. Intercepted before the confirm
+    // dialogs so a notice raised over one is not reachable through it.
+    if app.notice_open {
+        match key.code {
+            KeyCode::Enter | KeyCode::Esc => return Some(InputAction::DismissNotice),
+            _ => return None,
+        }
     }
 
     // If the `Clear the input queue?` confirmation dialog (opened by the

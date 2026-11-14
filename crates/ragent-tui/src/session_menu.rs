@@ -54,6 +54,8 @@ pub enum MenuAction {
     OpenUrl(String),
     /// Open the `Open in` submenu.
     OpenIn,
+    /// Open a system terminal at the session's directory (`Terminal`).
+    Terminal,
     /// Pin or unpin the session (same as `p`).
     TogglePin,
     /// Mark the session unread, or read again (same as `u`).
@@ -263,6 +265,20 @@ fn open_in_items(app: &App, target: &MenuTarget) -> Vec<MenuItem> {
     .collect()
 }
 
+/// Whether the top-level `Terminal` item applies to session `session_id`: this
+/// machine knows how to start a terminal for the session's directory.
+///
+/// The check is deliberately about the *machine*, not the directory: a session
+/// whose worktree has been removed still offers the item, so choosing it can
+/// report the missing worktree instead of leaving the user with a menu entry
+/// that silently vanished.
+fn terminal_available(app: &App, session_id: &str) -> bool {
+    let Some(dir) = app.session_directory(session_id) else {
+        return false;
+    };
+    crate::open_in::launch_spec(OpenTarget::Terminal, &dir, &LaunchEnv::current()).is_some()
+}
+
 /// The `PR/MRs` choices: each pull/merge request session `target` has had,
 /// newest first, as `PR #12 [open] title`; choosing one opens its URL.
 fn request_items(app: &App, target: &MenuTarget) -> Vec<MenuItem> {
@@ -380,6 +396,14 @@ fn build_items(app: &App, session_id: &str) -> Vec<MenuItem> {
         item("Archive", Some('a'), MenuAction::Archive, 3),
         item("Delete", Some('d'), MenuAction::Delete, 3),
     ]);
+    // The top-level `Terminal` entry closes the menu: this machine can start a
+    // terminal for the session's directory. It is appended last so the items
+    // above keep the positions and accelerator keys users already know. The
+    // item is never greyed out for a missing worktree - choosing it is what
+    // reports the absence, and a greyed-out row would say nothing about why.
+    if terminal_available(app, session_id) {
+        items.push(item("Terminal", Some('t'), MenuAction::Terminal, 4));
+    }
     items
 }
 
@@ -767,6 +791,7 @@ fn dispatch_project(app: &mut App, project_id: &str, action: MenuAction) -> Resu
             app.open_directory_in(&dir, open)?;
         }
         MenuAction::OpenIn
+        | MenuAction::Terminal
         | MenuAction::MoveTo
         | MenuAction::Requests
         | MenuAction::OpenUrl(_)
@@ -822,6 +847,7 @@ fn dispatch_selection(app: &mut App, action: MenuAction) -> Result<(), String> {
         MenuAction::Archive => app.archive_sessions_by_id(&ids)?,
         MenuAction::Delete => app.request_delete_sessions(ids, "the selection")?,
         MenuAction::OpenIn
+        | MenuAction::Terminal
         | MenuAction::MoveTo
         | MenuAction::Requests
         | MenuAction::OpenUrl(_)
@@ -863,6 +889,7 @@ fn dispatch_session(app: &mut App, session_id: &str, action: MenuAction) -> Resu
         MenuAction::Archive => app.archive_session_by_id(session_id),
         MenuAction::Delete => app.request_delete_session(session_id),
         MenuAction::Launch(target) => app.open_session_in(session_id, target),
+        MenuAction::Terminal => app.open_session_terminal(session_id),
         MenuAction::MoveToSection(section) => {
             app.move_session_to_section(session_id, section.as_deref())
         }

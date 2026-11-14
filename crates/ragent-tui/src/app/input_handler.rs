@@ -2206,6 +2206,13 @@ impl App {
                         self.needs_redraw = true;
                     }
                 }
+                // The single-button notice dialog only reports a message; both
+                // `Enter` and `Esc` close it and nothing else changes.
+                InputAction::DismissNotice => {
+                    if self.notice_open {
+                        self.dismiss_notice();
+                    }
+                }
                 // `Clear this project's memory?` confirmation dialog (opened by
                 // `/memory clear`). Memory is removed only here, on an explicit
                 // `Yes`.

@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+### Fixed - the wrong terminal is started by `Open in` / `Terminal`
+
+- Terminal selection is no longer a fixed list of guesses that ignored the
+  desktop the TUI is running in. Candidates are now tried in this order:
+  `$TERMINAL`, `$TERMCMD`, `xdg-terminal-exec` (which consults the user's own
+  XDG configuration), the emulator the running desktop ships with (read from
+  `$XDG_CURRENT_DESKTOP` / `$XDG_SESSION_DESKTOP`, matched case-insensitively
+  across GNOME, KDE/plasma, XFCE, MATE, Cinnamon, LXDE, LXQt, Budgie, i3, Sway,
+  Hyprland and COSMIC), `$TERM_PROGRAM` (the terminal ragent itself runs in),
+  and only then the static fallback list. On a GNOME 45+ desktop this now picks
+  `ptyxis` instead of whichever entry the old list happened to contain, and an
+  `xdg-terminal-exec` present on `PATH` outranks every guess.
+- `ptyxis`, `kgx`, `cosmic-term`, `qterminal`, `lxterminal`, `mate-terminal`,
+  `tilix` and `i3-sensible-terminal` are recognised, with the correct argument
+  that makes each run a command (`--` for Ptyxis/KGX, `-e` elsewhere).
+- A desktop whose own emulator is not installed falls through to the next
+  candidate (`x-terminal-emulator`, then the rest) rather than reporting that
+  the machine has no terminal at all.
+
+### Added - session menu `Terminal` entry
+
+- The session context menu ends with `Terminal` (`t`), which opens a system
+  terminal at the session's directory - the worktree checkout when the session
+  has one. The entry is offered only when the machine can start a terminal, and
+  it closes the menu so the items above keep the positions and accelerator keys
+  they already had.
+- A session whose worktree has been deleted now reports it: choosing `Terminal`
+  opens a single-button `Worktree missing` notice naming the path (and the
+  branch, when known) instead of the menu entry silently doing nothing. `Enter`
+  or `Esc` closes it and every other key is swallowed, so the input buffer
+  behind it stays locked.
+- An `Open in > Terminal` launch names a login shell explicitly
+  (`gnome-terminal -- $SHELL -l`), because several emulators are clients of a
+  server process that keeps its own working directory and the spawned child is
+  detached - the session's directory was otherwise not where the terminal
+  opened.
+
 ### Added - response language directive
 
 - `agent.response_language` injects a `## Response Language` section as the

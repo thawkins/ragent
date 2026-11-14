@@ -441,6 +441,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         app.queue_clear_confirm_area = Rect::default();
     }
+    // The single-button notice dialog (a worktree that no longer exists, raised
+    // by the session menu's `Terminal` entry). Drawn above the chat with the same
+    // overlay machinery as the confirm dialogs, and dismissed by `Enter`/`Esc`.
+    if app.notice_open {
+        render_notice_dialog(frame, app);
+    } else {
+        app.notice_area = Rect::default();
+    }
     // `Clear this project's memory?` confirmation dialog (`/memory clear`) - a
     // modal drawn above the chat that reuses the shared overlay machinery.
     if app.memory_clear_confirm_open {
@@ -2470,6 +2478,102 @@ fn render_yes_no_confirm(frame: &mut Frame, title: &str, selected: usize) -> Rec
     );
 
     area
+}
+
+/// Render the single-button notice dialog, and return the area it painted.
+///
+/// Unlike [`render_yes_no_confirm`] there is no decision to make: one `OK` button
+/// confirms only that the message was read, so `Enter` and `Esc` both dismiss it.
+/// It is drawn with the same frame, border and footer treatment as the confirm
+/// dialogs so the two cannot look like different kinds of overlay.
+///
+/// # Arguments
+///
+/// * `title` - dialog title, with its surrounding spaces.
+/// * `message` - the line stating what happened.
+/// * `detail` - an optional secondary line, usually the value involved.
+fn render_notice(frame: &mut Frame, title: &str, message: &str, detail: Option<&str>) -> Rect {
+    use ratatui::widgets::List;
+    use ratatui::widgets::ListItem;
+    use ratatui::widgets::ListState;
+
+    const FOOTER: &str = "Enter or Esc closes";
+
+    let mut lines: Vec<&str> = vec![message];
+    if let Some(detail) = detail {
+        lines.push(detail);
+    }
+    // Wrap-free sizing: the longest line plus the `> ` marker decides the width,
+    // and the message, its detail and the footer decide the height.
+    let widest = lines
+        .iter()
+        .map(|l| l.chars().count())
+        .chain(std::iter::once(FOOTER.chars().count()))
+        .chain(std::iter::once(title.chars().count().saturating_sub(2)))
+        .max()
+        .unwrap_or(0) as u16;
+    let width = (widest + 6).clamp(30, frame.area().width);
+    let height = lines.len() as u16 + 4;
+    let area = centered_rect_fixed(width, height, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Yellow));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+
+    let items: Vec<ListItem> = lines
+        .iter()
+        .map(|line| {
+            ListItem::new(Line::from(Span::styled(
+                *line,
+                Style::default().fg(Color::White),
+            )))
+        })
+        .chain(std::iter::once(ListItem::new(Line::from(Span::styled(
+            "> OK",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )))))
+        .collect();
+    let mut state = ListState::default();
+    // The `OK` row is the last item and the only selectable one.
+    state.select(Some(lines.len()));
+    frame.render_stateful_widget(List::new(items), chunks[0], &mut state);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            FOOTER,
+            Style::default().fg(Color::DarkGray),
+        )))
+        .alignment(Alignment::Center),
+        chunks[1],
+    );
+
+    area
+}
+
+/// Render the single-button notice dialog and cache its area.
+fn render_notice_dialog(frame: &mut Frame, app: &mut App) {
+    app.notice_area = render_notice(
+        frame,
+        &app.notice_title,
+        &app.notice_message,
+        app.notice_detail.as_deref(),
+    );
 }
 
 /// Render the `Clear the input queue?` confirmation dialog (spec `inputqueue`
