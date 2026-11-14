@@ -296,14 +296,14 @@ async fn test_pull_request_counts_rate_limit_widens_the_interval() {
             service.refresh_with(&project, Some(&source)).await,
             RefreshOutcome::Failed { rate_limited: true }
         );
-        expected = (expected * 2).min(Duration::from_secs(3600));
+        expected = (expected * 2).min(Duration::from_hours(1));
         assert_eq!(service.interval(&project.id), expected);
         assert!(!service.is_due(&project.id), "no retry inside the interval");
         // An explicit refresh may try again at once; the back-off is kept.
         service.force_due(&project.id);
         assert!(service.is_due(&project.id));
     }
-    assert_eq!(expected, Duration::from_secs(3600));
+    assert_eq!(expected, Duration::from_hours(1));
     assert_eq!(stored_counts(&m), vec![("feature/a".to_string(), None)]);
 }
 
