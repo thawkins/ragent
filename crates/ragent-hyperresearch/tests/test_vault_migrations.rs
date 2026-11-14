@@ -100,20 +100,31 @@ fn test_apply_pending_is_idempotent() {
 fn test_apply_pending_advances_a_version_zero_ledger() {
     // A version-0 ledger (a vault predating this build's ledger format) is the
     // only state that can make `apply_pending` enter its migration loop, so it
-    // is the one case that drives the production ledger write. Seeding the file
-    // by hand instead would prove nothing about that write.
+    // is the one case that drives the production ledger write. `read_version`
+    // reports a missing ledger as version 0, so the v0 vault is simply a vault
+    // with no ledger at all - nothing is written here except by the loop.
     //
     // `MIGRATIONS` is empty today, so the loop first has to be reachable at all:
-    // with the real (zero) step count the seeded version already equals the
+    // with the real (zero) step count the vault's version already equals the
     // target and the loop body - the only writer of the ledger - is skipped,
     // which is exactly the regression this test exists to catch.
     let _guard = with_step_count(1);
     let root = scratch("version-zero");
-    // The version-0 ledger is seeded as the exact bytes the migration loop
-    // writes (`migrations::ledger_bytes`), so `read_version` sees a real v0
-    // vault and the loop below is the only thing that advances it.
-    std::fs::write(root.join(MIGRATIONS_FILE), migrations::ledger_bytes(0))
-        .expect("seed version-0 ledger");
+    // The v0 vault is the state `read_version` already gives a missing ledger
+    // under the real (empty) list: the version this build reports for a vault
+    // that predates the ledger. Nothing is written here to create it - no
+    // `std::fs::write` reproduces any part of the ledger - so the migration loop
+    // below is the only writer there is. A seeded file would leave this case
+    // green even if the loop stopped writing, or changed what it writes.
+    assert_eq!(
+        migrations::MIGRATIONS.len(),
+        0,
+        "the v0 case is the real empty-list version"
+    );
+    assert!(
+        !root.join(MIGRATIONS_FILE).exists(),
+        "nothing but the migration loop writes the ledger"
+    );
 
     let version = apply_pending(&root).expect("the ledger advances");
     assert_eq!(
@@ -127,13 +138,11 @@ fn test_apply_pending_advances_a_version_zero_ledger() {
         version,
         "the version the loop wrote reads back"
     );
-    // The production write is exercised, not reproduced: the migration loop owns
-    // the only ledger write, and these assert what it persisted - the bare
-    // version number and a newline, the format `read_version` parses on every
-    // later run. Reproducing it with a hand-rolled `write` would still pass if
-    // the loop stopped writing the ledger or changed its format.
+    // The production write is the only thing that created the ledger, so these
+    // assert what the loop persisted - the bare version number and a newline,
+    // the format `read_version` parses on every later run.
     assert_eq!(
-        std::fs::read_to_string(root.join(MIGRATIONS_FILE)).expect("ledger"),
+        std::fs::read_to_string(root.join(MIGRATIONS_FILE)).expect("the loop wrote a ledger"),
         migrations::ledger_bytes(version),
         "the file the loop left behind is the ledger format, recording the new version"
     );

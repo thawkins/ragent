@@ -130,12 +130,12 @@ fn test_macros_do_not_panic_when_stdout_and_stderr_are_closed() {
             // "one probe ran" assertion below is what makes a stale name fail.
             "test_cli_out_macros::test_macro_output_probe",
             "--nocapture",
-            "--ignored",
         ])
-        .env("RAGENT_CLI_OUT_PROBE", "1")
         // The marker path is passed in rather than recomputed in the child: the
         // helper derives it from the process id, and the child's id is not the
-        // parent's, so a recomputed path could never be observed here.
+        // parent's, so a recomputed path could never be observed here. The child
+        // closes its own streams only when it finds this variable, so the probe
+        // running inside this binary's own test pass cannot touch our stdio.
         .env("RAGENT_CLI_OUT_PROBE_MARKER", &marker)
         .output()
         .expect("probe runs");
@@ -181,6 +181,33 @@ fn test_macros_do_not_panic_when_stdout_and_stderr_are_closed() {
     );
 }
 
+#[test]
+fn test_a_filter_that_names_no_test_exits_zero_and_reports_no_probe() {
+    // The false positive the parent above guards against, shown directly: a
+    // filter naming no test is a green run ("0 passed", exit 0), so `status`
+    // and `--exact` alone can never prove the probe ran.
+    let output = std::process::Command::new(std::env::current_exe().expect("test binary path"))
+        .args([
+            "--exact",
+            "test_cli_out_macros::no_such_probe",
+            "--nocapture",
+        ])
+        .output()
+        .expect("binary runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "a filter that matches nothing is a green run: status={:?}",
+        output.status
+    );
+    assert_eq!(
+        counted(&stdout, "test").max(counted(&stderr, "test")),
+        0,
+        "a filter that matches nothing runs no test\nstdout: {stdout}\nstderr: {stderr}"
+    );
+}
+
 /// The marker content the probe writes once it has driven every macro.
 const PROBE_FINISHED: &str = "ran: macros drove the closed streams";
 
@@ -223,48 +250,48 @@ fn inherited_probe_marker() -> Option<std::path::PathBuf> {
 
 /// Probe body: closes stdout and stderr, then drives every macro.
 ///
-/// Ignored unless `RAGENT_CLI_OUT_PROBE` is set, so a plain `cargo nextest run`
-/// never closes its own streams. When it is set the body replaces this process's
-/// stdout and stderr with `/dev/null` file descriptors and closes them, which is
-/// exactly the `| head -1` shape the helpers exist for.
+/// Always runs (no `#[ignore]` and no env gate): a filter that names this test
+/// wrongly then matches nothing and the harness exits `0` having run zero
+/// tests, which is invisible. Running the body unconditionally turns that into
+/// a panic, because the body closes this process's stdout and stderr. The parent
+/// therefore always passes `RAGENT_CLI_OUT_PROBE_MARKER`; selected as a child
+/// probe it closes the streams, and selected inside the parent's own run - with
+/// no marker, and with the parent's own streams left alone - it is a no-op.
 #[test]
-#[ignore = "probe body; driven by test_macros_do_not_panic_when_stdout_and_stderr_are_closed"]
 fn test_macro_output_probe() {
-    if std::env::var_os("RAGENT_CLI_OUT_PROBE").is_none() {
+    if !cfg!(unix) {
         return;
     }
 
     // Announce that the probe body ran, before the streams are closed: the
     // parent's only other evidence would be the harness's own output, which the
     // next lines send to /dev/null.
-    let marker = inherited_probe_marker().expect("parent passes the marker path");
+    let Some(marker) = inherited_probe_marker() else {
+        // Not driven as a probe (this binary's own run of the test, or a filter
+        // that named it by accident): leave the harness's streams alone.
+        return;
+    };
     if let Some(parent) = marker.parent() {
         let _ = std::fs::create_dir_all(parent); // INTENTIONAL: best-effort, the create below is the assertion
     }
     std::fs::write(&marker, b"started").expect("probe marker");
 
-    // Closing fd 1 and 2 is only meaningful on Unix; elsewhere the probe body
-    // is a no-op and the parent's assertion still holds (the macros are
-    // exercised by the other tests through `*_io_log`).
-    #[cfg(unix)]
-    {
-        // SAFETY: this is a probe process whose only job is to close its own
-        // streams; it does no further I/O that anyone observes.
-        #[allow(unsafe_code)]
-        unsafe {
-            let dev_null = std::fs::OpenOptions::new()
-                .write(true)
-                .open("/dev/null")
-                .expect("open /dev/null");
-            use std::os::fd::AsRawFd;
-            // Redirect first so the macro writes have a live target, then close
-            // it: the following writes hit EBADF rather than a full console.
-            let fd = dev_null.as_raw_fd();
-            libc::dup2(fd, 1);
-            libc::dup2(fd, 2);
-            libc::close(1);
-            libc::close(2);
-        }
+    // SAFETY: this is a probe process whose only job is to close its own
+    // streams; it does no further I/O that anyone observes.
+    #[allow(unsafe_code)]
+    unsafe {
+        let dev_null = std::fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/null")
+            .expect("open /dev/null");
+        use std::os::fd::AsRawFd;
+        // Redirect first so the macro writes have a live target, then close
+        // it: the following writes hit EBADF rather than a full console.
+        let fd = dev_null.as_raw_fd();
+        libc::dup2(fd, 1);
+        libc::dup2(fd, 2);
+        libc::close(1);
+        libc::close(2);
     }
 
     // Every macro, in every documented form: bare, formatted, named argument.

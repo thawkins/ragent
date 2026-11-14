@@ -527,10 +527,44 @@ pub fn cap_read(bytes: &[u8], max_bytes: usize) -> String {
 /// write_atomic(std::path::Path::new("/tmp/state.json"), b"{}").expect("write");
 /// ```
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    write_atomic_with(path, |file| {
-        use std::io::Write as _;
-        file.write_all(bytes)
-    })
+    write_atomic_stream(path, |out| out.write_all(bytes))
+}
+
+/// Write a file atomically, streaming its contents from a [`std::io::Write`]
+/// sink: a unique temp file in the same directory, the callback, `sync_all`,
+/// then a rename.
+///
+/// This is the form to use when the payload is already held as borrowed parts
+/// (a header plus a large `&str`) and must not be copied into one buffer first:
+/// the callback receives the still-open temp file as a `Write` sink, so each
+/// part is written straight through and the peak memory stays the caller's own
+/// copy. [`write_atomic_with`] is the same helper handing the raw [`File`] to a
+/// caller that needs `sync_data`/`set_len` and the like.
+///
+/// # Errors
+///
+/// Returns the underlying [`std::io::Error`] from the callback or from the
+/// rename. A failed write or rename removes the temp file best-effort and
+/// leaves `path` untouched.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::io::Write as _;
+/// use ragent_types::guard::write_atomic_stream;
+///
+/// let body = "report body";
+/// write_atomic_stream(std::path::Path::new("/tmp/report.md"), |out| {
+///     out.write_all(b"# header\n")?;
+///     out.write_all(body.as_bytes())
+/// })
+/// .expect("write");
+/// ```
+pub fn write_atomic_stream<F>(path: &Path, write: F) -> std::io::Result<()>
+where
+    F: FnOnce(&mut dyn std::io::Write) -> std::io::Result<()>,
+{
+    write_atomic_with(path, |file| write(file))
 }
 
 /// Write a file atomically, streaming its contents from a writer callback:

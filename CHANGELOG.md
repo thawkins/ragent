@@ -5,20 +5,28 @@
 ### Changed - sub-agent reports stream to disk, and the audit ledger stays truthful
 
 - `persist_task_output` takes the report as the caller's shared `Arc<str>` - the
-  same allocation `TaskEntry::result` stores - and writes the header and the
-  body into the temp file in turn, so persisting a sub-agent's full report no
-  longer builds a second report-sized buffer while the completion handler still
-  holds the original.
+  same allocation `TaskEntry::result` stores - and streams the header, the
+  borrowed body and the trailing newline one part at a time into the temp file
+  through the new `ragent_types::guard::write_atomic_stream`, a `&mut dyn Write`
+  sink over the same hardened `write_atomic_with` path (unique temp file,
+  `sync_all`, rename, owner-only mode, temp cleanup on failure). Persisting a
+  sub-agent's full report therefore builds no copy of it at all while the
+  completion handler still holds the original, and `write_atomic` is now a thin
+  wrapper over the sink form.
 - `ragent-hyperresearch`'s vault-migration test drives the production ledger
-  write through `apply_pending` instead of replaying it with `std::fs::write`,
-  seeds the version-0 ledger with `migrations::ledger_bytes` (the loop's own
-  writer) and asserts the ledger file the loop left behind, so a loop that
-  stopped writing the ledger, or changed its format, now fails the test.
-- The `cli_out` macro probe is verified to run under the registered module name
+  write through `apply_pending` from a vault that has no ledger file at all (the
+  version-0 state), so no part of the seed is replayed with `std::fs::write`
+  either, and it asserts the returned version, the ledger the loop created
+  (read back and compared against `migrations::ledger_bytes`) and the settled
+  re-run. Stubbing the loop's ledger write out makes the test fail.
+- The `cli_out` macro probe runs under the registered module name
   (`test_cli_out_macros::test_macro_output_probe` selects exactly one test,
-  where the bare name selects none and still exits 0) and also asserts that the
-  probe body finished (it rewrites its marker only after driving every macro),
-  so a filter naming the wrong module fails instead of passing silently.
+  where the bare name selects none and still exits 0), is neither `#[ignore]`d
+  nor env-gated so it panics rather than passing silently if it is ever selected
+  outside the probe, and the parent asserts the probe started, that the filter
+  selected exactly one test, and that the body finished. A companion test pins
+  the false positive itself: a filter naming no test is a green run that runs
+  zero tests.
 - `docs/reports/code-audit.md` leaves every Complex item unmarked: none of the
   work in this release implements one.
 

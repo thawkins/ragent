@@ -18,32 +18,34 @@
 | `validate_id`, `Untrusted::fence`, `prompt_for_permission` tests | Fixed: `test_vault_id.rs`, `test_untrusted_fence.rs`, `test_permission_prompt.rs` |
 
 **Implementation status (this pass):** Medium-effort items 1-10, 16, 20, 21 and
-22 are implemented and verified (see the *Done* marks in the plan tables below).
+22 are implemented and verified (see the *Medium Effort* table below).
 `cargo fmt --check`, `cargo clippy --workspace --all-targets` (zero warnings) and
 the twelve code `check-*` guard scripts are clean, and
 `cargo nextest run --workspace` is 16146/16146 (17 skipped). Medium 11-15 and
-17-19 and 23-28, and every Complex item, remain open.
+17-19 and 23-28, and every Complex item, remain open: the Complex table below
+carries no status column because none of it is started.
 
 **Review follow-ups (this pass).** Four points raised on the PR are addressed in
-the code rather than the report: `guard::write_atomic` is the buffered wrapper
-over a new streaming `guard::write_atomic_with`, and the completion handler
-builds the report body once as a shared `Arc<str>` - the same allocation
-`TaskEntry::result` stores - which `persist_task_output` writes into the temp
-file in turn with the header, so no second report-sized buffer is built while
-the loop's own `String` is still live; `test_vault_migrations` drives the
-production ledger write through `apply_pending` (via a test-only step-count
-override, since `MIGRATIONS` is empty and a bare version-0 seed never reaches the
-loop), seeds a version-0 ledger with `migrations::ledger_bytes` exactly as the
-loop writes it, and asserts the returned version, the ledger file the loop left
-behind (read back and compared against `ledger_bytes`), and the settled re-run -
-none of it replayed with `std::fs::write`; the `cli_out` macro probe filter names
-the registered module `test_cli_out_macros::test_macro_output_probe` (verified to
-select exactly one test, where the bare name selects none and still exits 0),
-and asserts that the probe ran, that the `--exact` filter selected exactly one
-test, and that the probe body finished (it rewrites its marker only after driving
-every macro), so a stale name fails instead of passing silently; and every
-Complex item stays unmarked, because none of the files this pass changed
-implements one.
+the code rather than the report: `guard::write_atomic` and the new
+`guard::write_atomic_stream` are thin wrappers over `guard::write_atomic_with`,
+whose `&dyn std::io::Write` sink takes the header, the borrowed body and the
+trailing newline one part at a time, so `persist_task_output` never builds a
+copy of the report - the completion handler keeps a single shared `Arc<str>`
+(the same allocation `TaskEntry::result` stores) and streams that. A test asserts
+the sink form, and a second asserts the target is untouched until every part
+lands;
+`test_vault_migrations` drives the production ledger write through `apply_pending`
+from a vault that has **no** ledger at all (`read_version` reports a missing
+ledger as version 0), so no `std::fs::write` reproduces the seed either, and
+asserts the returned version, the ledger the loop created - read back and
+compared against `migrations::ledger_bytes` - and the settled re-run;
+the `cli_out` macro probe names the registered module
+`test_cli_out_macros::test_macro_output_probe` (verified: that name selects
+exactly one test, while the bare name selects none and still exits 0), is
+neither `#[ignore]`d nor env-gated so a *wrong* filter panics instead of passing
+silently, and the parent asserts the probe started, that the filter selected
+exactly one test, and that the body finished; and every Complex item stays
+unmarked, because none of the files this pass changed implements one.
 
 **Fixed here: sidebar heading drops the description.** A project's `Properties`
 description was shown only when the heading had at least six columns left after

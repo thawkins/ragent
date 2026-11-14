@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ragent_types::guard::{write_atomic, write_atomic_with};
+use ragent_types::guard::{write_atomic, write_atomic_stream, write_atomic_with};
 
 /// A per-test scratch directory under `target/temp` (NFR-004: tests never write
 /// outside the workspace).
@@ -132,6 +132,40 @@ fn test_write_atomic_to_a_bare_file_name_uses_the_current_directory() {
     std::env::set_current_dir(&previous).expect("restore cwd");
     result.expect("bare file name writes");
     assert_eq!(std::fs::read(dir.join("bare.json")).expect("read"), b"body");
+}
+
+#[test]
+fn test_write_atomic_stream_streams_each_part_into_one_file() {
+    // The `Write`-sink form exists so a caller holding a body by reference writes
+    // its header and body separately through one sink, with no concatenated copy
+    // of the payload in between.
+    let dir = scratch("stream-sink");
+    let target = dir.join("report.md");
+    let body = "the borrowed body";
+    write_atomic_stream(&target, |out| {
+        out.write_all(b"# header\n")?;
+        out.write_all(body.as_bytes())
+    })
+    .expect("write");
+    assert_eq!(
+        std::fs::read(&target).expect("read"),
+        b"# header\nthe borrowed body"
+    );
+}
+
+#[test]
+fn test_write_atomic_stream_keeps_the_target_until_the_last_part_lands() {
+    // The sink form shares the hardened path: the target only appears once every
+    // part wrote and the temp was synced, so a reader never sees a partial file.
+    let dir = scratch("stream-atomic");
+    let target = dir.join("report.md");
+    std::fs::write(&target, b"previous").expect("seed");
+    write_atomic_stream(&target, |out| {
+        out.write_all(b"# header\n")?;
+        out.flush()
+    })
+    .expect("write");
+    assert_eq!(std::fs::read(&target).expect("read"), b"# header\n");
 }
 
 #[test]

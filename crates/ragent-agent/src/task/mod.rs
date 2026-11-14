@@ -41,9 +41,10 @@ use crate::session::processor::SessionProcessor;
 ///
 /// `content` is the shared report body as an `Arc<str>` - the very same
 /// allocation `TaskEntry::result` stores, so writing the report never copies it.
-/// The header and the borrowed body are written to the temp file in turn
-/// through [`ragent_types::guard::write_atomic_with`], which keeps the peak at
-/// the caller's one copy of the report rather than a second report-sized buffer.
+/// The header, the borrowed body and the trailing newline are streamed into the
+/// temp file in turn through [`ragent_types::guard::write_atomic_stream`], so
+/// the peak stays the caller's one copy of the report: no concatenated
+/// `Vec<u8>` of the whole report is ever built.
 #[doc(hidden)]
 pub fn persist_task_output(
     working_dir: &std::path::Path,
@@ -65,16 +66,15 @@ pub fn persist_task_output(
         return None;
     }
     let file = dir.join(format!("{task_id}.md"));
-    // The body is the full untruncated sub-agent reply, so it is written
+    // The body is the full untruncated sub-agent reply, so it is streamed
     // straight from the caller's `Arc<str>` into the temp file: the header
     // first, then the shared body and its trailing newline - the same
     // allocation the task entry keeps - so no concatenated or copied buffer of
-    // the report is ever built.
+    // the report is ever built while the loop's own `String` is still live.
     let header = format!(
         "# {task_id} - {agent_name}\n\ntask: {task_prompt}\n\nduration_ms: {duration_ms}\n\n---\n\n"
     );
-    let written = ragent_types::guard::write_atomic_with(&file, |out| {
-        use std::io::Write as _;
+    let written = ragent_types::guard::write_atomic_stream(&file, |out| {
         out.write_all(header.as_bytes())?;
         out.write_all(content.as_bytes())?;
         out.write_all(b"\n")
