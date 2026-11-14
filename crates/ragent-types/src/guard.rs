@@ -555,9 +555,11 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// process (or two processes) never collide; a stale temp left by a crashed run
 /// is skipped rather than wedging the write.
 ///
-/// Streaming the body keeps the peak memory at the caller's own copy: a report
-/// persisted from a borrowed `&str` writes its header and body to the temp file
-/// in turn, instead of concatenating them into one buffer first.
+/// The callback receives the still-open temp file, so the peak memory stays the
+/// caller's own copy: a report persisted from a borrowed `&str` writes its
+/// header and body to the temp file in turn, instead of concatenating them into
+/// one buffer first. Buffering in a `BufWriter` over that file would give the
+/// same peak, since each part is larger than the buffer.
 ///
 /// # Errors
 ///

@@ -156,6 +156,34 @@ fn test_macros_do_not_panic_when_stdout_and_stderr_are_closed() {
         "the probe did not run: the --exact filter selected no test, so this \
          case would pass without exercising a single macro\nstdout: {stdout}\nstderr: {stderr}"
     );
+    // The marker proves the body started; this proves the filter named exactly
+    // it. A prefix or substring that matched a sibling as well would start more
+    // than one test, and `--exact` plus this count is what pins the name. The
+    // count comes from the harness's `running N tests` line: the probe closes
+    // the streams before the `N passed` summary is written, so that line is the
+    // only count that survives.
+    let started = counted(&stdout, "test").max(counted(&stderr, "test"));
+    assert_eq!(
+        started, 1,
+        "the --exact filter must select exactly one test (the probe)\n\
+         stdout: {stdout}\nstderr: {stderr}"
+    );
+}
+
+/// The number preceding `label` in the harness's output, if it wrote one.
+///
+/// `counted(stdout, "test")` reads the `running 1 test` / `running 3 tests`
+/// line (the harness emits `test` or `tests` to agree with the count); a stream
+/// with no such line counts as zero.
+fn counted(stream: &str, label: &str) -> u64 {
+    stream
+        .lines()
+        .find_map(|line| {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            let idx = words.iter().position(|w| *w == label)?;
+            words.get(idx.checked_sub(1)?)?.parse().ok()
+        })
+        .unwrap_or(0)
 }
 
 /// Path of the marker the probe body creates once it has started.

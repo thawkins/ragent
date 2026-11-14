@@ -25,14 +25,17 @@ the twelve code `check-*` guard scripts are clean, and
 17-19 and 23-28, and every Complex item, remain open.
 
 **Review follow-ups (this pass).** Four points raised on the PR are addressed in
-the code rather than the report: `guard::write_atomic` is now the buffered
-wrapper over a new streaming `guard::write_atomic_with`, so the sub-agent report
-is written from the caller's borrowed `&str` with no second copy of it;
+the code rather than the report: `guard::write_atomic` is the buffered wrapper
+over a new streaming `guard::write_atomic_with`, so the sub-agent report is
+written from the caller's borrowed `&str` with no second report-sized buffer;
 `test_vault_migrations` drives the production ledger write through
-`apply_pending` from a seeded version-0 ledger instead of replaying the line by
-hand; the `cli_out` macro probe filter names the module `tests/all.rs` actually
-registers and asserts the probe ran, so an unmatched filter fails; and the
-Complex items are left unmarked, since none of them is implemented.
+`apply_pending` (via a test-only step-count override, since `MIGRATIONS` is empty
+and a bare version-0 seed never reaches the loop) and asserts the persisted
+version, the format and the settled re-run; the `cli_out` macro probe filter
+names the module `tests/all.rs` actually registers, and asserts both that the
+probe ran and that the `--exact` filter selected exactly one test, so a stale
+name fails instead of passing silently; and every Complex item stays unmarked,
+because none of the files this pass changed implements one.
 
 **Fixed here: sidebar heading drops the description.** A project's `Properties`
 description was shown only when the heading had at least six columns left after

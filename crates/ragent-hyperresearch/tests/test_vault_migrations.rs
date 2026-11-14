@@ -4,21 +4,21 @@
 //! are: a vault with no ledger is the version-1 case (an un-started vault must
 //! not be rewritten), and a vault written by a *newer* build is refused rather
 //! than silently downgraded. `MIGRATIONS` is empty today (the format is at
-//! version 1), so `apply_pending` on a fresh vault writes the ledger once and
-//! is idempotent afterwards. These tests pin the ledger file format too, since
-//! `read_version` is what every later run parses.
+//! version 1), so `apply_pending` on a fresh vault writes no ledger at all and
+//! is idempotent.
 //!
-//! `apply_pending` deliberately writes the ledger only when a step actually
-//! runs (the loop body owns the write), so with an empty `MIGRATIONS` list a
-//! fresh vault stays ledger-less and reads back as version 1 either way. These
-//! tests pin that, and pin the loop's write by driving it from a seeded
-//! version-0 ledger: that is the only state that enters the loop today. If a
-//! future migration is added the "settled vault" assertions below should be
-//! revisited to assert the ledger file directly.
+//! `apply_pending` writes the ledger only from its migration loop (the loop body
+//! owns the write), so with an empty `MIGRATIONS` list nothing a fresh vault
+//! does can reach that write. The loop is therefore driven through the crate's
+//! `#[doc(hidden)]` step-count override, which stands in for "N steps are
+//! pending": `test_apply_pending_advances_a_version_zero_ledger` seeds a
+//! version-0 ledger and asserts what the loop persisted, the format it wrote,
+//! and that a second run neither advances nor rewrites. If a real migration is
+//! added, the override can be dropped from that test.
 
 use ragent_hyperresearch::core::Error;
 use ragent_hyperresearch::core::migrations::{
-    MIGRATIONS, MIGRATIONS_FILE, apply_pending, current_version, read_version,
+    self, MIGRATIONS, MIGRATIONS_FILE, apply_pending, current_version, read_version,
 };
 
 /// A fresh scratch vault root under `target/temp/` (NFR-004: tests never write
@@ -43,6 +43,22 @@ fn test_current_version_is_at_least_one() {
         current_version(),
         u32::try_from(MIGRATIONS.len()).expect("step count fits") + 1
     );
+}
+
+/// Take the crate's process-global step-count override for `count`, recovering
+/// from a poisoned lock.
+///
+/// `MIGRATIONS` is a `&'static` list, so `apply_pending`'s loop cannot be driven
+/// from a test by adding a step the way a real migration would. The crate
+/// therefore exposes a `#[doc(hidden)]` override that stands in for "N steps are
+/// pending", which is what lets these tests reach the loop body - and with it
+/// the production ledger write - while the real list stays empty.
+fn with_step_count(count: usize) -> std::sync::MutexGuard<'static, ()> {
+    let guard = migrations::step_count_override_mutex()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    migrations::set_step_count_override(Some(count));
+    guard
 }
 
 #[test]
@@ -83,10 +99,15 @@ fn test_apply_pending_is_idempotent() {
 #[test]
 fn test_apply_pending_advances_a_version_zero_ledger() {
     // A version-0 ledger (a vault predating this build's ledger format) is the
-    // only state that makes `apply_pending` enter its migration loop while
-    // `MIGRATIONS` is empty, so it is the one case that drives the production
-    // ledger write. Seeding the file by hand instead would prove nothing about
-    // that write.
+    // only state that can make `apply_pending` enter its migration loop, so it
+    // is the one case that drives the production ledger write. Seeding the file
+    // by hand instead would prove nothing about that write.
+    //
+    // `MIGRATIONS` is empty today, so the loop first has to be reachable at all:
+    // with the real (zero) step count the seeded version already equals the
+    // target and the loop body - the only writer of the ledger - is skipped,
+    // which is exactly the regression this test exists to catch.
+    let _guard = with_step_count(1);
     let root = scratch("version-zero");
     std::fs::write(root.join(MIGRATIONS_FILE), "0\n").expect("seed version-0 ledger");
 
@@ -96,6 +117,7 @@ fn test_apply_pending_advances_a_version_zero_ledger() {
         current_version(),
         "a v0 vault reaches the current version"
     );
+    assert_eq!(version, 2, "one step takes a v0 vault to v2");
     assert_eq!(
         std::fs::read_to_string(root.join(MIGRATIONS_FILE)).expect("ledger"),
         format!("{version}\n"),
