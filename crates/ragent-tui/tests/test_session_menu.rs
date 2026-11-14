@@ -150,6 +150,9 @@ async fn test_session_menu_m_opens_menu_with_accelerators_and_rules() {
         (MenuAction::Delete, "Delete"),
         (MenuAction::Terminal, "Terminal"),
     ] {
+        if action == MenuAction::Terminal && !has_terminal {
+            continue;
+        }
         let line = &lines[line_of(&action)];
         let body = line.trim_start_matches('│').trim_end_matches('│');
         let hint = body.trim_end().chars().last().expect("a hint column");
