@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Fixed - "New session on branch" no longer leaves an orphaned worktree
+
+- `ProjectManager::create_session` created the session's git worktree before
+  inserting the session row, and nothing undid the worktree when the insert
+  failed: the worktree stayed under `worktrees/` with no session pointing to
+  it, so after a restart neither the session, its branch nor its worktree
+  could be found from the sidebar. The worktree is now removed again (new
+  `worktree::remove_session_worktree`) and the error names the branch.
+- The TUI reported the failure only on the status line, cut down to the
+  outermost error, and did not log it. It now keeps the whole error chain and
+  logs `branch session was not created` at warn level.
+- New tests: a branch session is still listed after the database file is
+  reopened, and a refused insert removes the worktree and keeps the cause.
+- `test_pull_request_counts` uses `Duration::from_hours(1)`, clearing two
+  `clippy::duration_suboptimal_units` warnings.
+
 ### Changed - sub-agent reports stream to disk, and the audit ledger stays truthful
 
 - `persist_task_output` takes the report as the caller's shared `Arc<str>` - the
