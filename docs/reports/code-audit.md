@@ -17,21 +17,22 @@
 | SSE stream duplication | Partly fixed: the buffer-cap preamble is one helper in `providers/http_client.rs`; the Anthropic / Azure Anthropic loop was not re-checked |
 | `validate_id`, `Untrusted::fence`, `prompt_for_permission` tests | Fixed: `test_vault_id.rs`, `test_untrusted_fence.rs`, `test_permission_prompt.rs` |
 
-**Implementation status (this pass):** Medium-effort items 1-8, 9, 10, 20, 21 and
+**Implementation status (this pass):** Medium-effort items 1-10, 16, 20, 21 and
 22 are implemented and verified (see the *Done* marks in the plan tables below).
-`cargo fmt --check`, `cargo clippy --workspace --all-targets` and the six
-`check-*` guard scripts are clean, and `cargo nextest run --workspace` is
-16143/16144. Medium 11-19 and 23-28, and every Complex item, remain open.
+`cargo fmt --check`, `cargo clippy --workspace --all-targets` (zero warnings) and
+all twelve `check-*` guard scripts are clean, and `cargo nextest run --workspace`
+is 16144/16144 (17 skipped). Medium 11-15 and 17-19 and 23-28, and every Complex
+item, remain open.
 
-**Known-open defect (Medium 16, pre-existing).** The TUI project sidebar shows a
-project's `Properties` description only when the heading has at least six columns
-left after its name and trailing hints, so at the default 32-column sidebar a
-long name plus a remote kind (`laughing_kirch [github] v`) drops it entirely.
-`test_project_menu_properties_saves_description_and_backend` fails on this and
-failed before this pass. A fix must rank the description above the remote kind
-and the collapsed count, which changes the heading layout asserted by several
-`test_sessions_sidebar` cases (the pinned `Pinned v` row, the `[github]` suffix,
-the remote-kind cases); it is left open rather than half-applied.
+**Fixed here: sidebar heading drops the description.** A project's `Properties`
+description was shown only when the heading had at least six columns left after
+its name and trailing hints, so at the default 32-column sidebar a long name plus
+a remote kind (`laughing_kirch [github] v`) dropped it entirely and
+`test_project_menu_properties_saves_description_and_backend` failed. The heading
+now ranks name, then description, then remote kind and collapsed count, with the
+chevron always kept: `laughing_kirch v (Agent home)`. The description takes the
+room the name and chevron leave, and the kind/count are added only while they
+still fit beside it, so nothing is pushed off the row.
 
 ---
 
@@ -199,7 +200,7 @@ the remote-kind cases); it is left open rather than half-applied.
 | 13 | `McpProbe` duplicate | `ragent-tui/src/app/connector.rs:428`, `src/connectors.rs:317` | Move the probe into `ragent-connectors` and share |
 | 14 | Retryable-error keyword lists duplicate | `ragent-bench/src/model.rs:531`, `ragent-agent/src/session/history.rs:716` | Extract `is_retryable_error(&str)` + status classifier into a shared crate |
 | 15 | Three backoff schedules | `http_client.rs:350`, `team/manager.rs:115`, `bench/model.rs:504` | One `Backoff` helper with a configurable base/cap/jitter |
-| 16 **Not done** | TUI browse-panel renderers near-duplicate | `ragent-tui/src/layout.rs:642` vs `:1540` | Parameterise one renderer over a row-source trait; keep the panel-specific headings as data |
+| 16 | TUI browse-panel renderers near-duplicate | `ragent-tui/src/layout.rs:642` vs `:1540` | Parameterise one renderer over a row-source trait; keep the panel-specific headings as data |
 | 17 | 29 identical browser state-machine functions | `ragent-tui/src/app/state.rs:2001`, `ragent-connectors/src/browse.rs:76` | Extract a shared `BrowseState` (query, category, marketplace, scroll, cursor) generic over the entry type |
 | 18 | SSE stream loop duplicated across providers | `providers/anthropic.rs:460`, `azure_resource.rs:528`, + 7 preamble sites | Route all providers through `providers/sse.rs`: one `consume_sse` taking a per-event closure |
 | 19 | Tool-name casing / file-name mismatch | `tools-core` tool files | Pick PascalCase for the user-facing names (already 28) or snake_case, and rename files to match the registered name |
