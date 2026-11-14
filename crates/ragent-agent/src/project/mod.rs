@@ -374,9 +374,9 @@ impl ProjectManager {
             .map_err(|e| {
                 if let Err(cleanup) = worktree::remove_session_worktree(&project, &path) {
                     tracing::warn!(
-                        error = %cleanup,
-                        worktree = %path.display(),
-                        "could not remove the worktree of a session that was not recorded"
+                        "could not remove the worktree {} of a session that was not \
+                         recorded: {cleanup:#}",
+                        path.display()
                     );
                 }
                 e.context(format!(

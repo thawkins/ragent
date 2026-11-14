@@ -344,7 +344,7 @@ impl App {
             match result {
                 Ok((created, project)) => self.focus_created_session(&created, &project),
                 Err(message) => {
-                    tracing::warn!(error = %message, "branch session was not created");
+                    tracing::warn!("branch session was not created: {message}");
                     self.status = format!("session: {message}");
                 }
             }

@@ -404,12 +404,12 @@ fn test_session_worktree_branch_session_survives_reopening_the_database() {
     assert!(checkout.worktree.is_some(), "the worktree is kept");
 }
 
-/// When the session row cannot be inserted, the worktree created for it is
-/// removed again and the error names the branch, so no orphaned worktree is
-/// left on disk with no session pointing to it.
-#[test]
-fn test_session_worktree_removed_when_the_session_cannot_be_recorded() {
-    let base = fixture_dir("worktree_rollback_on_insert_failure");
+/// Creates a branch session for `branch` while `trigger` (SQL installed on a
+/// second connection) makes recording it fail, then checks that the worktree
+/// is gone, no session row was kept, and the error keeps the branch and the
+/// cause.
+fn assert_worktree_rolled_back(name: &str, branch: &str, trigger: &str) {
+    let base = fixture_dir(name);
     let db = base.join("ragent.db");
     let root = base.join("trees");
     let repo = base.join("repo");
@@ -419,33 +419,55 @@ fn test_session_worktree_removed_when_the_session_cannot_be_recorded() {
     let sessions = ragent_agent::session::SessionManager::new(storage.clone(), events.clone());
     let projects = ragent_agent::project::ProjectManager::new(storage.clone(), events);
     let project = projects.resolve_for_dir(&repo).expect("project");
-    // Every session insert now fails, as a locked or damaged database would.
-    rusqlite::Connection::open(&db)
-        .expect("second connection")
-        .execute_batch(
-            "CREATE TRIGGER refuse_sessions BEFORE INSERT ON sessions \
-             BEGIN SELECT RAISE(ABORT, 'refused by test'); END;",
-        )
-        .expect("install trigger");
+    let conn = rusqlite::Connection::open(&db).expect("second connection");
+    conn.execute_batch(trigger).expect("install trigger");
 
     let err = projects
-        .create_session(&sessions, &project.id, Some("feature/rollback"), &root)
-        .expect_err("the insert is refused");
+        .create_session(&sessions, &project.id, Some(branch), &root)
+        .expect_err("recording the session is refused");
 
     let message = format!("{err:#}");
-    assert!(
-        message.contains("feature/rollback"),
-        "names the branch: {message}"
-    );
+    assert!(message.contains(branch), "names the branch: {message}");
     assert!(
         message.contains("refused by test"),
         "keeps the cause: {message}"
     );
-    let dest = session_worktree_path(&root, &project, "feature/rollback");
+    let dest = session_worktree_path(&root, &project, branch);
     assert!(!dest.exists(), "the worktree directory is removed");
     let listed = git(&repo, &["worktree", "list", "--porcelain"]);
     assert!(
-        !listed.contains("feature-rollback"),
+        !listed.contains(&path_slug(branch)),
         "git no longer lists the worktree: {listed}"
+    );
+    let rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sessions WHERE branch = ?1",
+            [branch],
+            |r| r.get(0),
+        )
+        .expect("count sessions");
+    assert_eq!(rows, 0, "no session row points at the removed worktree");
+}
+
+/// A refused session insert removes the worktree created for it.
+#[test]
+fn test_session_worktree_removed_when_the_session_cannot_be_recorded() {
+    assert_worktree_rolled_back(
+        "worktree_rollback_on_insert_failure",
+        "feature/rollback",
+        "CREATE TRIGGER refuse_sessions BEFORE INSERT ON sessions \
+         BEGIN SELECT RAISE(ABORT, 'refused by test'); END;",
+    );
+}
+
+/// A refused project update after the session insert rolls the insert back
+/// too, so removing the worktree never strands a recorded session.
+#[test]
+fn test_session_worktree_removed_when_the_project_update_fails() {
+    assert_worktree_rolled_back(
+        "worktree_rollback_on_project_update_failure",
+        "feature/rollback-update",
+        "CREATE TRIGGER refuse_projects BEFORE UPDATE ON projects \
+         BEGIN SELECT RAISE(ABORT, 'refused by test'); END;",
     );
 }
