@@ -26,6 +26,7 @@ url = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 serial_test = "4"
 tempfile = "3.14"
+libc = "0.2"
 
 [lints]
 workspace = true

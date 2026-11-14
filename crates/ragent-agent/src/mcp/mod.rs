@@ -710,7 +710,7 @@ impl McpClient {
                 // that makes every later `reify` of that package fail with
                 // ENOTEMPTY, which surfaces only as "connection closed". Sweep
                 // it once per process before any child is spawned.
-                npx_cache::ensure_npx_cache_repaired();
+                npx_cache::ensure_npx_cache_repaired().await;
 
                 // `KillOnDrop` makes the child die with its transport. Without
                 // it, the process is abandoned to the OS when the client goes

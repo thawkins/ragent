@@ -6,6 +6,23 @@
 //! `AGENTS.md` ("Test Layout") and
 //! `docs/reports/testconsolidation-review.md`.
 
+/// The crate-wide lock serialising tests that touch a process-global (`set_current_dir`,
+/// `set_var`, `HOME`, `XDG_CONFIG_HOME`).
+///
+/// Under nextest each test is its own process, but a `cargo test` run shares one,
+/// so every mutating test in every child file must contend on the SAME mutex.
+pub fn global_env_mutex() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// Acquire [`global_env_mutex`], recovering from a poisoned lock.
+pub fn global_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    global_env_mutex()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[path = "test_activity_event.rs"]
 mod test_activity_event;
 
@@ -20,6 +37,9 @@ mod test_automation_run;
 
 #[path = "test_canonical_tool_parts.rs"]
 mod test_canonical_tool_parts;
+
+#[path = "test_cli_out_macros.rs"]
+mod test_cli_out_macros;
 
 #[path = "test_cron_every_no_start.rs"]
 mod test_cron_every_no_start;
@@ -74,6 +94,9 @@ mod test_message_display;
 
 #[path = "test_panic_guard.rs"]
 mod test_panic_guard;
+
+#[path = "test_read_capped.rs"]
+mod test_read_capped;
 
 #[path = "test_resource.rs"]
 mod test_resource;
@@ -131,6 +154,9 @@ mod test_typed_args_decision;
 
 #[path = "test_trigger_types.rs"]
 mod test_trigger_types;
+
+#[path = "test_write_atomic.rs"]
+mod test_write_atomic;
 
 #[path = "test_unified_redaction.rs"]
 mod test_unified_redaction;

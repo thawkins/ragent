@@ -107,19 +107,59 @@ fn default_npm_cache() -> Option<PathBuf> {
 /// remembering to sweep. [`std::sync::OnceLock`] makes concurrent first
 /// connects wait for the single sweep instead of racing it, and guarantees it
 /// happens before any caller spawns its own `npx`.
-pub fn ensure_npx_cache_repaired() {
+///
+/// The sweep walks the cache and waits on an advisory file lock, so it runs on
+/// the blocking pool rather than inline: `connect_inner` is an async fn, and
+/// blocking one of its threads while `npx` is being spawned would stall the
+/// runtime alongside it.
+pub async fn ensure_npx_cache_repaired() {
     static REPAIRED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    REPAIRED.get_or_init(|| {
-        // `None` means npm has never populated a cache on this host, so there
-        // is nothing to repair; the sweep logs its own outcome otherwise.
-        let _ = repair_default_npx_cache(); // INTENTIONAL: no npm cache on this host
-    });
+    if REPAIRED.get().is_some() {
+        return;
+    }
+    // A panic inside the sweep would otherwise make every later caller retry
+    // it; the sweep is best-effort, so a failure is recorded as "done".
+    if let Err(join_error) = tokio::task::spawn_blocking(|| {
+        REPAIRED.get_or_init(|| {
+            // The sweep is `async` only for the lock's back-off, which is a
+            // poll loop with no real asynchrony: driving it on this blocking
+            // thread with a current-thread runtime would need a runtime handle
+            // the thread does not have, so the whole task owns its own one.
+            tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .map_or_else(
+                    |error| {
+                        tracing::warn!(
+                            error = %error,
+                            "npx cache sweep runtime could not start; skipping the sweep"
+                        );
+                    },
+                    |runtime| {
+                        let local = tokio::task::LocalSet::new();
+                        local.block_on(&runtime, async {
+                            // `None` means npm has never populated a cache on
+                            // this host, so there is nothing to repair; the
+                            // sweep logs its own outcome otherwise.
+                            let _ = repair_default_npx_cache().await; // INTENTIONAL: no npm cache on this host
+                        });
+                    },
+                );
+        });
+    })
+    .await
+    {
+        tracing::warn!(
+            error = %join_error,
+            "npx cache sweep task failed; continuing without it"
+        );
+    }
 }
 
 /// Resolve the real cache root, take the cross-process repair lock, and sweep.
 ///
 /// Returns `None` when there is no npm `_npx` cache to inspect.
-pub fn repair_default_npx_cache() -> Option<RepairReport> {
+pub async fn repair_default_npx_cache() -> Option<RepairReport> {
     let root = npx_cache_root()?;
 
     // The lock only serialises concurrent *ragent* processes, so two of them
@@ -129,7 +169,7 @@ pub fn repair_default_npx_cache() -> Option<RepairReport> {
     // other holder is doing exactly the same thing - so a timeout degrades to a
     // best-effort sweep rather than a failure.
     let lock_target = root.join(".ragent-repair");
-    let _lock = match acquire_repair_lock(&lock_target) {
+    let _lock = match acquire_repair_lock(&lock_target).await {
         Ok(file) => Some(file),
         Err(error) => {
             tracing::debug!(
@@ -160,7 +200,12 @@ pub fn repair_default_npx_cache() -> Option<RepairReport> {
 ///
 /// An advisory `flock` on a companion file serialises concurrent ragent
 /// processes; the lock is released when the returned [`File`] is dropped.
-fn acquire_repair_lock(lock_target: &Path) -> std::io::Result<File> {
+///
+/// The wait between attempts is an async sleep: this runs inside
+/// [`ensure_npx_cache_repaired`]'s blocking task, but it shares that file with
+/// the async connect path, and a thread-blocking wait here would be the same
+/// stall one layer down if the function is ever called inline.
+async fn acquire_repair_lock(lock_target: &Path) -> std::io::Result<File> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -176,7 +221,7 @@ fn acquire_repair_lock(lock_target: &Path) -> std::io::Result<File> {
                 if std::time::Instant::now() >= deadline {
                     return Err(error);
                 }
-                std::thread::sleep(std::time::Duration::from_millis(25));
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
             }
         }
     }

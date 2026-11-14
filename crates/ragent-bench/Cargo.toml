@@ -26,7 +26,6 @@ futures.workspace = true
 reqwest.workspace = true
 async-trait = { workspace = true }
 rustc-hash = { workspace = true }
-calamine = { workspace = true }
 tempfile = "3.14"
 
 # Internal crates
@@ -37,6 +36,9 @@ ragent-types = { path = "../ragent-types" }
 
 [dev-dependencies]
 criterion = { workspace = true }
+# Only `tests/test_bench_core.rs` opens a workbook; the library never does, so
+# this stays a dev-dependency rather than an unused runtime one.
+calamine = { workspace = true }
 
 [[bench]]
 name = "agent_loop"

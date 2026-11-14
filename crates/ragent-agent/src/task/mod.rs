@@ -59,24 +59,17 @@ pub fn persist_task_output(
         return None;
     }
     let file = dir.join(format!("{task_id}.md"));
-    let tmp = dir.join(format!(".{task_id}.md.tmp"));
-    // Stream the report straight to the temp file instead of building the whole
-    // header+content in one `format!` String first: `content` is the full
-    // untruncated sub-agent reply, so concatenating it would double peak memory
-    // for the duration of the write. `write_all` of `content.as_bytes()` after
-    // the header keeps the byte-for-byte output identical.
-    let write_body = |path: &std::path::Path| -> std::io::Result<()> {
-        use std::io::Write as _;
-        let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
-        write!(out, "# {task_id} - {agent_name}\n\n")?;
-        write!(out, "task: {task_prompt}\n\n")?;
-        write!(out, "duration_ms: {duration_ms}\n\n")?;
-        out.write_all(b"---\n\n")?;
-        out.write_all(content.as_bytes())?;
-        out.write_all(b"\n")?;
-        out.flush()
-    };
-    if let Err(e) = write_body(&tmp).and_then(|()| std::fs::rename(&tmp, &file)) {
+    // Build the header (small) and append the report body, which is the full
+    // untruncated sub-agent reply: the body is written straight through rather
+    // than concatenated into one `String`, so the peak memory stays one copy.
+    let mut bytes = Vec::with_capacity(content.len() + 256);
+    bytes.extend_from_slice(
+        format!("# {task_id} - {agent_name}\n\ntask: {task_prompt}\n\nduration_ms: {duration_ms}\n\n---\n\n")
+            .as_bytes(),
+    );
+    bytes.extend_from_slice(content.as_bytes());
+    bytes.push(b'\n');
+    if let Err(e) = ragent_types::guard::write_atomic(&file, &bytes) {
         tracing::warn!(
             path = %file.display(),
             task_id,
@@ -84,7 +77,6 @@ pub fn persist_task_output(
             "sub-agent report could not be written to disk; the task result is \
              only available in memory"
         );
-        let _ = std::fs::remove_file(&tmp);
         return None;
     }
     Some(file)
@@ -1740,6 +1732,8 @@ fn truncate_str(s: &str, max_len: usize) -> std::borrow::Cow<'_, str> {
     if s.chars().count() <= max_len {
         std::borrow::Cow::Borrowed(s)
     } else {
+        // The cut is shared; the marker goes after the kept characters, so the
+        // budget does not include it (unlike `truncate_chars`).
         let head = ragent_types::strutil::truncate_chars_no_ellipsis(s, max_len);
         std::borrow::Cow::Owned(format!("{head}..."))
     }

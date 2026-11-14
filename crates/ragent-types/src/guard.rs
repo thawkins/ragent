@@ -507,3 +507,84 @@ pub fn cap_read(bytes: &[u8], max_bytes: usize) -> String {
         }
     }
 }
+
+/// Write `bytes` to `path` atomically: a unique temp file in the same
+/// directory, then a rename.
+///
+/// Every on-disk state file ragent owns needs the same three properties, and
+/// each was previously re-implemented where it was needed:
+///
+/// * **Atomicity** - the temp file lives in the target's directory so the
+///   rename stays on one filesystem and a reader never sees a half-written
+///   file, and a crash mid-write leaves the previous contents intact.
+/// * **Durability** - the temp is `sync_all`ed before the rename, so a crash
+///   just after it cannot expose a target whose bytes were never flushed.
+/// * **No symlink clobber (SEC-072)** - the temp is opened with
+///   [`open_new_owner_only`] (`create_new`, `0o600`), so a pre-placed symlink
+///   at the predictable temp path is refused rather than followed, and the
+///   rename carries the owner-only mode to the target. That matters because
+///   these files include the config and the credential store.
+///
+/// The temp name carries the pid and a monotonic counter, so two writers in one
+/// process (or two processes) never collide; a stale temp left by a crashed run
+/// is skipped rather than wedging the write.
+///
+/// # Errors
+///
+/// Returns the underlying [`std::io::Error`]. A failed write or rename removes
+/// the temp file best-effort and leaves `path` untouched.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_types::guard::write_atomic;
+///
+/// write_atomic(std::path::Path::new("/tmp/state.json"), b"{}").expect("write");
+/// ```
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let file_name = path
+        .file_name()
+        .map_or_else(|| "state".to_string(), |n| n.to_string_lossy().into_owned());
+    let mut tmp = std::path::PathBuf::new();
+    let mut opened = None;
+    for _ in 0..8 {
+        let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        tmp = path.with_file_name(format!(".{file_name}.{}.{seq}.tmp", std::process::id()));
+        match open_new_owner_only(&tmp) {
+            Ok(file) => {
+                opened = Some(file);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    let Some(mut file) = opened else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("no free temp file name for {}", path.display()),
+        ));
+    };
+    if let Err(e) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+        drop(file);
+        let _ = std::fs::remove_file(&tmp); // INTENTIONAL: best-effort temp cleanup
+        return Err(e);
+    }
+    drop(file);
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp); // INTENTIONAL: best-effort temp cleanup
+        return Err(e);
+    }
+    Ok(())
+}

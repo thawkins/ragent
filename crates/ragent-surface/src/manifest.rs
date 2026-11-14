@@ -134,20 +134,12 @@ pub fn fetch_and_parse(client: &reqwest::blocking::Client, url: &str) -> Option<
 }
 
 /// Read a stream into a byte vector, refusing a body larger than `max_bytes`.
-fn read_capped(mut reader: impl std::io::Read, max_bytes: u64) -> Result<Vec<u8>, ()> {
-    let mut bytes = Vec::new();
-    let mut chunk = vec![0_u8; 8 * 1024];
-    loop {
-        let read = reader.read(&mut chunk).map_err(|_| ())?;
-        if read == 0 {
-            break;
-        }
-        if (bytes.len() + read) as u64 > max_bytes {
-            return Err(());
-        }
-        bytes.extend_from_slice(&chunk[..read]);
-    }
-    Ok(bytes)
+///
+/// The ceiling rule is shared ([`ragent_types::read_capped`]); this wrapper
+/// only flattens the two failure cases into `()` because the fetch that calls
+/// it reports "no manifest metadata" either way.
+fn read_capped(reader: impl std::io::Read, max_bytes: u64) -> Result<Vec<u8>, ()> {
+    ragent_types::read_capped::read_capped(reader, max_bytes).map_err(|_| ())
 }
 
 /// Extract `(owner, repo)` from an `https://github.com/<owner>/<repo>` URL.

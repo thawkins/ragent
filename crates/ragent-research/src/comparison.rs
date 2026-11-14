@@ -201,14 +201,13 @@ fn prepare_summary(summary: &str) -> PreparedSummary {
 /// space before its `...`. The byte budget and the boundary step come from
 /// [`ragent_types::strutil`]; only the trim is local.
 fn truncate_cell(s: &str, max: usize) -> String {
-    if s.len() > max {
-        let head = ragent_types::strutil::truncate_bytes_no_ellipsis(s, max)
-            .trim_end()
-            .to_string();
-        format!("{head}...")
-    } else {
-        s.to_string()
+    if s.len() <= max {
+        return s.to_string();
     }
+    // Trim the trailing whitespace before the marker lands, so a cell never
+    // ends with a dangling space before its `...`; the cut itself is shared.
+    let head = ragent_types::strutil::truncate_bytes_no_ellipsis(s, max);
+    format!("{}...", head.trim_end())
 }
 
 /// Extract a short cell value for `criterion` from a prepared summary.

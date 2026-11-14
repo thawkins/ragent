@@ -80,6 +80,9 @@ mod test_gitlab_fetch_methods;
 #[path = "test_gitlab_helpers_coverage.rs"]
 mod test_gitlab_helpers_coverage;
 
+#[path = "test_gitlab_pipeline_tools.rs"]
+mod test_gitlab_pipeline_tools;
+
 #[path = "test_gitlab_legacy_migration.rs"]
 mod test_gitlab_legacy_migration;
 

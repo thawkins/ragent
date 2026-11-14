@@ -2537,22 +2537,10 @@ impl Config {
             )
         })?;
 
-        // Atomic write to the canonical global config path.
-        let tmp_path = target.with_extension("json.tmp");
-        std::fs::write(&tmp_path, &content).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to write restored config temp file '{}': {}",
-                tmp_path.display(),
-                e
-            )
-        })?;
-        std::fs::rename(&tmp_path, &target).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp_path); // INTENTIONAL: best-effort temp cleanup
-            anyhow::anyhow!(
-                "Failed to rename restored config to '{}': {}",
-                target.display(),
-                e
-            )
+        // Atomic write to the canonical global config path, through the same
+        // owner-only, `create_new` temp form the save path uses.
+        ragent_types::guard::write_atomic(&target, content.as_bytes()).map_err(|e| {
+            anyhow::anyhow!("Failed to restore config to '{}': {}", target.display(), e)
         })?;
 
         Ok(target)
@@ -2613,51 +2601,12 @@ impl Config {
             return Ok(());
         }
 
-        let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
-        if let Some(parent) = parent {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to create config directory '{}': {}",
-                    parent.display(),
-                    e
-                )
-            })?;
-        }
-        let dir = parent.unwrap_or_else(|| Path::new("."));
-        // Unique temp name in the target directory so `rename` stays on one
-        // filesystem (required for atomicity). pid + nanos keeps concurrent
-        // writers from colliding without adding a dependency.
-        let tmp_path = dir.join(format!(
-            ".{}.{}.{}.tmp",
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("ragent"),
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
-        ));
-        let write_result = (|| -> std::io::Result<()> {
-            use std::io::Write as _;
-            // SEC-022: the config holds plaintext credentials, so the temp is
-            // created owner-only (`0o600`) rather than at the process umask
-            // (typically `0o644`); the rename carries the mode to the target.
-            let mut file = ragent_types::guard::open_owner_only(&tmp_path)?;
-            file.write_all(json.as_bytes())?;
-            // Flush to stable storage before the rename so a crash after the
-            // rename cannot expose a target whose contents were not yet
-            // durable.
-            file.sync_all()?;
-            std::fs::rename(&tmp_path, path)
-        })();
-        if let Err(e) = write_result {
-            let _ = std::fs::remove_file(&tmp_path); // INTENTIONAL: best-effort temp cleanup
-            return Err(anyhow::anyhow!(
-                "Failed to write config file '{}': {}",
-                path.display(),
-                e
-            ));
-        }
+        // SEC-022: the config holds plaintext credentials, so the shared
+        // atomic write creates its temp owner-only (`0o600`, `create_new`) and
+        // flushes it before the rename; see [`ragent_types::guard::write_atomic`].
+        ragent_types::guard::write_atomic(path, json.as_bytes()).map_err(|e| {
+            anyhow::anyhow!("Failed to write config file '{}': {}", path.display(), e)
+        })?;
 
         Ok(())
     }

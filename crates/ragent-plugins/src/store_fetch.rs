@@ -30,9 +30,6 @@ use std::time::Duration;
 use crate::store_index::{StoreEndpoint, StoreEndpointError, StoreEntry, StoreKind};
 use crate::store_provider::provider_for;
 
-/// Read/write chunk size for streaming a store index into memory (ANTIPAT L9).
-const STREAM_CHUNK_BYTES: usize = 65_536;
-
 /// Wall-clock timeout and body-size ceiling for one store-index fetch.
 ///
 /// Populated from `plugins.stores` configuration (`timeout_ms`,
@@ -241,22 +238,13 @@ pub fn fetch_bytes(endpoint: &StoreEndpoint, limits: &FetchLimits) -> Result<Vec
 ///
 /// Pure and reader-agnostic so the size cap is unit-testable offline with a
 /// [`std::io::Cursor`]; [`fetch_bytes`] passes the HTTP response as the reader.
-pub fn read_capped(mut reader: impl std::io::Read, max_bytes: u64) -> Result<Vec<u8>, StoreError> {
-    let mut bytes = Vec::new();
-    let mut chunk = vec![0_u8; STREAM_CHUNK_BYTES];
-    loop {
-        let read = reader.read(&mut chunk).map_err(|e| StoreError::Network {
-            detail: e.to_string(),
-        })?;
-        if read == 0 {
-            break;
-        }
-        if (bytes.len() + read) as u64 > max_bytes {
-            return Err(StoreError::TooLarge { limit: max_bytes });
-        }
-        bytes.extend_from_slice(&chunk[..read]);
-    }
-    Ok(bytes)
+pub fn read_capped(reader: impl std::io::Read, max_bytes: u64) -> Result<Vec<u8>, StoreError> {
+    ragent_types::read_capped::read_capped(reader, max_bytes).map_err(|e| {
+        e.map_err(
+            |detail| StoreError::Network { detail },
+            |limit| StoreError::TooLarge { limit },
+        )
+    })
 }
 
 /// The label for a store, used in error text and reporting (FR-013).
