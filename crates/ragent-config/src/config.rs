@@ -88,9 +88,13 @@ pub struct Config {
     /// Injected into the system prompt as a dedicated standing section so the
     /// model keeps answering in this language even when its training data or
     /// the surrounding material is dominated by another one (DeepSeek models
-    /// default to Chinese without an explicit constraint). Unset or blank
-    /// emits no section, leaving the model's own default untouched.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// default to Chinese without an explicit constraint).
+    ///
+    /// Defaults to `"English"`, so a config that never mentions the key still
+    /// pins the answer language. A blank value is the explicit opt-out: it
+    /// emits no section and leaves the model's own default untouched.
+    #[serde(default = "default_response_language")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub response_language: Option<String>,
     /// Additional directories to scan for skill definitions.
     #[serde(default)]
@@ -389,7 +393,7 @@ impl Default for Config {
             command: HashMap::new(),
             mcp: HashMap::new(),
             instructions: Vec::new(),
-            response_language: None,
+            response_language: Some("English".to_string()),
             skill_dirs: Vec::new(),
             experimental: ExperimentalFlags::default(),
             hooks: Vec::new(),
@@ -537,6 +541,14 @@ pub struct AgentPerfConfig {
 
 fn default_step_budget_secs() -> u64 {
     300
+}
+
+/// Serde default for [`Config::response_language`]: a config that omits the key
+/// still pins the answer language, so a model that would otherwise drift (a
+/// DeepSeek model reverting to Chinese) is constrained without any setup. A
+/// blank value written explicitly is the opt-out.
+fn default_response_language() -> Option<String> {
+    Some("English".to_string())
 }
 
 fn default_stall_timeout_secs() -> u64 {

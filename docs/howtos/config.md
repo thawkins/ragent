@@ -194,7 +194,7 @@ provider entry (`thinking`, `env`, `models`) still merges.
 | `provider` | Deep merge per provider key: provider-level `api`, `env`, `thinking`, and `options` are replaced when the overlay specifies them, while `models` entries are merged per-model-id so a partial overlay (e.g. `provider.openrouter.models."anthropic/claude-sonnet-4".thinking`) does not discard lower-layer fields such as `name` or `capabilities`. Model-level `thinking` overrides provider-level `thinking`. |
 | `agent`, `command`, `mcp` | Per-key overlay replaces base entry. |
 | `permission`, `instructions`, `skill_dirs`, `hooks` | Append (union). |
-| `response_language` | Overlay overrides base when `Some` (a value, not additive). |
+| `response_language` | Overlay overrides base when `Some` (a value, not additive; default `"English"`, `""` opts out). |
 | `bash.allowlist`, `bash.denylist` | Union (deduplicated). |
 | `prices` | Per-model last-wins (overlay entry replaces base entry for the same model id). |
 | `code_index` | Overlay wins **only** for explicitly-set fields. The `specified` flags are propagated so the value survives a reload. |
@@ -672,8 +672,14 @@ The language the model must answer in, e.g. `"English"`.
 }
 ```
 
-Type: `Option<String>`. Default: unset (no section is emitted, so the model's
-own default applies). A project-level value overrides the global one.
+Type: `Option<String>`. Default: `"English"`. A project-level value overrides the
+global one.
+
+The default is `"English"`, so a config that never mentions the key still pins
+the answer language: no setup is needed to stop a model drifting. Set the key to
+any other language to answer in that one, or to `""` to opt out and leave the
+model's own default alone (no section is emitted for a blank or whitespace-only
+value).
 
 This is the fix for models that drift into another language. DeepSeek models in
 particular are trained predominantly on Chinese data and default to Chinese
@@ -684,7 +690,15 @@ rebuilt from config on every step, a section there survives compaction.
 The section is emitted **last**, after every other instruction, and states that
 it outranks tool output, source material, earlier turns and compacted summaries.
 It reaches tool-free single-step agents too, which take the early return that
-skips project context. A blank or whitespace-only value is treated as unset.
+skips project context.
+
+To opt out, write the key explicitly as an empty string:
+
+```json
+{
+  "response_language": ""
+}
+```
 
 ---
 

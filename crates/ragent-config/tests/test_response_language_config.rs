@@ -2,17 +2,35 @@
 //!
 //! The field names the language the model must answer in. It is a value (not an
 //! additive list), so a project-level setting overrides the global one, and it
-//! must round-trip through JSON without appearing in a serialised config that
-//! never set it.
+//! must round-trip through JSON. An omitted key defaults to English, so a model
+//! that would otherwise drift back to its training language is constrained
+//! without any setup; an explicitly blank value is the opt-out.
 
 use ragent_config::Config;
 
 #[test]
-fn test_response_language_defaults_to_none() {
-    assert!(
-        Config::default().response_language.is_none(),
-        "an unconfigured language must stay unset"
+fn test_response_language_defaults_to_english() {
+    assert_eq!(
+        Config::default().response_language.as_deref(),
+        Some("English"),
+        "a config that never names a language must still pin English"
     );
+}
+
+#[test]
+fn test_response_language_defaults_to_english_when_key_is_omitted() {
+    // The serde default must agree with `Config::default()`, or a parsed config
+    // and a constructed one would behave differently.
+    let config: Config = serde_json::from_str("{}").expect("parse");
+    assert_eq!(config.response_language.as_deref(), Some("English"));
+}
+
+#[test]
+fn test_response_language_blank_is_an_opt_out() {
+    // Blank is how a user who wants the model's own default back turns the
+    // directive off without deleting the key.
+    let config: Config = serde_json::from_str(r#"{"response_language": ""}"#).expect("parse");
+    assert_eq!(config.response_language.as_deref(), Some(""));
 }
 
 #[test]
@@ -23,13 +41,13 @@ fn test_response_language_parses_from_json() {
 }
 
 #[test]
-fn test_response_language_is_omitted_when_unset() {
-    // An unset field must not be written back, so a save does not litter every
-    // user's config with a null nobody asked for.
+fn test_response_language_is_written_when_set() {
+    // The default is now a real value, so it is serialised: a save writes the
+    // language out, which is what lets a user see and change it in their config.
     let json = serde_json::to_string(&Config::default()).expect("serialize");
     assert!(
-        !json.contains("response_language"),
-        "an unset language must not be serialized: {json}"
+        json.contains(r#""response_language":"English""#),
+        "the default language must be visible in a saved config: {json}"
     );
 }
 

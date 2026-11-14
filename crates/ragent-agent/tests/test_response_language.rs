@@ -5,15 +5,16 @@
 //! correction is lost at the next compaction. The section is therefore part of
 //! the system prompt, which is rebuilt from config on every step.
 //!
-//! These tests pin the three properties that make the feature safe: an unset or
-//! blank value emits nothing (so existing prompts stay byte-identical), a set
-//! value emits the named language, and the section reaches both a tool-bearing
-//! agent and the tool-free early-return path.
+//! These tests pin the properties that make the feature safe: an omitted key
+//! still emits the English section (so no setup is needed), a blank value is the
+//! explicit opt-out and emits nothing, a set value emits the named language, and
+//! the section reaches both a tool-bearing agent and the tool-free early-return
+//! path.
 
 use std::path::Path;
 
 use ragent_agent::agent::{
-    AgentInfo, AgentMode, build_response_language_section, build_system_prompt_with_context,
+    AgentInfo, AgentMode, build_response_language_section,
     build_system_prompt_with_storage_and_memory_and_config, builtin_agents,
 };
 use ragent_config::Config;
@@ -46,12 +47,13 @@ fn tool_free(agent: &AgentInfo) -> AgentInfo {
 }
 
 #[test]
-fn test_response_language_section_is_absent_when_unset() {
+fn test_response_language_section_defaults_to_english() {
+    // No configuration at all still pins the answer language: a model that would
+    // otherwise drift back to its training language is constrained out of the box.
     let config = Config::default();
-    assert!(
-        build_response_language_section(Some(&config)).is_none(),
-        "an unconfigured Response Language must emit no section"
-    );
+    let section = build_response_language_section(Some(&config)).expect("section is emitted");
+    assert!(section.starts_with("## Response Language"), "{section}");
+    assert!(section.contains("in English"), "{section}");
 }
 
 #[test]
@@ -145,19 +147,28 @@ fn test_response_language_reaches_a_tool_free_prompt() {
 }
 
 #[test]
-fn test_response_language_absent_from_a_prompt_when_unset() {
-    // The default must leave the prompt free of the section, so a user who has
-    // not opted in sees no behaviour change.
-    let prompt = build_system_prompt_with_context(
-        builtin("general"),
+fn test_response_language_absent_from_a_prompt_when_blank() {
+    // A blank value is the opt-out: the user asked for the model's own default,
+    // so no section is emitted at all.
+    let agent = builtin("general");
+    let config = with_language("");
+    let prompt = build_system_prompt_with_storage_and_memory_and_config(
+        agent,
         Path::new("."),
         "",
         None,
         None,
         None,
         None,
+        None,
+        None,
+        None,
+        Some(&config),
     );
-    assert!(!prompt.contains("## Response Language"), "unset is silent");
+    assert!(
+        !prompt.contains("## Response Language"),
+        "a blank language is the explicit opt-out"
+    );
 }
 
 #[test]

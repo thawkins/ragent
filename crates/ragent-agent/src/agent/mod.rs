@@ -2488,11 +2488,12 @@ team_task_complete(team_name: \"x\", task_id: \"y\")  # only works inside a team
 /// next compaction. A section in the system prompt survives compaction because
 /// the prompt is rebuilt from config on every step.
 ///
-/// `config.response_language` names the language; an unset or whitespace-only
-/// value yields `None` so the prompt stays byte-identical to its pre-feature
-/// form for every user who has not opted in. The wording states that the rule
-/// outranks surrounding material and earlier turns, because a plain
-/// "respond in English" is what models ignore first.
+/// `config.response_language` names the language, defaulting to `"English"` so a
+/// config that never mentions the key is still constrained. A whitespace-only
+/// value is the explicit opt-out and yields `None`, leaving the model's own
+/// default alone. The wording states that the rule outranks surrounding material
+/// and earlier turns, because a plain "respond in English" is what models ignore
+/// first.
 #[must_use]
 pub fn build_response_language_section(config: Option<&ragent_config::Config>) -> Option<String> {
     let language = config?
