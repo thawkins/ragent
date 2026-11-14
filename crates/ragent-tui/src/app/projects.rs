@@ -321,7 +321,7 @@ impl App {
             let result = manager
                 .create_session(&sessions, &project.id, Some(&branch), &root)
                 .map(|session| (session, project))
-                .map_err(|e| e.to_string());
+                .map_err(|e| format!("{e:#}"));
             pending
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -343,7 +343,10 @@ impl App {
         for result in finished {
             match result {
                 Ok((created, project)) => self.focus_created_session(&created, &project),
-                Err(message) => self.status = format!("session: {message}"),
+                Err(message) => {
+                    tracing::warn!("branch session was not created: {message}");
+                    self.status = format!("session: {message}");
+                }
             }
             self.sidebar.dirty = true;
             self.needs_redraw = true;

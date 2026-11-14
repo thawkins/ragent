@@ -363,3 +363,111 @@ fn test_session_worktree_prune_moves_sessions_to_a_directory_that_exists() {
         "the branch is remembered"
     );
 }
+
+/// A branch session survives a restart: after the database file is closed
+/// and reopened, the session is still listed under its project with its
+/// branch and worktree.
+#[test]
+fn test_session_worktree_branch_session_survives_reopening_the_database() {
+    let base = fixture_dir("worktree_survives_reopen");
+    let db = base.join("ragent.db");
+    let root = base.join("trees");
+    let repo = base.join("repo");
+    init_repo(&repo);
+    let (session_id, project_id) = {
+        let storage = std::sync::Arc::new(ragent_storage::Storage::open(&db).expect("storage"));
+        let events = std::sync::Arc::new(ragent_agent::event::EventBus::new(64));
+        let sessions = ragent_agent::session::SessionManager::new(storage.clone(), events.clone());
+        let projects = ragent_agent::project::ProjectManager::new(storage, events);
+        let project = projects.resolve_for_dir(&repo).expect("project");
+        let session = projects
+            .create_session(&sessions, &project.id, Some("feature/restart"), &root)
+            .expect("branch session");
+        (session.id, project.id)
+    };
+
+    let storage = ragent_storage::Storage::open(&db).expect("reopen storage");
+    let groups = storage.list_sessions_grouped().expect("grouped");
+    let group = groups
+        .iter()
+        .find(|g| g.project_id == project_id)
+        .expect("the project is listed after reopening");
+    assert!(
+        group.sessions.iter().any(|s| s.id == session_id),
+        "the branch session is listed after reopening"
+    );
+    let checkout = storage
+        .session_checkout(&session_id)
+        .expect("checkout query")
+        .expect("checkout row");
+    assert_eq!(checkout.branch.as_deref(), Some("feature/restart"));
+    assert!(checkout.worktree.is_some(), "the worktree is kept");
+}
+
+/// Creates a branch session for `branch` while `trigger` (SQL installed on a
+/// second connection) makes recording it fail, then checks that the worktree
+/// is gone, no session row was kept, and the error keeps the branch and the
+/// cause.
+fn assert_worktree_rolled_back(name: &str, branch: &str, trigger: &str) {
+    let base = fixture_dir(name);
+    let db = base.join("ragent.db");
+    let root = base.join("trees");
+    let repo = base.join("repo");
+    init_repo(&repo);
+    let storage = std::sync::Arc::new(ragent_storage::Storage::open(&db).expect("storage"));
+    let events = std::sync::Arc::new(ragent_agent::event::EventBus::new(64));
+    let sessions = ragent_agent::session::SessionManager::new(storage.clone(), events.clone());
+    let projects = ragent_agent::project::ProjectManager::new(storage.clone(), events);
+    let project = projects.resolve_for_dir(&repo).expect("project");
+    let conn = rusqlite::Connection::open(&db).expect("second connection");
+    conn.execute_batch(trigger).expect("install trigger");
+
+    let err = projects
+        .create_session(&sessions, &project.id, Some(branch), &root)
+        .expect_err("recording the session is refused");
+
+    let message = format!("{err:#}");
+    assert!(message.contains(branch), "names the branch: {message}");
+    assert!(
+        message.contains("refused by test"),
+        "keeps the cause: {message}"
+    );
+    let dest = session_worktree_path(&root, &project, branch);
+    assert!(!dest.exists(), "the worktree directory is removed");
+    let listed = git(&repo, &["worktree", "list", "--porcelain"]);
+    assert!(
+        !listed.contains(&path_slug(branch)),
+        "git no longer lists the worktree: {listed}"
+    );
+    let rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sessions WHERE branch = ?1",
+            [branch],
+            |r| r.get(0),
+        )
+        .expect("count sessions");
+    assert_eq!(rows, 0, "no session row points at the removed worktree");
+}
+
+/// A refused session insert removes the worktree created for it.
+#[test]
+fn test_session_worktree_removed_when_the_session_cannot_be_recorded() {
+    assert_worktree_rolled_back(
+        "worktree_rollback_on_insert_failure",
+        "feature/rollback",
+        "CREATE TRIGGER refuse_sessions BEFORE INSERT ON sessions \
+         BEGIN SELECT RAISE(ABORT, 'refused by test'); END;",
+    );
+}
+
+/// A refused project update after the session insert rolls the insert back
+/// too, so removing the worktree never strands a recorded session.
+#[test]
+fn test_session_worktree_removed_when_the_project_update_fails() {
+    assert_worktree_rolled_back(
+        "worktree_rollback_on_project_update_failure",
+        "feature/rollback-update",
+        "CREATE TRIGGER refuse_projects BEFORE UPDATE ON projects \
+         BEGIN SELECT RAISE(ABORT, 'refused by test'); END;",
+    );
+}

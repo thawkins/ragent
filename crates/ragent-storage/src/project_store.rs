@@ -423,15 +423,18 @@ impl Storage {
         directory: &str,
         checkout: &SessionCheckout,
     ) -> Result<()> {
-        let conn = lock_conn!(self)?;
-        let exists: bool = conn.query_row(
+        let mut conn = lock_conn!(self)?;
+        // One transaction: the caller removes the session's worktree when this
+        // fails, which is only safe if a failure leaves no session row behind.
+        let tx = conn.transaction()?;
+        let exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1)",
             params![project_id],
             |r| r.get(0),
         )?;
         anyhow::ensure!(exists, "project not found: {project_id}");
         let now = Utc::now().to_rfc3339();
-        conn.execute(
+        tx.execute(
             "INSERT INTO sessions \
              (id, project_id, directory, kind, branch, worktree, pr_count, created_at, updated_at, \
               execution_backend) \
@@ -448,10 +451,11 @@ impl Storage {
                 now
             ],
         )?;
-        conn.execute(
+        tx.execute(
             "UPDATE projects SET archived_at = NULL, updated_at = ?1 WHERE id = ?2",
             params![now, project_id],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
