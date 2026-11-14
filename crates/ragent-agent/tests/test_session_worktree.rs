@@ -363,3 +363,43 @@ fn test_session_worktree_prune_moves_sessions_to_a_directory_that_exists() {
         "the branch is remembered"
     );
 }
+
+/// A branch session survives a restart: after the database file is closed
+/// and reopened, the session is still listed under its project with its
+/// branch and worktree.
+#[test]
+fn test_session_worktree_branch_session_survives_reopening_the_database() {
+    let base = fixture_dir("worktree_survives_reopen");
+    let db = base.join("ragent.db");
+    let root = base.join("trees");
+    let repo = base.join("repo");
+    init_repo(&repo);
+    let (session_id, project_id) = {
+        let storage = std::sync::Arc::new(ragent_storage::Storage::open(&db).expect("storage"));
+        let events = std::sync::Arc::new(ragent_agent::event::EventBus::new(64));
+        let sessions = ragent_agent::session::SessionManager::new(storage.clone(), events.clone());
+        let projects = ragent_agent::project::ProjectManager::new(storage, events);
+        let project = projects.resolve_for_dir(&repo).expect("project");
+        let session = projects
+            .create_session(&sessions, &project.id, Some("feature/restart"), &root)
+            .expect("branch session");
+        (session.id, project.id)
+    };
+
+    let storage = ragent_storage::Storage::open(&db).expect("reopen storage");
+    let groups = storage.list_sessions_grouped().expect("grouped");
+    let group = groups
+        .iter()
+        .find(|g| g.project_id == project_id)
+        .expect("the project is listed after reopening");
+    assert!(
+        group.sessions.iter().any(|s| s.id == session_id),
+        "the branch session is listed after reopening"
+    );
+    let checkout = storage
+        .session_checkout(&session_id)
+        .expect("checkout query")
+        .expect("checkout row");
+    assert_eq!(checkout.branch.as_deref(), Some("feature/restart"));
+    assert!(checkout.worktree.is_some(), "the worktree is kept");
+}
