@@ -2,6 +2,100 @@
 
 ## [Unreleased]
 
+### Changed - sub-agent reports stream to disk, and the audit ledger stays truthful
+
+- `persist_task_output` takes the report as the caller's shared `Arc<str>` - the
+  same allocation `TaskEntry::result` stores - and streams the header, the
+  borrowed body and the trailing newline one part at a time into the temp file
+  through the new `ragent_types::guard::write_atomic_stream`, a `&mut dyn Write`
+  sink over the same hardened `write_atomic_with` path (unique temp file,
+  `sync_all`, rename, owner-only mode, temp cleanup on failure). Persisting a
+  sub-agent's full report therefore builds no copy of it at all while the
+  completion handler still holds the original, and `write_atomic` is now a thin
+  wrapper over the sink form.
+- `ragent-hyperresearch`'s vault-migration test drives the production ledger
+  write through `apply_pending` from a vault that has no ledger file at all (the
+  version-0 state), so no part of the seed is replayed with `std::fs::write`
+  either, and it asserts the returned version, the ledger the loop created
+  (read back and compared against `migrations::ledger_bytes`) and the settled
+  re-run. Stubbing the loop's ledger write out makes the test fail.
+- The `cli_out` macro probe runs under the registered module name
+  (`test_cli_out_macros::test_macro_output_probe` selects exactly one test,
+  where the bare name selects none and still exits 0), is neither `#[ignore]`d
+  nor env-gated so it panics rather than passing silently if it is ever selected
+  outside the probe, and the parent asserts the probe started, that the filter
+  selected exactly one test, and that the body finished. A companion test pins
+  the false positive itself: a filter naming no test is a green run that runs
+  zero tests.
+- `docs/reports/code-audit.md` leaves every Complex item unmarked: none of the
+  work in this release implements one.
+
+### Changed - the status bar spans the full width above the sessions panel
+
+- The status bar (and the teammate strip under it) now runs across the whole
+  window, over the top of the sessions panel, instead of stopping at the
+  panel's right-hand edge. The panel and the chat start on the row below it, so
+  the panel's top border no longer shares a row with the status bar's first
+  line. The band's geometry lives in `layout_statusbar::status_band`, next to
+  the renderer that consumes it, and `layout::render` splits only the body
+  beneath it. Nothing else moves: the panel keeps its column, width and
+  heading, and a window with no panel renders exactly as before.
+- A terminal too short for the band to leave the panel three or more rows
+  (`layout_statusbar` height plus a teammate strip) drops the panel and gives
+  the body to the chat, so a bordered box with no inner row can no longer
+  swallow every session it lists.
+
+### Fixed - the wrong terminal is started by `Open in` / `Terminal`
+
+- Terminal selection is no longer a fixed list of guesses that ignored the
+  desktop the TUI is running in. Candidates are now tried in this order:
+  `$TERMINAL`, `$TERMCMD`, `xdg-terminal-exec` (which consults the user's own
+  XDG configuration), the emulator the running desktop ships with (read from
+  `$XDG_CURRENT_DESKTOP` / `$XDG_SESSION_DESKTOP`, matched case-insensitively
+  across GNOME, KDE/plasma, XFCE, MATE, Cinnamon, LXDE, LXQt, Budgie, i3, Sway,
+  Hyprland and COSMIC), `$TERM_PROGRAM` (the terminal ragent itself runs in),
+  and only then the static fallback list. On a GNOME 45+ desktop this now picks
+  `ptyxis` instead of whichever entry the old list happened to contain, and an
+  `xdg-terminal-exec` present on `PATH` outranks every guess.
+- `ptyxis`, `kgx`, `cosmic-term`, `qterminal`, `lxterminal`, `mate-terminal`,
+  `tilix` and `i3-sensible-terminal` are recognised, with the correct argument
+  that makes each run a command (`--` for Ptyxis/KGX, `-e` elsewhere).
+- A desktop whose own emulator is not installed falls through to the next
+  candidate (`x-terminal-emulator`, then the rest) rather than reporting that
+  the machine has no terminal at all.
+
+### Added - session menu `Terminal` entry
+
+- The session context menu ends with `Terminal` (`t`), which opens a system
+  terminal at the session's directory - the worktree checkout when the session
+  has one. The entry is offered only when the machine can start a terminal, and
+  it closes the menu so the items above keep the positions and accelerator keys
+  they already had.
+- A session whose worktree has been deleted now reports it: choosing `Terminal`
+  opens a single-button `Worktree missing` notice naming the path (and the
+  branch, when known) instead of the menu entry silently doing nothing. `Enter`
+  or `Esc` closes it and every other key is swallowed, so the input buffer
+  behind it stays locked.
+- An `Open in > Terminal` launch names a login shell explicitly
+  (`gnome-terminal -- $SHELL -l`), because several emulators are clients of a
+  server process that keeps its own working directory and the spawned child is
+  detached - the session's directory was otherwise not where the terminal
+  opened.
+
+### Added - response language directive
+
+- `agent.response_language` injects a `## Response Language` section as the
+  **last** standing instruction in the system prompt. Models whose training data
+  is dominated by another language drift back to it when the prompt carries no
+  explicit constraint (DeepSeek defaults to Chinese), and a conversation-level
+  correction is lost at the next compaction; a system prompt section survives
+  because the prompt is rebuilt from config on every step. The wording states
+  the rule outranks tool output, earlier turns and compacted summaries, and the
+  section reaches tool-free single-step agents too. The value **defaults to
+  `"English"`**, so no setup is needed to stop a model drifting; set the key to
+  any other language to answer in that one, or to `""` to opt out and emit no
+  section at all. A project-level value overrides the global one.
+
 ## [1.0.169] - 2026-11-13
 
 Projects, session menus and PR/MR Auto-fix release.

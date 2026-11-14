@@ -247,7 +247,15 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   (`/project`, `ragent project`)
 - **Session menu and Auto-fix** — right-click (or `m` on) a sidebar session
   for Open PR/MR, Open in (editor, file manager, terminal), Pin, Mark as
-  unread, Rename, Fork, Move to section, Archive and Delete. A session bound
+  unread, Rename, Fork, Move to section, Archive, Delete and, on a machine that
+  can start one, a `Terminal` entry that opens a terminal at the session's
+  worktree (a deleted worktree is reported in a dialog naming the path, not
+  silently ignored). The terminal is the one your desktop actually runs, not a
+  fixed guess: `$TERMINAL` / `$TERMCMD` win, then `xdg-terminal-exec` (which
+  reads your XDG configuration), then the emulator named by
+  `$XDG_CURRENT_DESKTOP` (`ptyxis` on GNOME 45+, `konsole` on KDE,
+  `xfce4-terminal` on XFCE, ...), then `$TERM_PROGRAM`, then a fallback list.
+  A session bound
   to a GitHub pull request or GitLab merge request (including GitHub
   Enterprise and self-managed GitLab) can run Auto-fix: it is woken when CI
   fails, the branch conflicts, or a reviewer comments, and pauses after a

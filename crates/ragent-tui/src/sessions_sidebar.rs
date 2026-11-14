@@ -53,6 +53,9 @@ pub const DEFAULT_WIDTH: u16 = 32;
 pub const MIN_WIDTH: u16 = 20;
 /// Below this terminal width the sidebar hides itself (FR-10).
 pub const MIN_TERMINAL_WIDTH: u16 = 100;
+/// Narrowest room, name and chevron included, that still shows a project's
+/// description on its heading: ` (` plus one character plus `)`.
+const HEADER_NOTE_MIN: usize = 3;
 /// Section key of the `Pinned` pseudo-project; NUL keeps it apart from ids.
 const PINNED_KEY: &str = "\0pinned";
 /// Background of the open session's row when the cursor is elsewhere.
@@ -284,8 +287,14 @@ pub enum SidebarRow {
 ///
 /// `(Some(sidebar), chat)` when the sidebar is shown, `(None, area)` when it
 /// is turned off or the terminal is narrower than [`MIN_TERMINAL_WIDTH`].
+///
+/// The height test matters because `area` is the body below the status band,
+/// not the whole frame: on a terminal short enough that the band (the status
+/// bar, plus the teammate strip when a team is shown) leaves no room, the
+/// sidebar would paint a bordered box of zero or fewer inner rows and swallow
+/// every list row it holds, so it is dropped and the chat takes the body.
 pub fn split_area(app: &App, area: Rect) -> (Option<Rect>, Rect) {
-    if !app.sidebar.visible || area.width < MIN_TERMINAL_WIDTH {
+    if !app.sidebar.visible || area.width < MIN_TERMINAL_WIDTH || area.height <= 2 {
         return (None, area);
     }
     let width = app.sidebar.width.clamp(MIN_WIDTH, area.width / 2);
@@ -669,7 +678,7 @@ fn with_hint(text: &str, colour: Color, hint: &str, width: usize) -> Line<'stati
 }
 
 /// Truncates `text` to `max` characters, marking a cut with `..`.
-pub(crate) fn fit(text: &str, max: usize) -> String {
+pub fn fit(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_string();
     }
@@ -677,6 +686,11 @@ pub(crate) fn fit(text: &str, max: usize) -> String {
     let mut out: String = text.chars().take(keep).collect();
     out.push_str(&"..".chars().take(max - keep).collect::<String>());
     out
+}
+
+/// The chevron a section heading carries: `v` open, `>` collapsed.
+fn collapsed_mark(collapsed: bool) -> char {
+    if collapsed { '>' } else { 'v' }
 }
 
 /// Paints the sidebar into `area`.
@@ -795,34 +809,43 @@ fn row_line(
             description,
         } => {
             // A quiet heading so the session titles carry the list: the name
-            // in grey (yellow for `Pinned`), then a dimmer chevron (`v` open,
-            // `>` collapsed), the hidden-session count when collapsed, and
-            // the remote host kind: `ragent v [github]`.
-            let arrow = if *collapsed { '>' } else { 'v' };
-            let mut suffix = format!(" {arrow}");
-            if *collapsed && *count > 0 {
-                suffix.push_str(&format!(" {count}"));
-            }
-            if let Some(kind) = remote {
-                suffix.push_str(&format!(" [{kind}]"));
-            }
+            // in grey (yellow for `Pinned`), a dimmer chevron (`v` open,
+            // `>` collapsed), the remote host kind and the hidden-session
+            // count when collapsed: `ragent v [github] 2`. The project's
+            // `Properties` description follows the chevron when one is set.
             let name_colour = if key == PINNED_KEY {
                 Color::Yellow
             } else {
                 Color::Gray
             };
-            let name = fit(label, width);
-            let suffix = fit(&suffix, width.saturating_sub(name.chars().count()));
-            // The description gives way first: it gets what the name and
-            // the chevron leave, and is dropped below a few characters.
-            let room = width.saturating_sub(name.chars().count() + suffix.chars().count());
+            let name = fit(label, width.saturating_sub(2));
+            let arrow = format!(" {}", collapsed_mark(*collapsed));
+            // The description outranks the remote kind and the collapsed
+            // count: a short sidebar keeps it and drops those, so a project
+            // stays identifiable where it is described.
+            let room = width.saturating_sub(name.chars().count() + arrow.chars().count());
             let note = description
                 .as_deref()
-                .filter(|_| room >= 6)
-                .map(|d| format!(" ({})", fit(d, room - 3)))
+                .filter(|_| room >= HEADER_NOTE_MIN)
+                .map(|d| format!(" ({})", fit(d, room.saturating_sub(3))))
                 .unwrap_or_default();
+            let note_width = note.chars().count();
+            let mut suffix = String::new();
+            if *collapsed && *count > 0 {
+                let count_text = format!(" {count}");
+                if suffix.chars().count() + count_text.chars().count() + note_width <= room {
+                    suffix.push_str(&count_text);
+                }
+            }
+            if let Some(kind) = remote {
+                let kind_text = format!(" [{kind}]");
+                if suffix.chars().count() + kind_text.chars().count() + note_width <= room {
+                    suffix.push_str(&kind_text);
+                }
+            }
             Line::from(vec![
                 Span::styled(name, Style::default().fg(name_colour)),
+                Span::styled(arrow, Style::default().fg(Color::DarkGray)),
                 Span::styled(note, Style::default().fg(Color::DarkGray)),
                 Span::styled(suffix, Style::default().fg(Color::DarkGray)),
             ])

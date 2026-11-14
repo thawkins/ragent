@@ -106,13 +106,11 @@ pub fn pluralize(count: usize, singular: &str, plural: &str) -> String {
 /// marker here, not [`ragent_types::strutil::truncate_chars`], which reserves
 /// three of the budget for the ellipsis.
 pub fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.chars().count() <= max_len {
-        return s.to_string();
+    let head = ragent_types::strutil::truncate_chars_no_ellipsis(s, max_len);
+    if head.len() == s.len() {
+        return head;
     }
-    format!(
-        "{}...",
-        ragent_types::strutil::truncate_chars_no_ellipsis(s, max_len)
-    )
+    format!("{head}...")
 }
 
 /// Character budget for the command echoed in a bash tool-call header.

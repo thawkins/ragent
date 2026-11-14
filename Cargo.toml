@@ -178,7 +178,6 @@ ragent-connectors = { path = "crates/ragent-connectors" }
 ragent-llm = { path = "crates/ragent-llm" }
 ragent-plugins = { path = "crates/ragent-plugins" }
 ragent-server = { path = "crates/ragent-server" }
-ragent-surface = { path = "crates/ragent-surface" }
 ragent-tui = { path = "crates/ragent-tui" }
 
 # ── Hashing / file-locking ───────────────────────────────────────────────

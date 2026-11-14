@@ -60,13 +60,11 @@ pub fn step(
 /// [`ragent_types::strutil::truncate_chars`], which reserves three of it).
 #[must_use]
 pub fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_string();
+    let head = ragent_types::strutil::truncate_chars_no_ellipsis(text, max);
+    if head.len() == text.len() {
+        return head;
     }
-    format!(
-        "{}...",
-        ragent_types::strutil::truncate_chars_no_ellipsis(text, max)
-    )
+    format!("{head}...")
 }
 
 /// Generate schema-valid sample arguments for a JSON-schema tool declaration.

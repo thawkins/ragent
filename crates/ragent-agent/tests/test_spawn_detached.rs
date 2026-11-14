@@ -144,7 +144,7 @@ fn test_persist_task_output_writes_full_report_file() {
         "general",
         "audit prompt",
         42,
-        "FULL REPORT BODY",
+        &Arc::from("FULL REPORT BODY"),
     )
     .expect("persist should succeed in a writable dir");
 
@@ -175,7 +175,7 @@ fn test_persist_task_output_failure_returns_none_not_panic() {
     let blocker = dir.path().join("not-a-dir");
     std::fs::write(&blocker, b"file").unwrap();
     let bad_root = blocker.join("child"); // create_dir_all under a file fails
-    let result = persist_task_output(&bad_root, "t-x", "general", "p", 1, "body");
+    let result = persist_task_output(&bad_root, "t-x", "general", "p", 1, &Arc::from("body"));
     assert!(result.is_none());
 }
 

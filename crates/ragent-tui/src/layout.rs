@@ -388,9 +388,19 @@ fn model_picker_heading_band(widths: &[usize]) -> String {
 /// # }
 /// ```
 pub fn render(frame: &mut Frame, app: &mut App) {
+    // The status bar (and the teammate strip beneath it) span the whole frame,
+    // running across the top of the session sidebar rather than stopping at its
+    // right-hand edge. Only the body below that band is split horizontally, so
+    // the sidebar's top border sits under the status bar instead of beside it.
+    let band = crate::layout_statusbar::status_band(app, frame.area());
+    crate::layout_statusbar::render_status_bar(frame, app, band.status);
+    if let Some(strip_area) = band.teammate_strip {
+        crate::teammate_strip::render(frame, app, strip_area);
+    }
+
     // Session sidebar on the left (spec MULTISESSION M5); the chat gets the
     // rest. Overlays below still centre on the whole frame.
-    let (sidebar_area, chat_area) = crate::sessions_sidebar::split_area(app, frame.area());
+    let (sidebar_area, chat_area) = crate::sessions_sidebar::split_area(app, band.body);
     match sidebar_area {
         Some(area) => crate::sessions_sidebar::render(frame, app, area),
         None => {
@@ -440,6 +450,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         render_queue_clear_confirm(frame, app);
     } else {
         app.queue_clear_confirm_area = Rect::default();
+    }
+    // The single-button notice dialog (a worktree that no longer exists, raised
+    // by the session menu's `Terminal` entry). Drawn above the chat with the same
+    // overlay machinery as the confirm dialogs, and dismissed by `Enter`/`Esc`.
+    if app.notice_open {
+        render_notice_dialog(frame, app);
+    } else {
+        app.notice_area = Rect::default();
     }
     // `Clear this project's memory?` confirmation dialog (`/memory clear`) - a
     // modal drawn above the chat that reuses the shared overlay machinery.
@@ -2470,6 +2488,102 @@ fn render_yes_no_confirm(frame: &mut Frame, title: &str, selected: usize) -> Rec
     );
 
     area
+}
+
+/// Render the single-button notice dialog, and return the area it painted.
+///
+/// Unlike [`render_yes_no_confirm`] there is no decision to make: one `OK` button
+/// confirms only that the message was read, so `Enter` and `Esc` both dismiss it.
+/// It is drawn with the same frame, border and footer treatment as the confirm
+/// dialogs so the two cannot look like different kinds of overlay.
+///
+/// # Arguments
+///
+/// * `title` - dialog title, with its surrounding spaces.
+/// * `message` - the line stating what happened.
+/// * `detail` - an optional secondary line, usually the value involved.
+fn render_notice(frame: &mut Frame, title: &str, message: &str, detail: Option<&str>) -> Rect {
+    use ratatui::widgets::List;
+    use ratatui::widgets::ListItem;
+    use ratatui::widgets::ListState;
+
+    const FOOTER: &str = "Enter or Esc closes";
+
+    let mut lines: Vec<&str> = vec![message];
+    if let Some(detail) = detail {
+        lines.push(detail);
+    }
+    // Wrap-free sizing: the longest line plus the `> ` marker decides the width,
+    // and the message, its detail and the footer decide the height.
+    let widest = lines
+        .iter()
+        .map(|l| l.chars().count())
+        .chain(std::iter::once(FOOTER.chars().count()))
+        .chain(std::iter::once(title.chars().count().saturating_sub(2)))
+        .max()
+        .unwrap_or(0) as u16;
+    let width = (widest + 6).clamp(30, frame.area().width);
+    let height = lines.len() as u16 + 4;
+    let area = centered_rect_fixed(width, height, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Yellow));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+
+    let items: Vec<ListItem> = lines
+        .iter()
+        .map(|line| {
+            ListItem::new(Line::from(Span::styled(
+                *line,
+                Style::default().fg(Color::White),
+            )))
+        })
+        .chain(std::iter::once(ListItem::new(Line::from(Span::styled(
+            "> OK",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )))))
+        .collect();
+    let mut state = ListState::default();
+    // The `OK` row is the last item and the only selectable one.
+    state.select(Some(lines.len()));
+    frame.render_stateful_widget(List::new(items), chunks[0], &mut state);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            FOOTER,
+            Style::default().fg(Color::DarkGray),
+        )))
+        .alignment(Alignment::Center),
+        chunks[1],
+    );
+
+    area
+}
+
+/// Render the single-button notice dialog and cache its area.
+fn render_notice_dialog(frame: &mut Frame, app: &mut App) {
+    app.notice_area = render_notice(
+        frame,
+        &app.notice_title,
+        &app.notice_message,
+        app.notice_detail.as_deref(),
+    );
 }
 
 /// Render the `Clear the input queue?` confirmation dialog (spec `inputqueue`
@@ -6021,27 +6135,15 @@ fn render_chat(frame: &mut Frame, app: &mut App, chat_area: Rect) {
     refresh_input_render_cache(app, input_inner_width as u16);
     let input_height = app.session.input_render_cache.height;
 
-    // Whether to show the teammate strip (1 row under the status bar, FR-027).
-    // A team with no members reserves no line at all (FR-066).
-    let team_strip = crate::teammate_strip::is_visible(app);
-    let team_strip_h = if team_strip { 1u16 } else { 0 };
-
+    // The status bar and teammate strip are rendered by `render` above, across
+    // the whole frame, so this area holds only the messages/log and the input.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(breakpoint.status_bar_height()), // status bar (responsive)
-            Constraint::Length(team_strip_h),                   // teammate strip (0 when hidden)
-            Constraint::Min(3),                                 // messages + optional log
-            Constraint::Length(input_height),                   // input (dynamic)
+            Constraint::Min(3),               // messages + optional log
+            Constraint::Length(input_height), // input (dynamic)
         ])
         .split(chat_area);
-
-    // Use v2 status bar with responsive design
-    crate::layout_statusbar::render_status_bar(frame, app, chunks[0]);
-
-    if team_strip {
-        crate::teammate_strip::render(frame, app, chunks[1]);
-    }
 
     // Split the middle area horizontally when an auxiliary side panel is visible.
     // Use responsive split based on terminal width. Only one side panel is
@@ -6064,7 +6166,7 @@ fn render_chat(frame: &mut Frame, app: &mut App, chat_area: Rect) {
                 Constraint::Percentage(msg_pct), // messages (responsive)
                 Constraint::Percentage(log_pct), // side panel (responsive)
             ])
-            .split(chunks[2]);
+            .split(chunks[0]);
 
         app.message_area = h_chunks[0];
         render_messages(frame, app, h_chunks[0]);
@@ -6170,7 +6272,7 @@ fn render_chat(frame: &mut Frame, app: &mut App, chat_area: Rect) {
             }
         }
     } else {
-        app.message_area = chunks[2];
+        app.message_area = chunks[0];
         app.log_area = Rect::default();
         app.profile_area = Rect::default();
         app.tasks_area = Rect::default();
@@ -6180,14 +6282,14 @@ fn render_chat(frame: &mut Frame, app: &mut App, chat_area: Rect) {
         app.active_agents_area = Rect::default();
         app.teams_area = Rect::default();
         app.teams_rows_area = Rect::default();
-        render_messages(frame, app, chunks[2]);
-        apply_selection_highlight(frame, app, SelectionPane::Messages, chunks[2]);
+        render_messages(frame, app, chunks[0]);
+        apply_selection_highlight(frame, app, SelectionPane::Messages, chunks[0]);
     }
 
     let input_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(button_col_w), Constraint::Min(20)])
-        .split(chunks[3]);
+        .split(chunks[1]);
 
     app.input_area = input_chunks[1];
     render_input(frame, app, input_chunks[1]);

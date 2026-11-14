@@ -957,6 +957,69 @@ impl App {
         self.open_directory_in(&dir, target)
     }
 
+    /// Opens a system terminal at the directory of session `id` (the session
+    /// context menu's `Terminal` entry).
+    ///
+    /// A session that owns a git worktree has the sidebar row's worktree as its
+    /// directory, so this opens the terminal at that worktree's branch checkout.
+    /// When the directory no longer exists - a worktree the user deleted, or a
+    /// checkout that was never created - the failure is reported in an `OK`
+    /// dialog naming the path, not on the status line, because a detached
+    /// terminal's failure to appear is otherwise indistinguishable from a slow
+    /// window manager.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the session is unknown, this machine has no
+    /// terminal, or it cannot be started.
+    pub(crate) fn open_session_terminal(&mut self, id: &str) -> Result<(), String> {
+        let dir = self
+            .session_directory(id)
+            .ok_or_else(|| format!("session not found: {id}"))?;
+        if !dir.is_dir() {
+            let branch = self
+                .sidebar
+                .checkouts
+                .get(id)
+                .and_then(|c| c.branch.clone());
+            self.open_notice(
+                " Worktree missing ",
+                format!("{} is not a directory.", dir.display()),
+                branch.as_deref().map(|b| format!("branch: {b}")),
+            );
+            return Ok(());
+        }
+        self.open_directory_in(&dir, crate::open_in::OpenTarget::Terminal)
+    }
+
+    /// Shows the single-button notice dialog: `message`, an optional `detail`
+    /// line, and an `OK` button that closes it.
+    ///
+    /// The dialog is state only; it paints on the next frame and swallows keys
+    /// until dismissed (see [`App::notice_open`]).
+    ///
+    /// # Arguments
+    ///
+    /// * `title` - the dialog's title, including its surrounding spaces.
+    /// * `message` - the line stating what happened.
+    /// * `detail` - a secondary line, usually the value involved.
+    pub(crate) fn open_notice(&mut self, title: &str, message: String, detail: Option<String>) {
+        self.notice_title = title.to_string();
+        self.notice_message = message;
+        self.notice_detail = detail;
+        self.notice_open = true;
+        self.needs_redraw = true;
+    }
+
+    /// Closes the notice dialog without acting.
+    pub(crate) fn dismiss_notice(&mut self) {
+        self.notice_open = false;
+        self.notice_title.clear();
+        self.notice_message.clear();
+        self.notice_detail = None;
+        self.needs_redraw = true;
+    }
+
     /// Opens directory `dir` in `target` (editor, file manager, terminal).
     ///
     /// # Errors

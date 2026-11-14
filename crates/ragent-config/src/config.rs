@@ -83,6 +83,19 @@ pub struct Config {
     /// Additional instruction strings appended to agent prompts.
     #[serde(default)]
     pub instructions: Vec<String>,
+    /// Language the model must answer in, e.g. `"English"`.
+    ///
+    /// Injected into the system prompt as a dedicated standing section so the
+    /// model keeps answering in this language even when its training data or
+    /// the surrounding material is dominated by another one (DeepSeek models
+    /// default to Chinese without an explicit constraint).
+    ///
+    /// Defaults to `"English"`, so a config that never mentions the key still
+    /// pins the answer language. A blank value is the explicit opt-out: it
+    /// emits no section and leaves the model's own default untouched.
+    #[serde(default = "default_response_language")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_language: Option<String>,
     /// Additional directories to scan for skill definitions.
     #[serde(default)]
     pub skill_dirs: Vec<String>,
@@ -380,6 +393,7 @@ impl Default for Config {
             command: HashMap::new(),
             mcp: HashMap::new(),
             instructions: Vec::new(),
+            response_language: Some("English".to_string()),
             skill_dirs: Vec::new(),
             experimental: ExperimentalFlags::default(),
             hooks: Vec::new(),
@@ -527,6 +541,14 @@ pub struct AgentPerfConfig {
 
 fn default_step_budget_secs() -> u64 {
     300
+}
+
+/// Serde default for [`Config::response_language`]: a config that omits the key
+/// still pins the answer language, so a model that would otherwise drift (a
+/// DeepSeek model reverting to Chinese) is constrained without any setup. A
+/// blank value written explicitly is the opt-out.
+fn default_response_language() -> Option<String> {
+    Some("English".to_string())
 }
 
 fn default_stall_timeout_secs() -> u64 {
@@ -2537,22 +2559,10 @@ impl Config {
             )
         })?;
 
-        // Atomic write to the canonical global config path.
-        let tmp_path = target.with_extension("json.tmp");
-        std::fs::write(&tmp_path, &content).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to write restored config temp file '{}': {}",
-                tmp_path.display(),
-                e
-            )
-        })?;
-        std::fs::rename(&tmp_path, &target).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp_path); // INTENTIONAL: best-effort temp cleanup
-            anyhow::anyhow!(
-                "Failed to rename restored config to '{}': {}",
-                target.display(),
-                e
-            )
+        // Atomic write to the canonical global config path, through the same
+        // owner-only, `create_new` temp form the save path uses.
+        ragent_types::guard::write_atomic(&target, content.as_bytes()).map_err(|e| {
+            anyhow::anyhow!("Failed to restore config to '{}': {}", target.display(), e)
         })?;
 
         Ok(target)
@@ -2613,51 +2623,12 @@ impl Config {
             return Ok(());
         }
 
-        let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
-        if let Some(parent) = parent {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to create config directory '{}': {}",
-                    parent.display(),
-                    e
-                )
-            })?;
-        }
-        let dir = parent.unwrap_or_else(|| Path::new("."));
-        // Unique temp name in the target directory so `rename` stays on one
-        // filesystem (required for atomicity). pid + nanos keeps concurrent
-        // writers from colliding without adding a dependency.
-        let tmp_path = dir.join(format!(
-            ".{}.{}.{}.tmp",
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("ragent"),
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
-        ));
-        let write_result = (|| -> std::io::Result<()> {
-            use std::io::Write as _;
-            // SEC-022: the config holds plaintext credentials, so the temp is
-            // created owner-only (`0o600`) rather than at the process umask
-            // (typically `0o644`); the rename carries the mode to the target.
-            let mut file = ragent_types::guard::open_owner_only(&tmp_path)?;
-            file.write_all(json.as_bytes())?;
-            // Flush to stable storage before the rename so a crash after the
-            // rename cannot expose a target whose contents were not yet
-            // durable.
-            file.sync_all()?;
-            std::fs::rename(&tmp_path, path)
-        })();
-        if let Err(e) = write_result {
-            let _ = std::fs::remove_file(&tmp_path); // INTENTIONAL: best-effort temp cleanup
-            return Err(anyhow::anyhow!(
-                "Failed to write config file '{}': {}",
-                path.display(),
-                e
-            ));
-        }
+        // SEC-022: the config holds plaintext credentials, so the shared
+        // atomic write creates its temp owner-only (`0o600`, `create_new`) and
+        // flushes it before the rename; see [`ragent_types::guard::write_atomic`].
+        ragent_types::guard::write_atomic(path, json.as_bytes()).map_err(|e| {
+            anyhow::anyhow!("Failed to write config file '{}': {}", path.display(), e)
+        })?;
 
         Ok(())
     }
@@ -3220,6 +3191,11 @@ impl Config {
         base.permission.extend(overlay.permission);
         base.instructions.extend(overlay.instructions);
         base.skill_dirs.extend(overlay.skill_dirs);
+        // A project-level language preference is a value, not an additive list,
+        // so an overlay that sets it wins outright.
+        if overlay.response_language.is_some() {
+            base.response_language = overlay.response_language;
+        }
 
         if overlay.experimental.open_telemetry {
             base.experimental.open_telemetry = true;

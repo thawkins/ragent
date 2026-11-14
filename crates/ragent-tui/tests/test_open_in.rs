@@ -102,7 +102,9 @@ fn test_open_in_terminal_found_on_path() {
         terminal.program, "gnome-terminal",
         "first in preference order"
     );
-    assert_eq!(terminal.args, Vec::<String>::new());
+    // Several terminals are servers whose child keeps the server's working
+    // directory, so the directory is named by starting a login shell there.
+    assert_eq!(args(&terminal), ["--", "/bin/sh", "-l"]);
     let editor = resolve(OpenTarget::Editor, &e).expect("editor");
     assert_eq!(editor.program, "gnome-terminal");
     assert_eq!(args(&editor), ["--", "vim", "."]);
@@ -126,4 +128,101 @@ fn test_open_in_macos_terminal_and_terminal_editor() {
         resolve(OpenTarget::Editor, &e).is_none(),
         "a terminal editor cannot be started in Terminal.app"
     );
+}
+
+#[test]
+fn test_open_in_prefers_the_desktop_terminal_over_the_fallback_list() {
+    // The fallback list would reach for `x-terminal-emulator`/`gnome-terminal`;
+    // the desktop the TUI runs in names XFCE, so `xfce4-terminal` wins.
+    let mut e = env("linux", &[("XDG_CURRENT_DESKTOP", "XFCE")]);
+    e.path = vec![fake_path(
+        "xfce",
+        &["gnome-terminal", "x-terminal-emulator", "xfce4-terminal"],
+    )];
+    let terminal = resolve(OpenTarget::Terminal, &e).expect("terminal");
+    assert_eq!(terminal.program, "xfce4-terminal");
+    assert_eq!(args(&terminal), ["-e", "/bin/sh", "-l"]);
+}
+
+#[test]
+fn test_open_in_desktop_entries_are_matched_case_insensitively() {
+    // Ubuntu spells it `ubuntu:GNOME`; KDE's session name is `plasma`.
+    let mut e = env("linux", &[("XDG_CURRENT_DESKTOP", "ubuntu:GNOME")]);
+    e.path = vec![fake_path(
+        "ubuntu-gnome",
+        &["gnome-terminal", "ptyxis", "konsole"],
+    )];
+    assert_eq!(
+        resolve(OpenTarget::Terminal, &e).expect("terminal").program,
+        "ptyxis",
+        "GNOME 45+ ships ptyxis, which outranks gnome-terminal"
+    );
+
+    let mut plasma = env("linux", &[("XDG_SESSION_DESKTOP", "plasma")]);
+    plasma.path = vec![fake_path("plasma", &["konsole", "x-terminal-emulator"])];
+    assert_eq!(
+        resolve(OpenTarget::Terminal, &plasma)
+            .expect("terminal")
+            .program,
+        "konsole"
+    );
+}
+
+#[test]
+fn test_open_in_desktop_terminal_falls_through_when_not_installed() {
+    // The desktop is XFCE but xfce4-terminal is not installed: the generic
+    // alternatives link is the next best answer, not "no terminal".
+    let mut e = env("linux", &[("XDG_CURRENT_DESKTOP", "XFCE")]);
+    e.path = vec![fake_path("xfce-missing", &["x-terminal-emulator"])];
+    assert_eq!(
+        resolve(OpenTarget::Terminal, &e).expect("terminal").program,
+        "x-terminal-emulator"
+    );
+}
+
+#[test]
+fn test_open_in_terminal_env_var_beats_desktop_detection() {
+    // `$TERMINAL` is an explicit user instruction and outranks every guess.
+    let mut e = env(
+        "linux",
+        &[("XDG_CURRENT_DESKTOP", "XFCE"), ("TERMINAL", "alacritty")],
+    );
+    e.path = vec![fake_path("explicit", &["xfce4-terminal", "alacritty"])];
+    assert_eq!(
+        resolve(OpenTarget::Terminal, &e).expect("terminal").program,
+        "alacritty"
+    );
+}
+
+#[test]
+fn test_open_in_prefers_xdg_terminal_exec_when_present() {
+    // `xdg-terminal-exec` reads the user's own configuration, so it outranks
+    // the desktop guess; it takes the command without an exec separator.
+    let mut e = env("linux", &[("XDG_CURRENT_DESKTOP", "GNOME")]);
+    e.path = vec![fake_path(
+        "xdg-exec",
+        &["xdg-terminal-exec", "gnome-terminal"],
+    )];
+    let terminal = resolve(OpenTarget::Terminal, &e).expect("terminal");
+    assert_eq!(terminal.program, "xdg-terminal-exec");
+    assert_eq!(args(&terminal), ["/bin/sh", "-l"]);
+}
+
+#[test]
+fn test_open_in_uses_the_current_term_program_as_a_last_resort() {
+    // No `$TERMINAL`, no desktop variable and nothing from the fallback list:
+    // the terminal the TUI itself runs in is still a good answer.
+    let mut e = env("linux", &[("TERM_PROGRAM", "ghostty")]);
+    e.path = vec![fake_path("term-program", &["ghostty"])];
+    assert_eq!(
+        resolve(OpenTarget::Terminal, &e).expect("terminal").program,
+        "ghostty"
+    );
+}
+
+#[test]
+fn test_open_in_term_program_must_be_installed() {
+    let mut e = env("linux", &[("TERM_PROGRAM", "ghostty")]);
+    e.path = vec![fake_path("term-program-missing", &[])];
+    assert!(resolve(OpenTarget::Terminal, &e).is_none());
 }

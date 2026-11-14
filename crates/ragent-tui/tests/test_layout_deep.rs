@@ -637,6 +637,92 @@ fn setup_select_azure_resource_entries_and_empty_states() {
 }
 
 // ===========================================================================
+// The full-width status band above the sidebar
+// ===========================================================================
+
+/// The status bar spans the whole frame width, across the top of the session
+/// sidebar, and the sidebar starts on the row below it.
+///
+/// Before this the sidebar and the chat were siblings of one horizontal split,
+/// so the status bar began at the sidebar's right-hand edge and the sidebar's
+/// top border shared a row with the status bar's first line.
+#[test]
+fn status_bar_spans_the_width_above_the_sidebar() {
+    let (width, height) = (120u16, 30u16);
+    let mut app = support::make_app();
+    app.sidebar.visible = true;
+    let terminal = render(&mut app, width, height);
+    let buffer = terminal.backend().buffer().clone();
+    let row = |y: u16| {
+        (0..width)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect::<String>()
+    };
+
+    let sidebar = app.sidebar.area;
+    assert_eq!(sidebar.x, 0, "the sidebar still starts at column 0");
+    assert_eq!(
+        sidebar.y, 2,
+        "the sidebar starts below the two-row status bar"
+    );
+    assert_eq!(
+        sidebar.height,
+        height - 2,
+        "the sidebar takes the whole body below the status bar"
+    );
+
+    // The status bar's own row carries its content at column 0, over the
+    // sidebar rather than to the right of it.
+    let status_row0 = row(0);
+    assert!(
+        status_row0.starts_with(['\u{25cf}', ' ']),
+        "status row 1 does not begin at column 0: {status_row0:?}"
+    );
+    assert!(
+        !status_row0.trim().is_empty(),
+        "status row 1 is empty at column 0"
+    );
+
+    // The sidebar's top border is its own row, below the band.
+    let border_row = row(sidebar.y);
+    assert!(
+        border_row.starts_with('\u{250c}'),
+        "expected the sidebar's top-left corner on row {}: {border_row:?}",
+        sidebar.y
+    );
+    assert!(
+        border_row.contains("SESSIONS"),
+        "expected the sidebar heading on its border row: {border_row:?}"
+    );
+}
+
+/// With no sidebar the band is unchanged: the status bar still starts at row 0
+/// and fills the width, so the layout does not depend on the sidebar's presence.
+#[test]
+fn status_bar_geometry_is_independent_of_the_sidebar() {
+    let (width, height) = (120u16, 30u16);
+    let mut app = support::make_app();
+    app.sidebar.visible = false;
+    let terminal = render(&mut app, width, height);
+    let buffer = terminal.backend().buffer().clone();
+    let row = |y: u16| {
+        (0..width)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect::<String>()
+    };
+
+    assert!(
+        row(0).starts_with(['\u{25cf}', ' ']),
+        "status row 1 still begins at column 0: {:?}",
+        row(0)
+    );
+    assert!(
+        !row(0).trim().is_empty() && !row(1).trim().is_empty(),
+        "both status rows render"
+    );
+}
+
+// ===========================================================================
 // messages_to_lines / render_output_view_overlay
 // ===========================================================================
 

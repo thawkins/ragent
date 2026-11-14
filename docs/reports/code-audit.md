@@ -17,6 +17,46 @@
 | SSE stream duplication | Partly fixed: the buffer-cap preamble is one helper in `providers/http_client.rs`; the Anthropic / Azure Anthropic loop was not re-checked |
 | `validate_id`, `Untrusted::fence`, `prompt_for_permission` tests | Fixed: `test_vault_id.rs`, `test_untrusted_fence.rs`, `test_permission_prompt.rs` |
 
+**Implementation status (this pass):** Medium-effort items 1-10, 16, 20, 21 and
+22 are implemented and verified (see the *Medium Effort* table below).
+`cargo fmt --check`, `cargo clippy --workspace --all-targets` (zero warnings) and
+the twelve code `check-*` guard scripts are clean, and
+`cargo nextest run --workspace` is 16146/16146 (17 skipped). Medium 11-15 and
+17-19 and 23-28, and every Complex item, remain open: the Complex table below
+carries no status column because none of it is started.
+
+**Review follow-ups (this pass).** Four points raised on the PR are addressed in
+the code rather than the report: `guard::write_atomic` and the new
+`guard::write_atomic_stream` are thin wrappers over `guard::write_atomic_with`,
+whose `&dyn std::io::Write` sink takes the header, the borrowed body and the
+trailing newline one part at a time, so `persist_task_output` never builds a
+copy of the report - the completion handler keeps a single shared `Arc<str>`
+(the same allocation `TaskEntry::result` stores) and streams that. A test asserts
+the sink form, and a second asserts the target is untouched until every part
+lands;
+`test_vault_migrations` drives the production ledger write through `apply_pending`
+from a vault that has **no** ledger at all (`read_version` reports a missing
+ledger as version 0), so no `std::fs::write` reproduces the seed either, and
+asserts the returned version, the ledger the loop created - read back and
+compared against `migrations::ledger_bytes` - and the settled re-run;
+the `cli_out` macro probe names the registered module
+`test_cli_out_macros::test_macro_output_probe` (verified: that name selects
+exactly one test, while the bare name selects none and still exits 0), is
+neither `#[ignore]`d nor env-gated so a *wrong* filter panics instead of passing
+silently, and the parent asserts the probe started, that the filter selected
+exactly one test, and that the body finished; and every Complex item stays
+unmarked, because none of the files this pass changed implements one.
+
+**Fixed here: sidebar heading drops the description.** A project's `Properties`
+description was shown only when the heading had at least six columns left after
+its name and trailing hints, so at the default 32-column sidebar a long name plus
+a remote kind (`laughing_kirch [github] v`) dropped it entirely and
+`test_project_menu_properties_saves_description_and_backend` failed. The heading
+now ranks name, then description, then remote kind and collapsed count, with the
+chevron always kept: `laughing_kirch v (Agent home)`. The description takes the
+room the name and chevron leave, and the kind/count are added only while they
+still fit beside it, so nothing is pushed off the row.
+
 ---
 
 ## High Priority
@@ -168,16 +208,16 @@
 ## Medium Effort (30 min - 2 hours each)
 | # | Finding | File(s) | Fix |
 |---|---------|---------|-----|
-| 1 | `validate_id` untested | `crates/ragent-hyperresearch/src/core/vault.rs:104` | Add `tests/test_vault_id.rs` covering empty, `..`, `/`, `\`, leading `.`, and a valid id |
-| 2 | `Untrusted::fence` untested | `crates/ragent-hyperresearch/src/core/untrusted.rs:30` | Add a test where the body contains the fence marker and assert it is sanitised |
-| 3 | `prompt_for_permission` untested | `crates/ragent-agent/src/session/permissions.rs:529` | Add timeout/deny/allow tests over a scripted permission channel |
-| 4 | `build_analyzer_request` untested | `crates/ragent-agent/src/security/mod.rs:104` | Assert the rendered prompt and JSON schema for a fixed tool input |
-| 5 | Team tool handlers untested | `tool/team_task_list.rs:10`, `team_approve_plan.rs:14`, `team_memory_common.rs:1` | One test per handler, plus the reject-without-feedback error branch |
-| 6 | GitLab pipeline `execute` paths untested | `crates/ragent-tools-vcs/src/gitlab/gitlab_pipelines.rs:93` | Mock the client and assert request shape + rendered output for each tool |
-| 7 | Vault migrations untested | `crates/ragent-hyperresearch/src/core/migrations.rs:54` | Round-trip a v0 vault through `apply_pending` and assert the version bump |
-| 8 | `cli_out` macros untested | `src/cli_out.rs:49` | Capture the writer and assert routing/format for each macro |
-| 9 | `ragent-read_capped` ×3 | `store_fetch.rs:244`, `fetch.rs:329`, `manifest.rs:137` | Hoist one generic `read_capped` (parameterised over the error) into `ragent-types` |
-| 10 | 51 `truncate*` helpers | `ragent_types::strutil` callers | Replace each body with a delegation to `truncate_chars`/`truncate_bytes`; fix the `...`/`…` disagreement |
+| 1 **Done** | `validate_id` untested | `crates/ragent-hyperresearch/src/core/vault.rs:104` | Add `tests/test_vault_id.rs` covering empty, `..`, `/`, `\`, leading `.`, and a valid id |
+| 2 **Done** | `Untrusted::fence` untested | `crates/ragent-hyperresearch/src/core/untrusted.rs:30` | Add a test where the body contains the fence marker and assert it is sanitised |
+| 3 **Done** | `prompt_for_permission` untested | `crates/ragent-agent/src/session/permissions.rs:529` | Add timeout/deny/allow tests over a scripted permission channel |
+| 4 **Done** | `build_analyzer_request` untested | `crates/ragent-agent/src/security/mod.rs:104` | Assert the rendered prompt and JSON schema for a fixed tool input |
+| 5 **Done** | Team tool handlers untested | `tool/team_task_list.rs:10`, `team_approve_plan.rs:14`, `team_memory_common.rs:1` | One test per handler, plus the reject-without-feedback error branch |
+| 6 **Done** | GitLab pipeline `execute` paths untested | `crates/ragent-tools-vcs/src/gitlab/gitlab_pipelines.rs:93` | Mock the client and assert request shape + rendered output for each tool |
+| 7 **Done** | Vault migrations untested | `crates/ragent-hyperresearch/src/core/migrations.rs:54` | Round-trip a v0 vault through `apply_pending` and assert the version bump |
+| 8 **Done** | `cli_out` macros untested | `src/cli_out.rs:49` | Capture the writer and assert routing/format for each macro |
+| 9 **Done** | `ragent-read_capped` ×3 | `store_fetch.rs:244`, `fetch.rs:329`, `manifest.rs:137` | Hoist one generic `read_capped` (parameterised over the error) into `ragent-types` |
+| 10 **Partly done** | 51 `truncate*` helpers | `ragent_types::strutil` callers | Replace each body with a delegation to `truncate_chars`/`truncate_bytes`; fix the `...`/`…` disagreement |
 | 11 | Plugin/connector store + marketplace + commands duplication | `store.rs`, `store_index.rs`, `marketplace_ops.rs`, `commands.rs` in both crates | Extract a generic store module (kind parameter over manifest name and error type) and have both crates instantiate it |
 | 12 | `write_spec` duplicate | `ragent-tui/src/app/slash.rs:152`, `src/cli.rs:1917` | Move into `ragent-specs` and call from both |
 | 13 | `McpProbe` duplicate | `ragent-tui/src/app/connector.rs:428`, `src/connectors.rs:317` | Move the probe into `ragent-connectors` and share |
@@ -187,9 +227,9 @@
 | 17 | 29 identical browser state-machine functions | `ragent-tui/src/app/state.rs:2001`, `ragent-connectors/src/browse.rs:76` | Extract a shared `BrowseState` (query, category, marketplace, scroll, cursor) generic over the entry type |
 | 18 | SSE stream loop duplicated across providers | `providers/anthropic.rs:460`, `azure_resource.rs:528`, + 7 preamble sites | Route all providers through `providers/sse.rs`: one `consume_sse` taking a per-event closure |
 | 19 | Tool-name casing / file-name mismatch | `tools-core` tool files | Pick PascalCase for the user-facing names (already 28) or snake_case, and rename files to match the registered name |
-| 20 | Atomic write re-implemented 4× | `specs/io.rs:135`, `mcp/enable_state.rs:94`, `task/mod.rs:62`, `config.rs:2469` | One `atomic_write(path, bytes)` using the hardened `create_new` form |
-| 21 | Blocking sleep in async path | `mcp/npx_cache.rs:179` | Replace with `tokio::time::sleep` and await it |
-| 22 | Error handling `?` vs `let _ =` | `mcp/enable_state.rs:89`, `npx_cache.rs:114`, `task/mod.rs:87` | Propagate or log the discarded errors |
+| 20 **Done** | Atomic write re-implemented 4× | `specs/io.rs:135`, `mcp/enable_state.rs:94`, `task/mod.rs:62`, `config.rs:2469` | One `atomic_write(path, bytes)` using the hardened `create_new` form |
+| 21 **Done** | Blocking sleep in async path | `mcp/npx_cache.rs:179` | Replace with `tokio::time::sleep` and await it |
+| 22 **Done** | Error handling `?` vs `let _ =` | `mcp/enable_state.rs:89`, `npx_cache.rs:114`, `task/mod.rs:87` | Propagate or log the discarded errors |
 | 23 | Test fixture duplication | 23 TUI `make_app`, 22 `make_agent`, 3 server `AppState` | Delete locals, import from `tests/support`; extend `ragent-server/tests/support/mod.rs` |
 | 24 | 52 test files write into `std::env::temp_dir()` | 52 test files | Point at `target/temp/<unique-name>` resolved from `env!("CARGO_MANIFEST_DIR")` |
 | 25 | Vendored `pdf-extract` two breaking releases behind | `vendor/pdf-extract` | Bump to 0.12.1 and re-apply the local patch, or document the fork reason |

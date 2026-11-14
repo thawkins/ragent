@@ -260,8 +260,9 @@ async fn test_sessions_sidebar_enter_on_row_switches_session() {
     let rows = sidebar_rows(&mut app);
     let a_row = row_of(&rows, &untitled(&a)).expect("A");
     app.sidebar.focused = true;
-    // Rows inside the border start one line below the sidebar top.
-    app.sidebar.cursor = a_row - 1;
+    // Rows inside the border start one line below the sidebar top, which sits
+    // under the full-width status band rather than on screen row 0.
+    app.sidebar.cursor = a_row - usize::from(app.sidebar.area.y) - 1;
 
     app.handle_key_event(key(KeyCode::Enter, KeyModifiers::NONE))
         .await;

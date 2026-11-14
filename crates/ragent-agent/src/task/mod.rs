@@ -38,6 +38,13 @@ use crate::session::processor::SessionProcessor;
 /// never leaves a half-written report. Returns the path on success; on any
 /// I/O failure returns `None` and the in-memory `TaskEntry::result` remains
 /// the only copy.
+///
+/// `content` is the shared report body as an `Arc<str>` - the very same
+/// allocation `TaskEntry::result` stores, so writing the report never copies it.
+/// The header, the borrowed body and the trailing newline are streamed into the
+/// temp file in turn through [`ragent_types::guard::write_atomic_stream`], so
+/// the peak stays the caller's one copy of the report: no concatenated
+/// `Vec<u8>` of the whole report is ever built.
 #[doc(hidden)]
 pub fn persist_task_output(
     working_dir: &std::path::Path,
@@ -45,7 +52,7 @@ pub fn persist_task_output(
     agent_name: &str,
     task_prompt: &str,
     duration_ms: u64,
-    content: &str,
+    content: &Arc<str>,
 ) -> Option<PathBuf> {
     let dir = working_dir.join("log").join("subagents");
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -59,24 +66,20 @@ pub fn persist_task_output(
         return None;
     }
     let file = dir.join(format!("{task_id}.md"));
-    let tmp = dir.join(format!(".{task_id}.md.tmp"));
-    // Stream the report straight to the temp file instead of building the whole
-    // header+content in one `format!` String first: `content` is the full
-    // untruncated sub-agent reply, so concatenating it would double peak memory
-    // for the duration of the write. `write_all` of `content.as_bytes()` after
-    // the header keeps the byte-for-byte output identical.
-    let write_body = |path: &std::path::Path| -> std::io::Result<()> {
-        use std::io::Write as _;
-        let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
-        write!(out, "# {task_id} - {agent_name}\n\n")?;
-        write!(out, "task: {task_prompt}\n\n")?;
-        write!(out, "duration_ms: {duration_ms}\n\n")?;
-        out.write_all(b"---\n\n")?;
+    // The body is the full untruncated sub-agent reply, so it is streamed
+    // straight from the caller's `Arc<str>` into the temp file: the header
+    // first, then the shared body and its trailing newline - the same
+    // allocation the task entry keeps - so no concatenated or copied buffer of
+    // the report is ever built while the loop's own `String` is still live.
+    let header = format!(
+        "# {task_id} - {agent_name}\n\ntask: {task_prompt}\n\nduration_ms: {duration_ms}\n\n---\n\n"
+    );
+    let written = ragent_types::guard::write_atomic_stream(&file, |out| {
+        out.write_all(header.as_bytes())?;
         out.write_all(content.as_bytes())?;
-        out.write_all(b"\n")?;
-        out.flush()
-    };
-    if let Err(e) = write_body(&tmp).and_then(|()| std::fs::rename(&tmp, &file)) {
+        out.write_all(b"\n")
+    });
+    if let Err(e) = written {
         tracing::warn!(
             path = %file.display(),
             task_id,
@@ -84,7 +87,6 @@ pub fn persist_task_output(
             "sub-agent report could not be written to disk; the task result is \
              only available in memory"
         );
-        let _ = std::fs::remove_file(&tmp);
         return None;
     }
     Some(file)
@@ -1040,6 +1042,11 @@ impl AgentManager {
                 }
                 Ok(response) => {
                     let summary = truncate_str(&response, 2000).into_owned();
+                    // The report body is built once, as the shared `Arc<str>` the
+                    // task entry below stores: persistence streams that same
+                    // allocation into the temp file, so writing the report never
+                    // doubles it while `response` is still live.
+                    let full_report: Arc<str> = Arc::from(response.as_str());
                     // Report the real loop outcome: before this fix every
                     // successful completion was hard-coded "stop", so a run
                     // cut by the provider's silent end-of-stream still
@@ -1062,7 +1069,7 @@ impl AgentManager {
                         &agent_label,
                         &task_prompt_str,
                         duration_ms,
-                        &response,
+                        &full_report,
                     );
                     // ANTIPAT: the report is the documented durable recovery
                     // path (`TaskEntry::output_file`), so a silent `None` made
@@ -1079,7 +1086,7 @@ impl AgentManager {
                     {
                         if let Some(mut entry) = tasks.get_mut(&tid) {
                             entry.status = TaskStatus::Completed;
-                            entry.result = Some(Arc::from(response.as_str()));
+                            entry.result = Some(Arc::clone(&full_report));
                             entry.completed_at = Some(Utc::now());
                             entry.output_file = output_file.clone();
                             entry.report_status = report_status;
@@ -1740,6 +1747,8 @@ fn truncate_str(s: &str, max_len: usize) -> std::borrow::Cow<'_, str> {
     if s.chars().count() <= max_len {
         std::borrow::Cow::Borrowed(s)
     } else {
+        // The cut is shared; the marker goes after the kept characters, so the
+        // budget does not include it (unlike `truncate_chars`).
         let head = ragent_types::strutil::truncate_chars_no_ellipsis(s, max_len);
         std::borrow::Cow::Owned(format!("{head}..."))
     }

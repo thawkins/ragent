@@ -3256,6 +3256,22 @@ pub struct App {
     /// Cached area of the `Clear the input queue?` confirmation dialog (set
     /// during render). Kept in [`Rect::default`] while the dialog is closed.
     pub queue_clear_confirm_area: Rect,
+    /// Whether the single-button notice dialog is displayed.
+    ///
+    /// The dialog reports something that has no decision to make and offers one
+    /// `OK` button, so nothing happens while it is open: it only names what went
+    /// wrong. The session context menu's `Terminal` entry raises it when the
+    /// session's worktree is gone.
+    pub notice_open: bool,
+    /// Title of the notice dialog, with its surrounding spaces.
+    pub notice_title: String,
+    /// The line stating what happened.
+    pub notice_message: String,
+    /// A secondary line, usually the value involved (a path, a branch).
+    pub notice_detail: Option<String>,
+    /// Cached area of the notice dialog (set during render). Kept in
+    /// [`Rect::default`] while the dialog is closed.
+    pub notice_area: Rect,
     /// Whether the `Clear this project's memory?` confirmation dialog (opened by
     /// `/memory clear`) is displayed. No memory is removed while it is open; the
     /// store is emptied only after the user confirms with `Yes`.

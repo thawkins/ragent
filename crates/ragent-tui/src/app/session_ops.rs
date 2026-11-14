@@ -1085,6 +1085,10 @@ impl App {
             // The `Clear the input queue?` confirmation dialog is likewise a modal
             // overlay that swallows every keystroke (spec `inputqueue` FR-035).
             || self.queue_clear_confirm_open
+            // The single-button notice dialog is a modal overlay too: it swallows
+            // every keystroke and only closes on `Enter`/`Esc`, so no character
+            // may reach the input buffer while it is open.
+            || self.notice_open
             // The queue-entry panel (ALT-Q `Show` row) is a modal overlay too:
             // every key is routed to it, so no character may reach the input
             // buffer while it is open.

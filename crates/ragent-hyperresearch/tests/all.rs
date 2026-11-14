@@ -19,3 +19,6 @@ mod test_vault_id;
 
 #[path = "test_untrusted_fence.rs"]
 mod test_untrusted_fence;
+
+#[path = "test_vault_migrations.rs"]
+mod test_vault_migrations;

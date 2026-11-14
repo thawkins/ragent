@@ -41,9 +41,6 @@ use crate::error::ConnectorError;
 use crate::provider::{ParsedCatalogue, parse_catalogue, provider_for};
 use crate::store_index::{CatalogueEndpoint, CatalogueKind};
 
-/// Read/write chunk size for streaming a catalogue body into memory.
-const STREAM_CHUNK_BYTES: usize = 65_536;
-
 /// Name of the on-disk catalogue cache directory.
 pub const CACHE_DIR: &str = "catalogues";
 
@@ -326,27 +323,13 @@ pub fn fetch_bytes(
 ///
 /// Returns [`ConnectorError::CatalogueFetch`] on a read failure and
 /// [`ConnectorError::CatalogueTooLarge`] when the body exceeds `max_bytes`.
-pub fn read_capped(
-    mut reader: impl std::io::Read,
-    max_bytes: u64,
-) -> Result<Vec<u8>, ConnectorError> {
-    let mut bytes = Vec::new();
-    let mut chunk = vec![0_u8; STREAM_CHUNK_BYTES];
-    loop {
-        let read = reader
-            .read(&mut chunk)
-            .map_err(|e| ConnectorError::CatalogueFetch {
-                detail: e.to_string(),
-            })?;
-        if read == 0 {
-            break;
-        }
-        if (bytes.len() + read) as u64 > max_bytes {
-            return Err(ConnectorError::CatalogueTooLarge { limit: max_bytes });
-        }
-        bytes.extend_from_slice(&chunk[..read]);
-    }
-    Ok(bytes)
+pub fn read_capped(reader: impl std::io::Read, max_bytes: u64) -> Result<Vec<u8>, ConnectorError> {
+    ragent_types::read_capped::read_capped(reader, max_bytes).map_err(|e| {
+        e.map_err(
+            |detail| ConnectorError::CatalogueFetch { detail },
+            |limit| ConnectorError::CatalogueTooLarge { limit },
+        )
+    })
 }
 
 /// An on-disk catalogue cache keyed by endpoint URL and catalogue (FR-031).
